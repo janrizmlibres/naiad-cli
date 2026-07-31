@@ -11,6 +11,7 @@ from naiad.domain.decide import (
     SILENCE_SECONDS,
     Consult,
     Deliver,
+    Finish,
     Notify,
     Nudge,
     Respond,
@@ -61,6 +62,7 @@ def signals(
     idle_for=0.0,
     question=None,
     consultation=None,
+    finished=False,
 ):
     return Signals(
         announcement=Announcement(seq=seq, state=state, question=question) if state else None,
@@ -71,6 +73,7 @@ def signals(
         nudges=nudges,
         idle_for=idle_for,
         consultation=consultation,
+        finished=finished,
     )
 
 
@@ -413,3 +416,62 @@ def test_an_answer_is_sent_once_the_turn_has_ended(workflow):
     )
 
     assert decide(workflow, stopped) == Respond(question=QUESTION, answer="the client")
+
+
+def test_announcing_a_terminal_state_finishes_the_run(workflow):
+    """The Workflow marks its last State Terminal; announcing it is what ends
+    the Run, so that Naiad never needs to know what any State means."""
+    assert decide(workflow, signals("done")) == Finish(state="done")
+
+
+def test_a_terminal_state_is_read_from_the_workflow_rather_than_from_its_name(workflow):
+    """No State name is special-cased. A Workflow whose 'done' is an ordinary
+    State and whose last State is called something else must behave the same
+    way round, or Naiad has learned one Workflow's vocabulary."""
+    other = parse_workflow(
+        "name = 'other'\n"
+        "[[states]]\nname = 'start'\nprompt = '/start'\n"
+        "[[states]]\nname = 'done'\nprompt = '/done'\n"
+        "[[states]]\nname = 'shipped'\nterminal = true\n"
+    )
+
+    assert isinstance(decide(other, signals("done")), Deliver)
+    assert decide(other, signals("shipped")) == Finish(state="shipped")
+
+
+def test_a_finished_run_is_not_acted_on_again(workflow):
+    """The Run is over. A tick loop that outlives it — a watch restarted, or
+    one that has not noticed yet — must find nothing left to do rather than
+    nudging an agent about a Run that ended."""
+    over = signals("done", seq=4, finished=True, stopped_since_action=True, idle_for=HANG_SECONDS)
+
+    assert decide(workflow, over) is NOTHING
+
+
+def test_nothing_the_agent_says_after_the_end_revives_the_run(workflow):
+    """The session is left alive, so the agent may well say something more
+    into it — and it is talking to the operator, not to Naiad. Reading only
+    the latest Announcement would drive a Run that had already ended."""
+    after = signals("grill", seq=5, finished=True)
+
+    assert decide(workflow, after) is NOTHING
+
+
+def test_needing_a_human_does_not_finish_the_run(workflow):
+    """Asserted beside the Terminal case because collapsing the two is the
+    tempting mistake: a Run that needs a human stays alive and keeps ticking,
+    and only a Terminal State ends one."""
+    assert isinstance(decide(workflow, signals("review")), Notify)
+    assert isinstance(decide(workflow, signals("done")), Finish)
+
+
+def test_a_terminal_state_with_a_prompt_finishes_rather_than_delivering(workflow):
+    """Terminal outranks delivery: the Run is over, so there is nothing left
+    to send and nobody left to send it to."""
+    talkative = parse_workflow(
+        "name = 'other'\n"
+        "[[states]]\nname = 'start'\nprompt = '/start'\n"
+        "[[states]]\nname = 'shipped'\nterminal = true\nprompt = '/celebrate'\n"
+    )
+
+    assert decide(talkative, signals("shipped")) == Finish(state="shipped")

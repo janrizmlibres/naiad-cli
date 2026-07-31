@@ -22,6 +22,7 @@ from naiad.domain.question import Question
 from naiad.domain.workflow import parse_workflow
 from naiad.runtime.announcements import Announcements
 from naiad.runtime.answers import AnswerLog
+from naiad.runtime.log import RunLog
 from naiad.runtime.loop import UndrivableRun, tick
 from naiad.runtime.records import Turns
 from naiad.runtime.run import RunStore
@@ -549,4 +550,125 @@ def test_an_answer_is_held_back_from_a_session_still_working(run, workflow, sess
     drive(run, workflow, session, answerer=answerer)
 
     assert answerer.consulted, "the answerer should still be consulted; consulting sends nothing"
+    assert session.sent == []
+
+
+def test_every_announcement_and_every_action_reaches_the_run_log(run, workflow, session):
+    """The log is the diagnostic. What it is worth depends entirely on the
+    tick loop writing to it as it goes, not on anything the agent does."""
+    announce(run, "grill")
+
+    drive(run, workflow, session)
+
+    log = RunLog(run.root)
+    assert [(entry.kind, entry.state) for entry in log.entries()] == [
+        ("announced", "grill"),
+        ("delivered", "grill"),
+    ]
+
+
+def test_an_announcement_is_logged_once_however_many_ticks_read_it(run, workflow, session):
+    """The loop reads the State file several times a minute."""
+    announce(run, "grill")
+
+    drive(run, workflow, session)
+    drive(run, workflow, session)
+    drive(run, workflow, session)
+
+    assert [e.kind for e in RunLog(run.root).entries()].count("announced") == 1
+
+
+def test_an_announcement_off_the_expected_path_is_logged_as_a_deviation(run, workflow, session):
+    """The Run began at 'grill', so 'review' was owed and 'implement' is a
+    departure — permitted, delivered, and written down."""
+    announce(run, "implement")
+
+    drive(run, workflow, session)
+
+    deviation = RunLog(run.root).deviations()[-1]
+    assert deviation.state == "implement"
+    assert deviation.expected == "review"
+
+
+def test_an_announcement_on_the_expected_path_is_not_logged_as_a_deviation(
+    run, workflow, session
+):
+    """Where the agent stands is read back from the log, so a Run that passed
+    a Gate — announced and never delivered — must not deviate next."""
+    announce(run, "review")
+    drive(run, workflow, session)
+
+    announce(run, "implement")
+    drive(run, workflow, session)
+
+    assert RunLog(run.root).deviations() == []
+
+
+def test_a_completed_run_can_be_reconstructed_from_its_log(run, workflow, session):
+    """The whole point: 'it produced something strange overnight' becomes a
+    readable sequence of which States it passed through and why Naiad did what
+    it did — without opening the session."""
+    answerer = RecordingAnswerer(Answered(text="the client"))
+
+    announce(run, "grill")
+    drive(run, workflow, session)
+    asked = Announcements(run.root).ask(
+        Question(text="Which module owns retries?", options=("the client", "the caller")),
+        state="grill",
+    )
+    Turns(run.root).record_end(latest_seq=asked.seq)
+    resolve(run, workflow, session, answerer)
+    announce(run, "review")
+    drive(run, workflow, session)
+    announce(run, "done")
+    drive(run, workflow, session)
+
+    assert [(e.kind, e.state) for e in RunLog(run.root).entries()] == [
+        ("announced", "grill"),
+        ("delivered", "grill"),
+        ("asked", "grill"),
+        ("consulted", None),
+        ("answered", None),
+        ("announced", "review"),
+        ("notified", None),
+        ("announced", "done"),
+        ("finished", "done"),
+    ]
+
+
+def test_the_run_log_says_why_the_operator_was_notified(run, workflow, session):
+    announce(run, "review")
+
+    drive(run, workflow, session)
+
+    notified = [e for e in RunLog(run.root).entries() if e.kind == "notified"][-1]
+    assert "review" in notified.detail
+
+
+def test_an_announcement_that_is_never_delivered_still_records_its_deviation(
+    run, workflow, session
+):
+    """A jump straight to the end. Naiad delivers nothing for it, so a
+    Deviation recorded only alongside a delivery would lose the one most worth
+    seeing."""
+    announce(run, "done")
+
+    drive(run, workflow, session)
+
+    deviated = RunLog(run.root).deviations()[-1]
+    assert deviated.state == "done"
+    assert deviated.expected == "review"
+
+
+def test_a_finished_run_is_not_driven_by_anything_the_agent_says_afterwards(
+    run, workflow, session
+):
+    """The session is left alive, so the agent may well announce again into
+    it. The Run is over and it is talking to the operator."""
+    announce(run, "done")
+    drive(run, workflow, session)
+
+    announce(run, "implement")
+
+    assert drive(run, workflow, session) is NOTHING
     assert session.sent == []

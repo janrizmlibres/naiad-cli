@@ -9,6 +9,7 @@ import pytest
 
 from naiad.domain.transitions import (
     UnknownState,
+    deviation,
     expected_next_state,
     next_state,
     start_state,
@@ -146,3 +147,51 @@ def test_a_start_state_the_workflow_does_not_declare_is_rejected(workflow):
     assert "spek" in str(caught.value)
     for name in ("grill", "review", "spec", "done"):
         assert name in str(caught.value)
+
+
+def test_announcing_the_expected_next_state_is_not_a_deviation(workflow):
+    """The ordinary case: the Run is where the Workflow says it should be."""
+    assert deviation(workflow, announced="spec", previous_state="review") is None
+
+
+def test_a_deviation_names_the_state_that_was_expected_instead(workflow):
+    """Recorded because it is more often a confused agent than a decision, and
+    the operator reading it later needs to know what was owed."""
+    assert deviation(workflow, announced="grill", previous_state="review") == "spec"
+
+
+def test_before_any_announcement_the_run_stands_where_it_began(workflow):
+    """The Run's first State was delivered at kickoff without an Announcement,
+    so with nothing announced yet the expectation is that State's successor."""
+    assert deviation(workflow, announced="spec", previous_state=None) == "review"
+
+
+def test_a_run_started_partway_expects_from_the_state_it_started_at(workflow):
+    partway = deviation(workflow, announced="grill", previous_state=None, started_at="review")
+
+    assert partway == "spec"
+
+
+def test_announcing_the_same_state_again_is_not_a_deviation(workflow):
+    """The implement loop is one State announced once per ticket. Treating a
+    repeat as a departure would fill the log with a Run doing exactly what its
+    Workflow asks of it."""
+    assert deviation(workflow, announced="spec", previous_state="spec") is None
+
+
+def test_with_gates_skipped_the_expected_state_skips_them_too(workflow):
+    """The expectation and the Prompt's interpolated successor are the same
+    expectation, so an unattended Run must not deviate by obeying the Prompt
+    it was given."""
+    assert deviation(workflow, announced="spec", previous_state="grill", skip_gates=True) is None
+
+
+def test_a_state_with_nothing_after_it_expects_nothing(workflow):
+    """Inventing an expectation to deviate from would be worse than having
+    none: at the end of a Workflow there is nothing the agent owes."""
+    assert deviation(workflow, announced="grill", previous_state="done") is None
+
+
+def test_a_run_that_began_at_a_state_the_workflow_no_longer_declares_expects_nothing(workflow):
+    """A Workflow edited mid-Run costs the expectation, not the Run."""
+    assert deviation(workflow, announced="grill", previous_state=None, started_at="gone") is None

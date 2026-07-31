@@ -12,7 +12,6 @@ import argparse
 import os
 import re
 import sys
-import time
 import uuid
 from collections.abc import Callable
 from datetime import datetime, timezone
@@ -26,12 +25,11 @@ from naiad.cli.announce import AnnounceError, announce_state
 from naiad.cli.ask import AskError, ask_question
 from naiad.cli.kickoff import start_run
 from naiad.cli.protocol import injection_for
-from naiad.domain.decide import Consult, Deliver, Nudge, Respond
+from naiad.cli.watch import watch
 from naiad.domain.transitions import UnknownState
 from naiad.domain.workflow import WorkflowError, load_workflow
 from naiad.hooks.install import DEFAULT_SETTINGS_PATH, install_hooks
 from naiad.runtime.announcements import Announcements
-from naiad.runtime.loop import tick
 from naiad.runtime.records import Turns
 from naiad.runtime.resolve import NoRunError, RunResolver
 from naiad.runtime.run import Run, RunStore, StorageError, default_runs_root
@@ -49,10 +47,6 @@ FAILURES = (
     UnknownState,
     WorkflowError,
 )
-
-# Fast enough that a finished turn is picked up promptly, slow enough that a
-# Run waiting on a human is not spinning.
-TICK_SECONDS = 2.0
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -115,9 +109,13 @@ def main(argv: list[str] | None = None) -> int:
     )
     install.set_defaults(handler=_install_hooks)
 
-    watch = subcommands.add_parser("watch", help="drive a Run's session until interrupted")
-    watch.add_argument("run_id", nargs="?", default=None, help="which Run (default: this session)")
-    watch.set_defaults(handler=_watch)
+    watch_parser = subcommands.add_parser(
+        "watch", help="drive a Run until it ends or is interrupted"
+    )
+    watch_parser.add_argument(
+        "run_id", nargs="?", default=None, help="which Run (default: this session)"
+    )
+    watch_parser.set_defaults(handler=_watch)
 
     arguments = parser.parse_args(argv)
     handler: Handler = arguments.handler
@@ -208,26 +206,19 @@ def _watch(arguments: argparse.Namespace) -> int:
 
     print(f"watching {run.id} ({run.tmux_session})")
     try:
-        while True:
-            action = tick(
-                run=run,
-                workflow=workflow,
-                session=session,
-                notifier=notifier,
-                answerer=answerer,
-                naiad=naiad,
-            )
-            if isinstance(action, Deliver):
-                print(f"delivered {action.state}")
-            elif isinstance(action, Consult):
-                print(f"consulting the answerer: {action.question.text}")
-            elif isinstance(action, Respond):
-                print(f"answered: {action.answer}")
-            elif isinstance(action, Nudge):
-                print(f"nudged the agent ({action.attempt})")
-            time.sleep(TICK_SECONDS)
+        watch(
+            run=run,
+            workflow=workflow,
+            session=session,
+            notifier=notifier,
+            answerer=answerer,
+            naiad=naiad,
+        )
     except KeyboardInterrupt:
-        return 0
+        # The operator giving up on a Run that has not ended. The session is
+        # left alive exactly as a finished Run's is.
+        pass
+    return 0
 
 
 def _named_run(run_id: str) -> Run:

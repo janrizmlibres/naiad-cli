@@ -45,6 +45,18 @@ def start_state(workflow: Workflow, named: str | None) -> State:
     return found
 
 
+def standing_state(workflow: Workflow, *, announced: str | None, started_at: str | None) -> str:
+    """Where the agent stands: its latest Announcement, or — before it has made
+    one — the State the Run began at, whose Prompt it was handed at kickoff.
+
+    One resolver rather than two, because it is asked from both ends: the
+    Protocol tells the agent what it owes from here, and a Deviation is
+    measured from here. Two copies would drift, and the Workflow file is the
+    single source of truth for ordering.
+    """
+    return announced if announced is not None else start_state(workflow, started_at).name
+
+
 def expected_next_state(
     workflow: Workflow,
     *,
@@ -52,13 +64,50 @@ def expected_next_state(
     started_at: str | None,
     skip_gates: bool = False,
 ) -> State | None:
-    """What the agent owes next, told to it by the Protocol.
-
-    Where it stands is its latest Announcement, or — before it has made one —
-    the State the Run began at, whose Prompt it was handed at kickoff.
-    """
-    standing = announced if announced is not None else start_state(workflow, started_at).name
+    """What the agent owes next, told to it by the Protocol."""
+    standing = standing_state(workflow, announced=announced, started_at=started_at)
     return next_state(workflow, standing, skip_gates=skip_gates)
+
+
+def deviation(
+    workflow: Workflow,
+    *,
+    announced: str,
+    previous_state: str | None,
+    started_at: str | None = None,
+    skip_gates: bool = False,
+) -> str | None:
+    """The State that was expected instead, when this Announcement was not it.
+
+    A Deviation is permitted and delivered — any State the Workflow declares is
+    a legal target, backward ones included, because the human may have
+    redirected the agent and refusing would deadlock exactly that intervention.
+    It is recorded rather than acted on, which is why this classifies an
+    Announcement instead of deciding an Action.
+
+    Measured with the same resolution the agent was given: the Prompt it was
+    working from named its successor, so an unattended Run obeying a Prompt
+    that skipped a Gate must not be read as having left the path.
+
+    Two Announcements are not Deviations. Re-announcing the State the agent is
+    already standing in is the implement loop — one State, announced once per
+    ticket — and an expectation of None is a State with nothing after it, where
+    inventing an expectation to deviate from would be worse than having none.
+    """
+    try:
+        standing = standing_state(workflow, announced=previous_state, started_at=started_at)
+    except UnknownState:
+        # A Workflow edited mid-Run that no longer declares the State this one
+        # began at. That costs the expectation, not the Run: the same choice is
+        # made where the Protocol is rendered (naiad.cli.protocol).
+        return None
+
+    if announced == standing:
+        return None
+    expected = next_state(workflow, standing, skip_gates=skip_gates)
+    if expected is None or expected.name == announced:
+        return None
+    return expected.name
 
 
 def _after(workflow: Workflow, current: str) -> tuple[State, ...]:
@@ -68,4 +117,11 @@ def _after(workflow: Workflow, current: str) -> tuple[State, ...]:
     return ()
 
 
-__all__ = ["UnknownState", "expected_next_state", "next_state", "start_state"]
+__all__ = [
+    "UnknownState",
+    "deviation",
+    "expected_next_state",
+    "next_state",
+    "standing_state",
+    "start_state",
+]

@@ -15,13 +15,26 @@ import uuid
 from typing import Protocol
 
 from naiad.domain.answerer import Answered, ConsultationSpec, Escalated, render_consultation
-from naiad.domain.decide import Action, Consult, Deliver, Notify, Nudge, Respond, Signals, decide
+from naiad.domain.decide import (
+    Action,
+    Consult,
+    Deliver,
+    Finish,
+    Notify,
+    Nudge,
+    Respond,
+    Signals,
+    decide,
+)
+from naiad.domain.announcement import Announcement
 from naiad.domain.prompt import render_prompt
 from naiad.domain.protocol import DEFAULT_NAIAD, render_answer, render_nudge
 from naiad.domain.question import Question
+from naiad.domain.transitions import deviation
 from naiad.domain.workflow import Workflow
 from naiad.runtime.announcements import Announcements
 from naiad.runtime.answers import AnswerLog
+from naiad.runtime.log import RunLog
 from naiad.runtime.records import Consultations, Handled, Notices, Turns, idle_seconds
 from naiad.runtime.run import Run
 
@@ -57,12 +70,21 @@ def tick(
     driven from data rather than from a test that waits. Every other caller
     means the current moment, so that is what it defaults to."""
     announcement = Announcements(run.root).latest()
+    log = RunLog(run.root)
     turns = Turns(run.root)
     handled = Handled(run.root)
     notices = Notices(run.root)
     consultations = Consultations(run.root)
     answers = AnswerLog(run.root)
     notified, nudges = notices.of(announcement)
+
+    # Written before the decision rather than after it, because where the agent
+    # stood before this Announcement is read back out of the log — and because
+    # an Announcement Naiad received is worth recording whether or not anything
+    # was done about it this tick.
+    log.record_announcement(
+        announcement, deviated_from=_deviation(run, workflow, log, announcement)
+    )
 
     action = decide(
         workflow,
@@ -75,6 +97,7 @@ def tick(
             nudges=nudges,
             idle_for=idle_seconds(run.root, now=now if now is not None else time.time()),
             consultation=consultations.of(announcement),
+            finished=log.finished(),
         ),
         skip_gates=run.skip_gates,
     )
@@ -97,6 +120,12 @@ def tick(
     elif isinstance(action, Nudge):
         session.send(_pane(run), render_nudge(attempt=action.attempt, naiad=naiad))
         notices.record_nudge(announcement)
+    elif isinstance(action, Finish):
+        # The session is deliberately not touched: nothing is sent into it and
+        # it is not killed, because it holds the evidence of what the Run did.
+        # Nothing is recorded here either — the log entry written below is what
+        # makes the ending final, so the fact has one home rather than two.
+        notifier.notify(title=f"naiad: {run.id}", message=f"finished at {action.state}")
     elif isinstance(action, Notify):
         notifier.notify(title=f"naiad: {run.id}", message=action.reason)
         notices.record_notified(announcement)
@@ -107,7 +136,25 @@ def tick(
             # for the same Announcement never arrives.
             answers.record(question=action.question, answer=action.reason, escalated=True)
 
+    log.record(action, seq=announcement.seq if announcement is not None else None)
     return action
+
+
+def _deviation(
+    run: Run, workflow: Workflow, log: RunLog, announcement: Announcement | None
+) -> str | None:
+    """Whether this Announcement left the expected path, asked of the domain
+    (ADR 0004). Where the agent stood before it is read back from the log,
+    which is the only place the Announcements before the latest are kept."""
+    if announcement is None:
+        return None
+    return deviation(
+        workflow,
+        announced=announcement.state,
+        previous_state=log.previous_state(announcement),
+        started_at=run.start_state,
+        skip_gates=run.skip_gates,
+    )
 
 
 def _consultation(run: Run, question: Question) -> ConsultationSpec:

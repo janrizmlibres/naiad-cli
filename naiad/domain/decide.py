@@ -14,7 +14,7 @@ from naiad.domain.announcement import Announcement
 from naiad.domain.answerer import Consultation, Escalated
 from naiad.domain.question import Question
 from naiad.domain.transitions import next_state
-from naiad.domain.workflow import Workflow
+from naiad.domain.workflow import State, Workflow
 
 # How many Nudges an Announcement is worth before Naiad stops and the human is
 # told. The bound is the point: an agent that is genuinely stuck will not
@@ -58,6 +58,10 @@ class Signals:
     idle_for is elapsed seconds since the last signal of any kind. It is handed
     in rather than read, so every rule below is testable as data in, Action out.
 
+    finished says the Run has already reached a Terminal State. It is a fact
+    about the Run rather than about an Announcement, and the only one: nothing
+    re-arms it, because nothing that arrives afterwards is Naiad's business.
+
     consultation is what the Answerer has said about the Question currently
     announced, or None if it has not been asked yet. It is a signal rather than
     something fetched here for the reason resolving a Question takes two
@@ -74,11 +78,17 @@ class Signals:
     nudges: int = 0
     idle_for: float = 0.0
     consultation: Consultation = None
+    finished: bool = False
 
 
 @dataclass(frozen=True)
 class Deliver:
-    """Send this State's Prompt into the session, Clearing first if asked."""
+    """Send this State's Prompt into the session, Clearing first if asked.
+
+    Carries no Deviation. Delivery happens whether or not the Announcement left
+    the expected path, so a Deviation changes nothing here; it classifies the
+    Announcement rather than the Action, and is recorded against it
+    (naiad.domain.transitions.deviation)."""
 
     state: str
     prompt: str
@@ -130,13 +140,29 @@ class Notify:
 
 
 @dataclass(frozen=True)
+class Finish:
+    """The Run is over: the agent announced a State the Workflow marks
+    Terminal. The operator is told the work is done and the tick loop stops,
+    which is the whole of what separates this from Notify.
+
+    The State is the outcome — which of a Workflow's ends this Run reached.
+
+    The session is deliberately not touched. It is left alive so that the
+    evidence of what the Run did is still there to read, which is exactly what
+    the operator wants when the result looks wrong.
+    """
+
+    state: str
+
+
+@dataclass(frozen=True)
 class Nothing:
     """The agent is working, or there is nothing left to act on."""
 
 
 NOTHING = Nothing()
 
-Action = Consult | Deliver | Notify | Nudge | Respond | Nothing
+Action = Consult | Deliver | Finish | Notify | Nudge | Respond | Nothing
 
 
 def decide(workflow: Workflow, signals: Signals, *, skip_gates: bool = False) -> Action:
@@ -145,7 +171,22 @@ def decide(workflow: Workflow, signals: Signals, *, skip_gates: bool = False) ->
     It only ever changes which State is interpolated into the Prompt; Naiad
     still never writes the State file (ADR 0001).
     """
+    if signals.finished:
+        # The Run ended. Nothing that arrives now is Naiad's business: the
+        # session is left alive for the operator to read and to type into, and
+        # an agent that says something more into it is talking to them. Without
+        # this a watch started again over a finished Run would drive it on.
+        return NOTHING
+
     announcement = _unhandled(signals)
+
+    ended = _terminal(workflow, signals.announcement)
+    if ended is not None and announcement is not None:
+        # No turn end is waited for. Finishing sends nothing into the session,
+        # so it cannot type over an agent still writing its last paragraph, and
+        # a Run whose agent has declared itself done should not be left ticking
+        # on a turn end that a session about to be abandoned may never fire.
+        return Finish(state=ended.name)
 
     if announcement is not None and announcement.question is not None:
         # A Question outranks the State it was asked from. The agent is
@@ -179,7 +220,10 @@ def decide(workflow: Workflow, signals: Signals, *, skip_gates: bool = False) ->
             # A State this Workflow does not declare. The announce command
             # rejects one, so this is the agent having found a way around it;
             # there is nothing to deliver and nobody but a human can say what
-            # was meant. Recording it as a Deviation is another ticket.
+            # was meant. It is not a Deviation — a Deviation is a legal target
+            # reached out of order — but the Run log holds the Announcement and
+            # this notification's reason beside it, which is what the operator
+            # reads to find out what the agent thought it was doing.
             return _notify(
                 signals,
                 f"the agent announced '{announcement.state}', "
@@ -221,6 +265,22 @@ def decide(workflow: Workflow, signals: Signals, *, skip_gates: bool = False) ->
     return _notify(signals, f"the session produced no signal for {int(signals.idle_for)}s")
 
 
+def _terminal(workflow: Workflow, announcement: Announcement | None) -> State | None:
+    """The Terminal State this Announcement names, if it names one.
+
+    Terminal is read from the Workflow, so Naiad recognises no State name of
+    its own and stays ignorant of what any particular Workflow means.
+
+    An Announcement carrying a Question is never an ending, however Terminal
+    the State it was asked from: the agent is standing in that State rather
+    than arriving at it, and it is waiting on an answer.
+    """
+    if announcement is None or announcement.question is not None:
+        return None
+    state = workflow.state(announcement.state)
+    return state if state is not None and state.terminal else None
+
+
 def _unhandled(signals: Signals) -> Announcement | None:
     """The Announcement still owed an Action, if there is one. Naiad acts once
     per Announcement, so one already acted on is as good as none."""
@@ -248,6 +308,7 @@ __all__ = [
     "Action",
     "Consult",
     "Deliver",
+    "Finish",
     "Nothing",
     "Notify",
     "Nudge",
