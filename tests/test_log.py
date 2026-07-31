@@ -8,7 +8,7 @@ into one another, and the Deviation naming both States.
 import pytest
 
 from naiad.domain.announcement import Announcement
-from naiad.domain.decide import NOTHING, Consult, Deliver, Finish, Notify, Nudge, Respond
+from naiad.domain.decide import NOTHING, Clear, Consult, Deliver, Finish, Notify, Nudge, Respond
 from naiad.domain.question import Question
 from naiad.runtime.log import RunLog
 
@@ -36,7 +36,7 @@ def test_every_announcement_and_every_action_is_recorded_in_order(log):
     """One narrative, read top to bottom. Out of order it is not a
     reconstruction of anything."""
     log.record_announcement(announcement(seq=1, state="grill"))
-    log.record(Deliver(state="grill", prompt="/grill", clear=False, next_states=("review",)), seq=1)
+    log.record(Deliver(state="grill", prompt="/grill", next_states=("review",)), seq=1)
     log.record_announcement(announcement(seq=2, state="review"))
     log.record(Notify(reason="state 'review' is a Gate State"), seq=2)
 
@@ -47,11 +47,31 @@ def test_delivering_a_prompt_and_answering_a_question_are_told_apart(log):
     """Both type into the same session, and a log that showed them alike would
     leave the operator unable to tell an answered Question from a phase that
     started twice."""
-    delivered = Deliver(state="implement", prompt="/implement", clear=True, next_states=("pr",))
+    delivered = Deliver(state="implement", prompt="/implement", next_states=("pr",))
     log.record(delivered, seq=1)
     log.record(Respond(question=QUESTION, answer="the client"), seq=2)
 
     assert kinds(log) == ["delivered", "answered"]
+
+
+def test_a_clear_is_recorded_as_its_own_line_before_the_delivery(log):
+    """The Clear splits off from delivery (ADR 0019), so the narrative shows the
+    context discarded and then the Prompt sent — two lines, not one."""
+    log.record(Clear(state="implement", attempt=1), seq=1)
+    log.record(Deliver(state="implement", prompt="/implement", next_states=("pr",)), seq=1)
+
+    assert [(e.kind, e.state) for e in log.entries()] == [
+        ("cleared", "implement"),
+        ("delivered", "implement"),
+    ]
+
+
+def test_a_retyped_clear_reads_apart_from_the_first_in_the_log(log):
+    """A dropped Clear that had to be typed again is the notable event; the
+    attempt number is what tells a retry from an ordinary first try."""
+    log.record(Clear(state="implement", attempt=2), seq=1)
+
+    assert "attempt 2" in log.entries()[-1].detail
 
 
 def test_an_announcement_records_the_state_it_named(log):

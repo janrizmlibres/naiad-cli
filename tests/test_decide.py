@@ -5,10 +5,13 @@ import pytest
 from naiad.domain.announcement import Announcement
 from naiad.domain.answerer import Answered, Escalated
 from naiad.domain.decide import (
+    CLEAR_CONFIRM_SECONDS,
+    CLEAR_RETRY_LIMIT,
     HANG_SECONDS,
     NOTHING,
     NUDGE_LIMIT,
     SILENCE_SECONDS,
+    Clear,
     Consult,
     Deliver,
     Finish,
@@ -87,6 +90,8 @@ def signals(
     consultation=None,
     finished=False,
     subject=None,
+    cleared=False,
+    clear_attempts=0,
 ):
     return Signals(
         announcement=(
@@ -102,6 +107,8 @@ def signals(
         idle_for=idle_for,
         consultation=consultation,
         finished=finished,
+        cleared=cleared,
+        clear_attempts=clear_attempts,
     )
 
 
@@ -111,7 +118,6 @@ def test_an_unhandled_announcement_with_a_turn_ended_delivers_that_states_prompt
     assert action == Deliver(
         state="grill",
         prompt="/grill-with-docs {task}",
-        clear=False,
         next_states=("review",),
     )
 
@@ -120,7 +126,7 @@ def test_delivery_carries_the_announcements_subject(workflow):
     """The Subject rides from the Announcement to the delivered Prompt, which
     is what lets the selection be made before the Clear rather than after it
     (ADR 0009)."""
-    action = decide(workflow, signals("implement", subject="04-x.md"))
+    action = decide(workflow, signals("implement", subject="04-x.md", cleared=True))
 
     assert action.subject == "04-x.md"
 
@@ -146,20 +152,86 @@ def test_an_announcement_already_acted_on_takes_no_action_however_often_asked(wo
 def test_the_same_state_announced_twice_delivers_twice(workflow):
     """Naiad acts once per Announcement, not once per change of value: the
     agent's fifth implement iteration must be delivered like the fourth."""
-    fourth = decide(workflow, signals("implement", seq=4, handled_seq=3))
-    fifth = decide(workflow, signals("implement", seq=5, handled_seq=4))
+    fourth = decide(workflow, signals("implement", seq=4, handled_seq=3, cleared=True))
+    fifth = decide(workflow, signals("implement", seq=5, handled_seq=4, cleared=True))
 
     assert isinstance(fourth, Deliver)
     assert isinstance(fifth, Deliver)
     assert fifth.state == fourth.state == "implement"
 
 
-def test_a_state_declaring_clear_has_its_context_cleared_before_delivery(workflow):
-    assert decide(workflow, signals("implement")).clear is True
+def test_a_state_declaring_clear_is_cleared_before_it_is_delivered(workflow):
+    """The Clear splits off from delivery as its own Action, so that the /clear
+    can be confirmed before the Prompt follows it (ADR 0019)."""
+    assert decide(workflow, signals("implement")) == Clear(state="implement", attempt=1)
 
 
-def test_a_state_not_declaring_clear_keeps_its_context(workflow):
-    assert decide(workflow, signals("grill")).clear is False
+def test_a_cleared_state_is_then_delivered(workflow):
+    """Once the Clear is confirmed the Prompt follows, and it does not Clear
+    again — the Clear Action did that."""
+    action = decide(workflow, signals("implement", cleared=True))
+
+    assert action == Deliver(
+        state="implement",
+        prompt="/implement the next ticket, then announce {next_state}",
+        next_states=("done",),
+    )
+
+
+def test_a_state_not_declaring_clear_is_delivered_without_clearing(workflow):
+    assert isinstance(decide(workflow, signals("grill")), Deliver)
+
+
+def test_a_typed_clear_is_waited_on_before_it_is_judged_dropped(workflow):
+    """The /clear has been typed; until the confirm window is up it may still
+    land, so Naiad does nothing rather than re-typing over a Clear on its way."""
+    waiting = signals("implement", clear_attempts=1, idle_for=CLEAR_CONFIRM_SECONDS - 1)
+
+    assert decide(workflow, waiting) is NOTHING
+
+
+def test_a_dropped_clear_is_retyped_once_the_confirm_window_passes(workflow):
+    """No marker within the window means the /clear was dropped: it is typed
+    again, the attempt numbered so the retry reads apart from the first."""
+    dropped = signals("implement", clear_attempts=1, idle_for=CLEAR_CONFIRM_SECONDS)
+
+    assert decide(workflow, dropped) == Clear(state="implement", attempt=2)
+
+
+def test_a_clear_that_never_lands_notifies_after_the_retry_limit(workflow):
+    """Bounded like a Nudge: past the limit the human is told rather than the
+    session Cleared forever, and delivering into an un-cleared context — the
+    bug this exists to prevent — is never done on purpose."""
+    exhausted = signals(
+        "implement", clear_attempts=CLEAR_RETRY_LIMIT, idle_for=CLEAR_CONFIRM_SECONDS
+    )
+
+    action = decide(workflow, exhausted)
+
+    assert isinstance(action, Notify)
+    silenced = signals(
+        "implement",
+        clear_attempts=CLEAR_RETRY_LIMIT,
+        idle_for=CLEAR_CONFIRM_SECONDS,
+        notified=True,
+    )
+    assert decide(workflow, silenced) is NOTHING
+
+
+def test_a_confirmed_clear_delivers_rather_than_retrying_however_many_were_typed(workflow):
+    """Confirmation wins over the attempt count: a Clear that landed is
+    delivered, not re-typed, even if a retry was already in flight."""
+    landed = signals(
+        "implement", cleared=True, clear_attempts=CLEAR_RETRY_LIMIT, idle_for=CLEAR_CONFIRM_SECONDS
+    )
+
+    assert isinstance(decide(workflow, landed), Deliver)
+
+
+def test_a_clear_is_not_typed_before_a_turn_has_ended(workflow):
+    """A Clear types into the session, so it wants the same guard delivery does:
+    an agent still working would be Cleared out from under itself."""
+    assert decide(workflow, signals("implement", stopped=False)) is NOTHING
 
 
 def test_nothing_announced_yet_takes_no_action(workflow):
@@ -172,7 +244,7 @@ def test_a_state_with_no_prompt_is_not_delivered(workflow):
 
 
 def test_delivery_names_the_next_state_in_declared_order(workflow):
-    assert decide(workflow, signals("implement")).next_states == ("done",)
+    assert decide(workflow, signals("implement", cleared=True)).next_states == ("done",)
 
 
 def test_with_gates_skipped_delivery_names_the_next_state_that_has_a_prompt(workflow):
@@ -359,7 +431,7 @@ def test_with_gates_skipped_delivery_is_otherwise_unchanged(workflow):
     kept = decide(workflow, signals("grill"))
     skipped = decide(workflow, signals("grill"), skip_gates=True)
 
-    assert (skipped.state, skipped.prompt, skipped.clear) == (kept.state, kept.prompt, kept.clear)
+    assert (skipped.state, skipped.prompt) == (kept.state, kept.prompt)
 
 
 def test_an_unacted_on_question_consults_the_answerer(workflow):
@@ -440,7 +512,7 @@ def test_a_question_already_acted_on_is_not_consulted_twice(workflow):
 
 def test_an_announcement_carrying_no_question_is_delivered_as_before(workflow):
     """Questions are an addition to Announcements, not a replacement."""
-    assert isinstance(decide(workflow, signals("implement")), Deliver)
+    assert isinstance(decide(workflow, signals("implement", cleared=True)), Deliver)
 
 
 def test_an_answer_is_not_sent_into_a_session_that_has_not_ended_its_turn(workflow):

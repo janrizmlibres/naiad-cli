@@ -3,7 +3,14 @@
 import pytest
 
 from naiad.domain.announcement import Announcement
-from naiad.runtime.records import Handled, Notices, Turns, idle_seconds
+from naiad.runtime.records import (
+    ClearAttempts,
+    Clears,
+    Handled,
+    Notices,
+    Turns,
+    idle_seconds,
+)
 
 
 @pytest.fixture
@@ -133,6 +140,117 @@ def test_a_nudge_counts_as_a_signal_so_the_next_one_is_a_full_period_later(tmp_p
     notices.record_nudge(GRILL)
 
     assert idle_seconds(tmp_path, now=_mtime(notices.path)) == pytest.approx(0, abs=0.01)
+
+
+def test_no_clear_has_landed_before_the_hook_fires(tmp_path):
+    assert Clears(tmp_path).count() == 0
+
+
+def test_a_clear_landing_is_counted_and_visible_to_a_fresh_reader(tmp_path):
+    Clears(tmp_path).record_landing()
+
+    assert Clears(tmp_path).count() == 1
+
+
+def test_clear_landings_accumulate(tmp_path):
+    """A count rather than a flag, for the reason Turns keeps one: this State's
+    Clear is told from the last State's by a baseline, not by a boolean."""
+    clears = Clears(tmp_path)
+    clears.record_landing()
+    clears.record_landing()
+
+    assert clears.count() == 2
+
+
+def test_a_clear_is_unconfirmed_until_it_lands(tmp_path):
+    clears = Clears(tmp_path)
+    attempts = ClearAttempts(tmp_path)
+    attempts.record_attempt(GRILL, landed=clears.count())
+
+    assert attempts.confirmed(GRILL, clears) is False
+
+    clears.record_landing()
+    assert attempts.confirmed(GRILL, clears) is True
+
+
+def test_no_attempt_means_no_confirmation_however_many_clears_have_landed(tmp_path):
+    """A landing with no attempt of ours behind it is a Clear for some other
+    Announcement — the delivery has not asked for this one's yet."""
+    clears = Clears(tmp_path)
+    clears.record_landing()
+    attempts = ClearAttempts(tmp_path)
+
+    assert attempts.attempts(GRILL) == 0
+    assert attempts.confirmed(GRILL, clears) is False
+
+
+def test_a_landing_before_the_attempt_does_not_confirm_it(tmp_path):
+    """The whole reason a count is kept and not a flag: a Clear that landed for
+    an earlier State must not read as this State's."""
+    clears = Clears(tmp_path)
+    attempts = ClearAttempts(tmp_path)
+    clears.record_landing()  # an earlier State's Clear
+    attempts.record_attempt(IMPLEMENT, landed=clears.count())
+
+    assert attempts.confirmed(IMPLEMENT, clears) is False
+
+    clears.record_landing()  # this State's Clear
+    assert attempts.confirmed(IMPLEMENT, clears) is True
+
+
+def test_clear_attempts_accumulate_within_one_announcement(tmp_path):
+    clears = Clears(tmp_path)
+    attempts = ClearAttempts(tmp_path)
+    attempts.record_attempt(GRILL, landed=clears.count())
+    attempts.record_attempt(GRILL, landed=clears.count())
+
+    assert attempts.attempts(GRILL) == 2
+
+
+def test_a_retry_keeps_the_first_attempts_baseline(tmp_path):
+    """A slow /clear that lands only after a retry still confirms: the baseline
+    is the first attempt's, so any landing since counts and the goalposts do
+    not move under a Clear already on its way."""
+    clears = Clears(tmp_path)
+    attempts = ClearAttempts(tmp_path)
+    attempts.record_attempt(GRILL, landed=clears.count())  # baseline 0
+    clears.record_landing()  # count 1
+    attempts.record_attempt(GRILL, landed=clears.count())  # landed 1, baseline still 0
+
+    assert attempts.confirmed(GRILL, clears) is True
+
+
+def test_clear_attempts_are_counted_per_announcement(tmp_path):
+    """The next Announcement re-arms it, so a Run whose Clear was dropped once
+    delivers the State after it cleanly."""
+    clears = Clears(tmp_path)
+    attempts = ClearAttempts(tmp_path)
+    attempts.record_attempt(GRILL, landed=clears.count())
+
+    assert attempts.attempts(IMPLEMENT) == 0
+    assert attempts.confirmed(IMPLEMENT, clears) is False
+
+
+def test_a_clear_landing_counts_as_a_signal_of_life(tmp_path):
+    """A landed Clear is the session answering, so idleness is measured from it
+    like any other signal — otherwise a Run waiting on its first Clear reads as
+    hung."""
+    (tmp_path / "run.json").write_text("{}")
+    Clears(tmp_path).record_landing()
+
+    assert idle_seconds(tmp_path, now=_mtime(Clears(tmp_path).path)) == pytest.approx(0, abs=0.01)
+
+
+def test_a_clear_attempt_counts_as_a_signal_so_the_confirm_wait_starts_from_it(tmp_path):
+    """Typing /clear is Naiad acting, so the wait for the marker is measured
+    from the attempt — without this the confirm timeout would run from whatever
+    happened before the Clear."""
+    (tmp_path / "run.json").write_text("{}")
+    ClearAttempts(tmp_path).record_attempt(GRILL, landed=0)
+
+    assert idle_seconds(
+        tmp_path, now=_mtime(ClearAttempts(tmp_path).path)
+    ) == pytest.approx(0, abs=0.01)
 
 
 def _mtime(path):

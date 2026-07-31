@@ -11,6 +11,7 @@ import subprocess
 import pytest
 
 from naiad.runtime.announcements import Announcements
+from naiad.runtime.records import Clears
 from naiad.runtime.run import RunStore
 from naiad_command import NAIAD, naiad_environment, requires_installed_naiad
 
@@ -60,9 +61,14 @@ def make_run(store, repo, **options):
     )
 
 
-def protocol(run, *, run_id="a-run"):
+def protocol(run, *, run_id="a-run", source="startup"):
+    """The SessionStart hook feeds the command its JSON on stdin, `source` among
+    it (a documented field, ADR 0002). Passed here so the command is met with
+    exactly the shape a real hook gives it, and so stdin is a pipe rather than
+    the test runner's terminal."""
     return subprocess.run(
         [NAIAD, "protocol"],
+        input=json.dumps({"hook_event_name": "SessionStart", "source": source}),
         capture_output=True,
         text=True,
         env=naiad_environment(run, run_id=run_id),
@@ -108,6 +114,45 @@ def test_a_run_started_at_a_named_state_is_told_what_follows_that_state(store, r
     finished = protocol(make_run(store, repo, start_state="review"))
 
     assert "announce: spec" in injected(finished)
+
+
+def test_a_clear_source_records_that_the_clear_landed(store, repo):
+    """The confirmation ADR 0019 turns on: a fresh context a /clear made says so
+    through the hook's `source`, and the loop reads it as the Clear landing."""
+    run = make_run(store, repo)
+
+    finished = protocol(run, source="clear")
+
+    assert finished.returncode == 0, finished.stderr
+    assert Clears(run.root).count() == 1
+
+
+def test_a_startup_source_records_no_clear(store, repo):
+    """A fresh context at startup is not a Clear, so nothing is recorded — else
+    every session's first context would read as a Clear that landed."""
+    run = make_run(store, repo)
+
+    protocol(run, source="startup")
+
+    assert Clears(run.root).count() == 0
+
+
+def test_a_compact_source_records_no_clear(store, repo):
+    """A compaction fires the same hook, so it must be told from a Clear by the
+    source — a running turn's auto-compaction is not this State's Clear."""
+    run = make_run(store, repo)
+
+    protocol(run, source="compact")
+
+    assert Clears(run.root).count() == 0
+
+
+def test_a_clear_source_still_injects_the_protocol(store, repo):
+    """Recording the landing does not replace the hook's job: the fresh context
+    a Clear made still needs the Protocol, like any other."""
+    finished = protocol(make_run(store, repo), source="clear")
+
+    assert "naiad state" in injected(finished)
 
 
 def test_no_run_attached_prints_nothing_and_succeeds(store, repo):

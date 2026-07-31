@@ -10,7 +10,6 @@ nothing to watch.
 from __future__ import annotations
 
 import subprocess
-import time
 
 from naiad.domain.session import SessionSpec
 
@@ -24,11 +23,6 @@ CLAUDE = "claude"
 # `[Pasted text #1]` and is submitted as prose, which silently turns a Prompt
 # that runs a skill into one that merely describes it.
 NEWLINE = "M-Enter"
-
-# A Clear is a slash command the TUI must process before the Prompt behind it
-# lands in the same input. Empirical, and verified by manual smoke rather than
-# by reading the terminal back (ADR 0002).
-CLEAR_SETTLE_SECONDS = 1.0
 
 
 class TmuxError(Exception):
@@ -52,10 +46,11 @@ class TmuxSessions:
             self._run(argv)
 
     def clear(self, pane: str) -> None:
-        """Discard the session's context, then let the TUI act on it before
-        whatever is sent next arrives."""
+        """Discard the session's context by typing /clear. Nothing is slept for:
+        whether the /clear landed is confirmed by Naiad's own SessionStart hook
+        and the Prompt held back until it has (ADR 0019), rather than hoping a
+        fixed pause outlasts a terminal that might drop the keystroke anyway."""
         self.send(pane, "/clear")
-        time.sleep(CLEAR_SETTLE_SECONDS)
 
     def _run(self, argv: list[str]) -> str:
         finished = subprocess.run(argv, capture_output=True, text=True)

@@ -17,6 +17,7 @@ from typing import Protocol
 from naiad.domain.answerer import Answered, ConsultationSpec, Escalated, render_consultation
 from naiad.domain.decide import (
     Action,
+    Clear,
     Consult,
     Deliver,
     Finish,
@@ -35,7 +36,15 @@ from naiad.domain.workflow import Workflow
 from naiad.runtime.announcements import Announcements
 from naiad.runtime.answers import AnswerLog
 from naiad.runtime.log import RunLog
-from naiad.runtime.records import Consultations, Handled, Notices, Turns, idle_seconds
+from naiad.runtime.records import (
+    ClearAttempts,
+    Clears,
+    Consultations,
+    Handled,
+    Notices,
+    Turns,
+    idle_seconds,
+)
 from naiad.runtime.run import Run
 
 
@@ -75,6 +84,8 @@ def tick(
     handled = Handled(run.root)
     notices = Notices(run.root)
     consultations = Consultations(run.root)
+    clears = Clears(run.root)
+    clearing = ClearAttempts(run.root)
     answers = AnswerLog(run.root)
     notified, nudges = notices.of(announcement)
 
@@ -98,16 +109,22 @@ def tick(
             idle_for=idle_seconds(run.root, now=now if now is not None else time.time()),
             consultation=consultations.of(announcement),
             finished=log.finished(),
+            cleared=clearing.confirmed(announcement, clears),
+            clear_attempts=clearing.attempts(announcement),
         ),
         skip_gates=run.skip_gates,
     )
 
-    if isinstance(action, Deliver) and announcement is not None:
-        pane = _pane(run)
-        if action.clear:
-            session.clear(pane)
+    if isinstance(action, Clear) and announcement is not None:
+        # Type /clear and record the attempt against the current Clear count,
+        # so a landing after this can be told from one before it. The Prompt
+        # does not follow yet: a later tick delivers it, once the SessionStart
+        # hook has confirmed the discard (ADR 0019).
+        session.clear(_pane(run))
+        clearing.record_attempt(announcement, landed=clears.count())
+    elif isinstance(action, Deliver) and announcement is not None:
         session.send(
-            pane,
+            _pane(run),
             render_prompt(
                 action.prompt,
                 task=run.task,

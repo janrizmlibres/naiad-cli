@@ -23,7 +23,7 @@ from dataclasses import dataclass, replace
 from pathlib import Path
 
 from naiad.domain.announcement import Announcement
-from naiad.domain.decide import Action, Consult, Deliver, Finish, Notify, Nudge, Respond
+from naiad.domain.decide import Action, Clear, Consult, Deliver, Finish, Notify, Nudge, Respond
 from naiad.domain.prompt import render_candidates
 from naiad.domain.question import Question
 from naiad.runtime.atomic import write_atomically
@@ -222,6 +222,15 @@ def _entry_for(action: Action) -> LogLine | None:
             kind="delivered",
             state=action.state,
             detail=f"next: {successors}" if successors else None,
+        )
+    if isinstance(action, Clear):
+        # The attempt is always carried, but only a retry is worth a word: a
+        # first Clear is the ordinary case and its number would be noise, while
+        # a second reads as the dropped-Clear it records (ADR 0019).
+        return LogLine(
+            kind="cleared",
+            state=action.state,
+            detail=f"attempt {action.attempt}" if action.attempt > 1 else None,
         )
     if isinstance(action, Respond):
         return LogLine(kind="answered", detail=f"{_question(action.question)} -> {action.answer}")

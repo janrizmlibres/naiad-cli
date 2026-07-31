@@ -9,9 +9,12 @@ import pytest
 
 from naiad.domain.answerer import Answered, Escalated
 from naiad.domain.decide import (
+    CLEAR_CONFIRM_SECONDS,
+    CLEAR_RETRY_LIMIT,
     NOTHING,
     HANG_SECONDS,
     SILENCE_SECONDS,
+    Clear,
     Consult,
     Deliver,
     Notify,
@@ -24,7 +27,7 @@ from naiad.runtime.announcements import Announcements
 from naiad.runtime.answers import AnswerLog
 from naiad.runtime.log import RunLog
 from naiad.runtime.loop import UndrivableRun, tick
-from naiad.runtime.records import Turns
+from naiad.runtime.records import Clears, Turns
 from naiad.runtime.run import RunStore
 
 WORKFLOW = """
@@ -113,6 +116,20 @@ def announce(run, state, *, then_stop=True, subject=None):
     return announcement
 
 
+def land_clear(run):
+    """Stand in for the SessionStart(clear) hook confirming the /clear landed —
+    the signal the loop waits on before delivering a Clearing State's Prompt."""
+    Clears(run.root).record_landing()
+
+
+def deliver_clearing(run, workflow, session, **kwargs):
+    """Drive a Clearing State's two-tick handshake through to its Prompt: type
+    /clear, confirm it landed, then deliver (ADR 0019). Returns the delivery."""
+    drive(run, workflow, session, **kwargs)
+    land_clear(run)
+    return drive(run, workflow, session, **kwargs)
+
+
 def test_an_announcement_with_a_turn_ended_delivers_the_prompt_into_the_pane(
     run, workflow, session
 ):
@@ -132,7 +149,7 @@ def test_the_subject_reaches_the_pane_in_the_delivered_prompt(run, workflow, ses
     anyway (ADR 0009)."""
     announce(run, "implement", subject=".scratch/f/issues/04-x.md")
 
-    drive(run, workflow, session)
+    deliver_clearing(run, workflow, session)
 
     assert ("send", "%42", "/implement the ticket at .scratch/f/issues/04-x.md") in session.sent
 
@@ -141,9 +158,9 @@ def test_successive_iterations_are_delivered_their_own_subjects(run, workflow, s
     """One State announced once per item, each delivery naming its own. This is
     what the Subject buys over re-deriving the choice in a Cleared context."""
     announce(run, "implement", subject="01-a.md")
-    drive(run, workflow, session)
+    deliver_clearing(run, workflow, session)
     announce(run, "implement", subject="02-b.md")
-    drive(run, workflow, session)
+    deliver_clearing(run, workflow, session)
 
     delivered = [message for kind, _, message in session.sent if kind == "send"]
     assert delivered == ["/implement the ticket at 01-a.md", "/implement the ticket at 02-b.md"]
@@ -168,9 +185,9 @@ def test_an_announcement_is_delivered_once_however_often_the_loop_ticks(run, wor
 
 def test_the_same_state_announced_again_is_delivered_again(run, workflow, session):
     announce(run, "implement", subject="04-x.md")
-    drive(run, workflow, session)
+    deliver_clearing(run, workflow, session)
     announce(run, "implement", subject="04-x.md")
-    drive(run, workflow, session)
+    deliver_clearing(run, workflow, session)
 
     assert [entry[0] for entry in session.sent] == ["clear", "send", "clear", "send"]
 
@@ -178,11 +195,81 @@ def test_the_same_state_announced_again_is_delivered_again(run, workflow, sessio
 def test_a_state_declaring_clear_is_cleared_before_its_prompt_arrives(run, workflow, session):
     announce(run, "implement", subject="04-x.md")
 
-    drive(run, workflow, session)
+    deliver_clearing(run, workflow, session)
 
     assert session.sent == [
         ("clear", "%42", None),
         ("send", "%42", "/implement the ticket at 04-x.md"),
+    ]
+
+
+def test_a_clearing_states_prompt_is_held_back_until_the_clear_is_confirmed(run, workflow, session):
+    """The whole of ADR 0019: the Prompt does not follow the /clear on faith.
+    A first tick types /clear and stops there; only once the Clear is confirmed
+    does a later tick deliver, so a dropped /clear can never be delivered
+    through."""
+    announce(run, "implement", subject="04-x.md")
+
+    first = drive(run, workflow, session)
+
+    assert isinstance(first, Clear)
+    assert session.sent == [("clear", "%42", None)]
+
+    land_clear(run)
+    delivered = drive(run, workflow, session)
+
+    assert isinstance(delivered, Deliver)
+    assert session.sent == [
+        ("clear", "%42", None),
+        ("send", "%42", "/implement the ticket at 04-x.md"),
+    ]
+
+
+def test_a_dropped_clear_is_retyped_once_the_confirm_window_passes(run, workflow, session):
+    """No confirmation arrives, so after the window the /clear is typed again
+    rather than the Prompt delivered into the context it should have cleared."""
+    announce(run, "implement", subject="04-x.md")
+    drive(run, workflow, session)
+
+    waited = drive(run, workflow, session, now=_later(run, CLEAR_CONFIRM_SECONDS - 1))
+    retry = drive(run, workflow, session, now=_later(run, CLEAR_CONFIRM_SECONDS))
+
+    assert waited is NOTHING
+    assert isinstance(retry, Clear) and retry.attempt == 2
+    assert [kind for kind, _, _ in session.sent] == ["clear", "clear"]
+
+
+def test_a_clear_that_never_lands_notifies_the_operator_and_delivers_nothing(
+    run, workflow, session
+):
+    """Past the retry bound the human is told and the session is left un-cleared
+    for them, rather than a Prompt delivered into a context that never cleared —
+    the bug this whole handshake exists to prevent."""
+    notifier = RecordingNotifier()
+    announce(run, "implement", subject="04-x.md")
+
+    action = None
+    for _ in range(CLEAR_RETRY_LIMIT + 1):
+        action = drive(run, workflow, session, notifier=notifier, now=_later(run, CLEAR_CONFIRM_SECONDS))
+
+    assert isinstance(action, Notify)
+    assert [kind for kind, _, _ in session.sent] == ["clear"] * CLEAR_RETRY_LIMIT
+    assert len(notifier.notified) == 1
+
+    after = drive(run, workflow, session, notifier=notifier, now=_later(run, CLEAR_CONFIRM_SECONDS))
+    assert after is NOTHING
+    assert len(notifier.notified) == 1
+
+
+def test_the_clear_reaches_the_run_log_before_the_delivery(run, workflow, session):
+    announce(run, "implement", subject="04-x.md")
+
+    deliver_clearing(run, workflow, session)
+
+    assert [(e.kind, e.state) for e in RunLog(run.root).entries()] == [
+        ("announced", "implement"),
+        ("cleared", "implement"),
+        ("delivered", "implement"),
     ]
 
 
@@ -269,7 +356,7 @@ def test_a_prompt_after_the_first_still_names_the_branch_and_the_predecessor(
     run, workflow = _branching_run(tmp_path, predecessor="MC-AGENT-8000")
     announce(run, "implement")
 
-    drive(run, workflow, session)
+    deliver_clearing(run, workflow, session)
 
     assert session.sent == [
         ("clear", "%7", None),
@@ -282,9 +369,9 @@ def test_the_branch_reaches_every_delivery_not_only_the_first(tmp_path, session)
     the reason it is delivered its Subject each time."""
     run, workflow = _branching_run(tmp_path, predecessor="MC-AGENT-8000")
     announce(run, "implement")
-    drive(run, workflow, session)
+    deliver_clearing(run, workflow, session)
     announce(run, "implement")
-    drive(run, workflow, session)
+    deliver_clearing(run, workflow, session)
 
     delivered = [message for kind, _, message in session.sent if kind == "send"]
     assert delivered == ["work on MC-AGENT-8546 based on MC-AGENT-8000"] * 2
@@ -294,7 +381,7 @@ def test_a_run_with_no_predecessor_delivers_the_prompt_with_it_empty(tmp_path, s
     run, workflow = _branching_run(tmp_path)
     announce(run, "implement")
 
-    drive(run, workflow, session)
+    deliver_clearing(run, workflow, session)
 
     assert ("send", "%7", "work on MC-AGENT-8546 based on ") in session.sent
 
@@ -349,7 +436,7 @@ def test_the_loop_keeps_running_after_a_notification_and_delivers_the_next_annou
     drive(run, workflow, session, notifier=notifier)
 
     announce(run, "implement", subject="04-x.md")
-    action = drive(run, workflow, session, notifier=notifier)
+    action = deliver_clearing(run, workflow, session, notifier=notifier)
 
     assert isinstance(action, Deliver)
     assert ("send", "%42", "/implement the ticket at 04-x.md") in session.sent

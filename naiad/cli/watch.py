@@ -14,7 +14,7 @@ from __future__ import annotations
 import time
 from collections.abc import Callable
 
-from naiad.domain.decide import Action, Consult, Deliver, Finish, Notify, Nudge, Respond
+from naiad.domain.decide import Action, Clear, Consult, Deliver, Finish, Notify, Nudge, Respond
 from naiad.domain.protocol import DEFAULT_NAIAD
 from naiad.domain.workflow import Workflow
 from naiad.runtime.log import RunLog
@@ -76,6 +76,9 @@ def watch(
 def _narrate(action: Action) -> str | None:
     """What the operator watching the terminal is told. Nothing for the ticks
     where nothing happened, which is most of them."""
+    if isinstance(action, Clear):
+        again = "" if action.attempt == 1 else f" again (attempt {action.attempt})"
+        return f"clearing {action.state}{again}"
     if isinstance(action, Deliver):
         return f"delivered {action.state}"
     if isinstance(action, Consult):

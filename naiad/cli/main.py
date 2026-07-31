@@ -13,6 +13,7 @@ a session except by taking an Entry off the Queue.
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import re
 import sys
@@ -47,7 +48,7 @@ from naiad.runtime.home import (
     default_runs_root,
 )
 from naiad.runtime.queue import Queue, status_of
-from naiad.runtime.records import Turns
+from naiad.runtime.records import Clears, Turns
 from naiad.runtime.resolve import NoRunError, RunResolver
 from naiad.runtime.run import Run, RunStore
 
@@ -270,13 +271,39 @@ def _protocol(arguments: argparse.Namespace) -> int:
     """The SessionStart hook, run on startup, on Clear and on compaction — the
     three moments a context is created or destroyed. Like the Stop hook it is
     installed independently of any Run, so a session nobody is driving prints
-    nothing and succeeds rather than failing."""
+    nothing and succeeds rather than failing.
+
+    A fresh context a Clear made is the one the loop is waiting on: it records
+    that the /clear landed, so delivery of the next Prompt can be gated on the
+    Clear being confirmed rather than hoped for (ADR 0019). The three sources
+    are told apart by the hook's own `source`, a documented field (ADR 0002),
+    so only a Clear counts — a startup or a compaction is not this State's
+    Clear."""
     run = _attached_run()
     if run is None:
         return 0
 
+    if _hook_source() == "clear":
+        Clears(run.root).record_landing()
+
     print(injection_for(run))
     return 0
+
+
+def _hook_source() -> str | None:
+    """The `source` this SessionStart hook was fired with — 'startup', 'clear',
+    'compact' or 'resume' — read from the hook's stdin JSON.
+
+    None when there is no readable source: the command run outside a hook, or
+    stdin that is empty or not JSON. None reads as no particular source and
+    records nothing, which is the safe default — a Clear is only ever acted on
+    when the hook says so in as many words."""
+    try:
+        payload = json.loads(sys.stdin.read() or "{}")
+    except (json.JSONDecodeError, ValueError):
+        return None
+    source = payload.get("source")
+    return source if isinstance(source, str) else None
 
 
 def _install_hooks(arguments: argparse.Namespace) -> int:

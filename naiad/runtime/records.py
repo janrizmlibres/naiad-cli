@@ -26,6 +26,8 @@ TURNS_FILENAME = "turns.json"
 HANDLED_FILENAME = "handled.json"
 NOTICES_FILENAME = "notices.json"
 CONSULTATIONS_FILENAME = "consultations.json"
+CLEARS_FILENAME = "clears.json"
+CLEAR_ATTEMPTS_FILENAME = "clearattempts.json"
 
 # Every file whose writing means something happened. The Run's own metadata is
 # among them so that a Run which has produced no signal at all is idle since it
@@ -36,6 +38,8 @@ SIGNAL_FILENAMES = (
     HANDLED_FILENAME,
     NOTICES_FILENAME,
     CONSULTATIONS_FILENAME,
+    CLEARS_FILENAME,
+    CLEAR_ATTEMPTS_FILENAME,
     METADATA_FILENAME,
 )
 
@@ -137,6 +141,78 @@ class Turns:
         return isinstance(after, int) and after >= announcement.seq
 
 
+class Clears:
+    """How many times a Clear has landed, written by the SessionStart hook when
+    a fresh context is one a /clear made — read from the hook's own `source`,
+    rather than a startup or a compaction (ADR 0019).
+
+    The counterpart to Turns. A Stop hook says a turn ended and counts them; a
+    SessionStart(clear) hook says a Clear landed and counts them. A count rather
+    than a flag for the same reason Turns keeps one: the question 'has this
+    State's Clear landed?' is asked against a baseline the loop stamped when it
+    typed /clear, and only a count can tell one State's Clear from the last.
+
+    Its own file, because the hook that writes it and the loop that writes the
+    attempts against it are different processes and must not race over one
+    document (the rule this module opens with).
+    """
+
+    def __init__(self, run_root: Path) -> None:
+        self.path = Path(run_root) / CLEARS_FILENAME
+
+    def record_landing(self) -> None:
+        _write(self.path, {"count": self.count() + 1})
+
+    def count(self) -> int:
+        count = _read(self.path).get("count")
+        return count if isinstance(count, int) else 0
+
+
+class ClearAttempts:
+    """What the loop has done to get a State's context cleared: how many times
+    it has typed /clear for the current Announcement, and the Clear count it
+    read the first time it did — the baseline a later landing is judged against.
+
+    Kept against the Announcement it belongs to and read as nothing for any
+    other, exactly like Notices: the next Announcement re-arms it, so a Run that
+    had one Clear dropped delivers the State after it cleanly. Written by the
+    loop, apart from the hook's count, because the two are different processes.
+    """
+
+    def __init__(self, run_root: Path) -> None:
+        self.path = Path(run_root) / CLEAR_ATTEMPTS_FILENAME
+
+    def attempts(self, announcement: Announcement | None) -> int:
+        return int(_current(self.path, announcement).get("attempts", 0) or 0)
+
+    def confirmed(self, announcement: Announcement | None, clears: Clears) -> bool:
+        """Whether this Announcement's Clear has landed since it was typed.
+
+        Takes the Clears count as an argument, the way Turns.ended_since_action
+        takes the Handled baseline: the fact lives in two files written by two
+        processes, and comparing them is the reader's job rather than either
+        writer's. False until a /clear has been typed for this Announcement, so
+        a landing left over from an earlier State cannot confirm this one.
+        """
+        document = _current(self.path, announcement)
+        attempts = int(document.get("attempts", 0) or 0)
+        baseline = int(document.get("baseline", 0) or 0)
+        return attempts > 0 and clears.count() > baseline
+
+    def record_attempt(self, announcement: Announcement | None, *, landed: int) -> None:
+        """Record that /clear was typed, holding the first attempt's baseline
+        across every retry: a Clear that was merely slow, and lands after a
+        retry, must still confirm rather than have its target moved past it."""
+        document = _current(self.path, announcement)
+        attempts = int(document.get("attempts", 0) or 0)
+        held = document.get("baseline")
+        baseline = held if attempts and isinstance(held, int) else landed
+        _write(
+            self.path,
+            {"seq": _seq(announcement), "baseline": baseline, "attempts": attempts + 1},
+        )
+
+
 class Handled:
     """The last Announcement Naiad acted on, so that it acts once per
     Announcement rather than once per change of value."""
@@ -230,4 +306,12 @@ class Consultations:
         )
 
 
-__all__ = ["Consultations", "Handled", "Notices", "Turns", "idle_seconds"]
+__all__ = [
+    "ClearAttempts",
+    "Clears",
+    "Consultations",
+    "Handled",
+    "Notices",
+    "Turns",
+    "idle_seconds",
+]

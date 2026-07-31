@@ -22,6 +22,18 @@ from naiad.domain.workflow import State, Workflow
 # fighting the agent rather than driving it (PRD, 'Recovery').
 NUDGE_LIMIT = 2
 
+# How long a typed /clear may go unconfirmed before Naiad reads it as dropped
+# and types it again (ADR 0019). Longer than a Clear that lands takes to report
+# itself — so a Clear merely in flight is not re-typed — and short enough that a
+# genuinely dropped one is caught within a few ticks.
+CLEAR_CONFIRM_SECONDS = 8.0
+
+# How many times a State's /clear is typed before the human is told it would not
+# land. The silence-then-Nudge bound applied to a Clear: re-typing a dropped one
+# is cheap and safe, but an un-cleared context is the one thing delivery must
+# never happen into, so past the bound Naiad stops rather than delivers.
+CLEAR_RETRY_LIMIT = 3
+
 # How long a session that has ended a turn may say nothing before Naiad reads
 # it as a forgotten Protocol. Long enough that an agent pausing between tool
 # calls is not interrupted mid-thought.
@@ -68,6 +80,13 @@ class Signals:
     decisions at all: the Answerer returns either an answer or an Escalation,
     and choosing between those is a rule. Branching on it where the Answerer is
     called would put that rule in the adapter layer (ADR 0004).
+
+    cleared and clear_attempts are the Clear handshake as signals (ADR 0019).
+    cleared says this Announcement's /clear has been confirmed by the
+    SessionStart hook; clear_attempts is how many times it has been typed. They
+    are facts about the current Announcement, like nudges, and the next one
+    re-arms them, so a State whose Clear was dropped is a fresh handshake from
+    the State after it.
     """
 
     announcement: Announcement | None
@@ -79,11 +98,33 @@ class Signals:
     idle_for: float = 0.0
     consultation: Consultation = None
     finished: bool = False
+    cleared: bool = False
+    clear_attempts: int = 0
+
+
+@dataclass(frozen=True)
+class Clear:
+    """Discard this State's context, and wait for the discard to be confirmed
+    before its Prompt is delivered (ADR 0019). The /clear can be dropped by the
+    terminal, so it is typed again if the confirmation does not come; attempt is
+    carried like a Nudge's, so a retry reads apart from the first try in the log.
+
+    A first-class Action rather than a step hidden inside Deliver, so the
+    waiting and the retrying are the decision's — elapsed time in, an Action out
+    — and the loop keeps no rule of its own (ADR 0004)."""
+
+    state: str
+    attempt: int
 
 
 @dataclass(frozen=True)
 class Deliver:
-    """Send this State's Prompt into the session, Clearing first if asked.
+    """Send this State's Prompt into the session.
+
+    The context has already been discarded when the State asked for it: a Clear
+    Action does that and is confirmed before this follows (ADR 0019), so a
+    delivery never Clears — by the time one is returned there is nothing left to
+    discard.
 
     Carries no Deviation. Delivery happens whether or not the Announcement left
     the expected path, so a Deviation changes nothing here; it classifies the
@@ -101,7 +142,6 @@ class Deliver:
 
     state: str
     prompt: str
-    clear: bool
     next_states: tuple[str, ...]
     subject: str | None = None
 
@@ -172,7 +212,7 @@ class Nothing:
 
 NOTHING = Nothing()
 
-Action = Consult | Deliver | Finish | Notify | Nudge | Respond | Nothing
+Action = Clear | Consult | Deliver | Finish | Notify | Nudge | Respond | Nothing
 
 
 def decide(workflow: Workflow, signals: Signals, *, skip_gates: bool = False) -> Action:
@@ -245,10 +285,15 @@ def decide(workflow: Workflow, signals: Signals, *, skip_gates: bool = False) ->
             # alive, and why there is no approve command.
             return _notify(signals, f"state '{state.name}' is a Gate State and is waiting for you")
 
+        if state.clear and not signals.cleared:
+            # The context must be discarded before the Prompt, and the discard
+            # confirmed rather than assumed. Until then delivery waits, exactly
+            # as it waits on a turn ending above (ADR 0019).
+            return _clear(signals, state.name)
+
         return Deliver(
             state=state.name,
             prompt=state.prompt,
-            clear=state.clear,
             next_states=resolve_next_states(workflow, state.name, skip_gates=skip_gates),
             subject=announcement.subject,
         )
@@ -302,6 +347,26 @@ def _unhandled(signals: Signals) -> Announcement | None:
     return announcement
 
 
+def _clear(signals: Signals, state_name: str) -> Action:
+    """Get this State's context discarded before its Prompt, catching a dropped
+    /clear rather than hoping (ADR 0019).
+
+    The silence-then-Nudge shape applied to a Clear that may be dropped: the
+    first /clear goes at once, a confirm window is waited before one is judged
+    dropped, a dropped one is re-typed, and past the retry bound the human is
+    told rather than the session left un-cleared under a delivery.
+    """
+    if signals.clear_attempts == 0:
+        return Clear(state=state_name, attempt=1)
+    if signals.idle_for < CLEAR_CONFIRM_SECONDS:
+        return NOTHING
+    if signals.clear_attempts < CLEAR_RETRY_LIMIT:
+        return Clear(state=state_name, attempt=signals.clear_attempts + 1)
+    return _notify(
+        signals, f"the clear was not confirmed after {CLEAR_RETRY_LIMIT} tries and looks dropped"
+    )
+
+
 def _notify(signals: Signals, reason: str, *, question: Question | None = None) -> Action:
     """Notification is once per Announcement, not once per tick. Every
     condition reaching here persists with identical signals until a human acts,
@@ -311,11 +376,14 @@ def _notify(signals: Signals, reason: str, *, question: Question | None = None) 
 
 
 __all__ = [
+    "CLEAR_CONFIRM_SECONDS",
+    "CLEAR_RETRY_LIMIT",
     "HANG_SECONDS",
     "NOTHING",
     "NUDGE_LIMIT",
     "SILENCE_SECONDS",
     "Action",
+    "Clear",
     "Consult",
     "Deliver",
     "Finish",
