@@ -11,6 +11,7 @@ from naiad.domain.entry import Entry
 from naiad.domain.supervise import DRAINED, IDLE, Resume, Signals, Start, supervise
 
 REPO = Path("/repos/naiad")
+ANOTHER_REPO = Path("/repos/hcgps")
 
 
 def entry(identifier, **overrides):
@@ -93,9 +94,13 @@ def test_a_supervisor_restarted_mid_run_resumes_the_same_entry():
 def test_a_finished_entry_is_scanned_past_to_the_next():
     done, waiting = entry("one", run_id="a-run"), entry("two")
 
-    assert supervise(draining(done, waiting, finished={"a-run"})) == Start(
-        entry=waiting, predecessor=None
-    )
+    # Which Entry the scan reaches, and not what it stands on: the Predecessor
+    # is resolved by its own table of cases below, and asserting it here as well
+    # is what made this test break when the rule for it changed.
+    scanned_past = supervise(draining(done, waiting, finished={"a-run"}))
+
+    assert isinstance(scanned_past, Start)
+    assert scanned_past.entry is waiting
 
 
 def test_a_finished_entry_is_scanned_past_to_the_next_unfinished_run():
@@ -125,3 +130,82 @@ def test_the_entries_are_taken_in_the_order_they_are_given():
     first, second, third = entry("one"), entry("two"), entry("three")
 
     assert supervise(draining(first, second, third)).entry is first
+
+
+# Resolving the Predecessor: the pinned base, else the nearest preceding Entry
+# for the same repository, else nothing. Exercised through Start, because
+# resolution rides on the Action rather than living behind a seam of its own.
+
+
+def test_an_entry_with_no_pinned_base_stands_on_the_entry_before_it():
+    """Stacking is the default: a later Entry sees the code an earlier one
+    wrote, or the second agent builds the same thing differently and the
+    conflict surfaces at merge."""
+    first = entry("one", run_id="a-run")
+    second = entry("two")
+
+    assert supervise(draining(first, second, finished={"a-run"})) == Start(
+        entry=second, predecessor="MC-AGENT-one"
+    )
+
+
+def test_a_pinned_base_wins_over_the_entry_before_it():
+    """Work unrelated to what came before is not stacked onto it, whatever
+    precedes it in the Queue."""
+    first = entry("one", run_id="a-run")
+    second = entry("two", pinned_base="develop")
+
+    assert supervise(draining(first, second, finished={"a-run"})) == Start(
+        entry=second, predecessor="develop"
+    )
+
+
+def test_an_entry_for_another_repository_is_walked_over():
+    """The Queue is global, so a branch name from another repository is not a
+    fact about this one — and handing one over would have the agent run the
+    ancestry test, get nothing useful, and quietly base on the base branch."""
+    first = entry("one", run_id="a-run")
+    interloper = entry("two", target_repo=ANOTHER_REPO, run_id="another-run")
+    third = entry("three")
+
+    assert supervise(
+        draining(first, interloper, third, finished={"a-run", "another-run"})
+    ) == Start(entry=third, predecessor="MC-AGENT-one")
+
+
+def test_the_first_entry_for_a_repository_stands_on_nothing():
+    """First for *its* repository rather than first in the Queue: everything
+    ahead of it belongs to another project, so there is nothing here to stand
+    on and it is handed nothing rather than something from elsewhere."""
+    interloper = entry("one", target_repo=ANOTHER_REPO, run_id="a-run")
+    second = entry("two")
+
+    assert supervise(draining(interloper, second, finished={"a-run"})) == Start(
+        entry=second, predecessor=None
+    )
+
+
+def test_an_entry_whose_immediate_predecessor_was_removed_takes_the_one_before_it():
+    """A removed Entry is absent from disk and so is naturally passed over.
+    That is the intended consequence of removing one: dropped work should not
+    be in the stack."""
+    first = entry("one", run_id="a-run")
+    # "two" was queued between them and removed; it is simply not here.
+    third = entry("three")
+
+    assert supervise(draining(first, third, finished={"a-run"})) == Start(
+        entry=third, predecessor="MC-AGENT-one"
+    )
+
+
+def test_a_preceding_entry_for_the_same_repository_is_never_skipped():
+    """Naiad does not skip one on the grounds that its work has already landed:
+    that is a question about git and the answer belongs to the agent (ADR 0015).
+    The stack collapses correctly without Naiad knowing anything."""
+    landed = entry("one", run_id="a-run")
+    stacked = entry("two", run_id="another-run")
+    third = entry("three")
+
+    assert supervise(
+        draining(landed, stacked, third, finished={"a-run", "another-run"})
+    ) == Start(entry=third, predecessor="MC-AGENT-two")

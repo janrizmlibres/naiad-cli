@@ -17,6 +17,13 @@ returns while it is parked. And crash recovery, because a restarted Supervisor
 is handed the same signals and finds the same Entry, which the existing watch
 handles in both directions: it reports that a finished Run has finished and
 returns, and picks an unfinished one up mid-flight (ADR 0013).
+
+The Entry the scan chooses to Start carries the Predecessor its work stands on,
+resolved from the Entries before it. Resolution is deliberately not a seam of
+its own: it rides on the Start Action, so the rule that picks an Entry and the
+rule that decides what it stands on are exercised by one table of cases. It
+happens when an Entry starts rather than when it is queued, because Entries may
+be added or removed in between.
 """
 
 from __future__ import annotations
@@ -56,10 +63,12 @@ class Signals:
 class Start:
     """Start this Entry's Run, then watch it.
 
-    predecessor is what the work stands on, resolved here rather than by the
-    loop afterwards, so that picking an Entry and deciding what it stands on are
-    one decision exercised by one table of cases. An opaque string: whether to
-    actually stand on it is the agent's to decide in the Prompt (ADR 0015).
+    predecessor is what the work stands on — the Entry's pinned base, or the
+    Working branch of the nearest preceding Entry for the same repository —
+    resolved here rather than by the loop afterwards, so that picking an Entry
+    and deciding what it stands on are one decision exercised by one table of
+    cases. An opaque string: whether to actually stand on it is the agent's to
+    decide in the Prompt (ADR 0015).
     """
 
     entry: Entry
@@ -103,20 +112,48 @@ def supervise(signals: Signals) -> Action:
     (ADR 0013). Falling off the end means every Entry is done, which is the
     empty Queue again and answers the same way.
     """
-    for entry in signals.entries:
+    for position, entry in enumerate(signals.entries):
         if entry.run_id is None:
-            return Start(entry=entry, predecessor=_predecessor(entry))
+            return Start(
+                entry=entry,
+                predecessor=_predecessor(entry, preceding=signals.entries[:position]),
+            )
         if entry.run_id not in signals.finished:
             return Resume(entry=entry)
 
     return IDLE if signals.following else DRAINED
 
 
-def _predecessor(entry: Entry) -> str | None:
-    """What an Entry's work stands on. The pinned base only, for now; resolving
-    it from the Entries before it is the next thing this learns, and Start's
-    shape does not change when it does."""
-    return entry.pinned_base
+def _predecessor(entry: Entry, *, preceding: Sequence[Entry]) -> str | None:
+    """What an Entry's work stands on: the pinned base if it has one, otherwise
+    the Working branch of the nearest preceding Entry for the same repository,
+    otherwise nothing.
+
+    Entries for other repositories are walked over, because the Queue is global
+    and a branch name from another repository is not a fact about this one:
+    handed one, the agent runs the ancestry test, gets nothing useful, and
+    quietly bases on the base branch — silently wrong exactly when the global
+    Queue is used as intended.
+
+    Entries for the same repository are never walked over. Naiad does not skip
+    one on the grounds that its work has already landed, because that is a
+    question about git and the answer belongs to the agent (ADR 0015); the stack
+    collapses correctly without Naiad knowing anything, since an Entry built on
+    the one before it carries that one's commits. Removed Entries are absent
+    from the Queue and so are passed over here without being asked about, which
+    is the intended consequence of removing one.
+
+    Stacking rather than nothing is the default because the two failures are not
+    symmetrical; ADR 0015 records the trade.
+    """
+    if entry.pinned_base is not None:
+        return entry.pinned_base
+
+    for earlier in reversed(preceding):
+        if earlier.target_repo == entry.target_repo:
+            return earlier.working_branch
+
+    return None
 
 
 __all__ = [

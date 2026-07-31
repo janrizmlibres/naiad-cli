@@ -206,7 +206,9 @@ def test_two_queued_entries_are_run_one_after_the_other(queue, runs, repo):
 
     supervising(queue, runs, supervision)
 
-    assert supervision.started == [(first.id, None), (second.id, None)]
+    # The second Entry stands on the first's Working branch, resolved by the
+    # rules and carried through the loop untouched.
+    assert supervision.started == [(first.id, None), (second.id, first.working_branch)]
     assert supervision.driven == ["run-1", "run-2"]
 
 
@@ -246,7 +248,7 @@ def test_an_entry_added_while_following_is_picked_up(queue, runs, repo):
 def test_a_supervisor_restarted_mid_run_drives_the_same_run(queue, runs, repo):
     """It finds the same Entry and watches its Run again, which the existing
     watch handles in both directions (ADR 0013)."""
-    queued(queue, repo, "one")
+    first = queued(queue, repo, "one")
     queued(queue, repo, "two")
     interrupted = Supervision(runs, finishes=False)
     with pytest.raises(Interrupted):
@@ -258,20 +260,20 @@ def test_a_supervisor_restarted_mid_run_drives_the_same_run(queue, runs, repo):
     # The first Entry's Run is driven again rather than started again, and only
     # the second Entry is ever started.
     assert resumed.driven[0] == "run-1"
-    assert resumed.started == [("two", None)]
+    assert resumed.started == [("two", first.working_branch)]
 
 
 def test_a_supervisor_restarted_after_a_run_finished_moves_on(queue, runs, repo):
     """Watching reports that a finished Run has finished and returns, so the
     scan passes it and reaches the next Entry."""
-    queued(queue, repo, "one")
+    first = queued(queue, repo, "one")
     supervising(queue, runs, Supervision(runs))
     queued(queue, repo, "two")
 
     second = Supervision(runs)
     supervising(queue, runs, second)
 
-    assert second.started == [("two", None)]
+    assert second.started == [("two", first.working_branch)]
 
 
 def test_an_entry_whose_run_has_gone_missing_is_reported(queue, runs, repo):
