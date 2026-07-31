@@ -205,13 +205,15 @@ def _describe_the_work(parser: argparse.ArgumentParser, *, required: bool = True
         default=None,
         help="the target repository (default: the working directory)",
     )
-    # Required, but not by argparse: the refusal lives with the other checks
-    # (naiad.cli.refusals), so that both entrances are guarded by the same one
-    # and the message can say why Naiad invents no Working branch (ADR 0015).
+    # Optional: given, it is carried verbatim and never second-guessed; absent,
+    # the agent at the head of the Run derives a name from the target
+    # repository's conventions and declares it (ADR 0022). Naiad itself still
+    # invents no branch name (ADR 0015).
     parser.add_argument(
         "--branch",
         default=None,
-        help="the working branch this work's commits belong on (required)",
+        help="the working branch this work's commits belong on "
+        "(default: the agent derives one in the repository)",
     )
     # Left under the flag's own name rather than the glossary's, because the two
     # commands make different things of it: a Run records it as its Predecessor,
@@ -513,7 +515,7 @@ def _queue_add(arguments: argparse.Namespace) -> int:
         missing = "no task" if arguments.workflow is not None else "no workflow and no task"
         print(
             f"naiad: {missing} was given, and no batch file either; "
-            "try: naiad queue add <workflow> <task> --branch <branch>, "
+            "try: naiad queue add <workflow> <task>, "
             "or naiad queue add --file <batch.toml>",
             file=sys.stderr,
         )
@@ -556,6 +558,7 @@ def _queued_from_file(arguments: argparse.Namespace) -> int:
         entries = enqueue_batch(
             works,
             queue=Queue(default_queue_root()),
+            runs=RunStore(default_runs_root()),
             entry_ids=_batch_ids(added, works),
             # One moment for the whole file, because one command wrote them
             # all. Only the ids are spaced, and spacing them is how they sort
@@ -598,6 +601,7 @@ def _queued(arguments: argparse.Namespace, *, remedy: Remedy) -> Entry | None:
                 skip_gates=arguments.skip_gates,
             ),
             queue=Queue(default_queue_root()),
+            runs=RunStore(default_runs_root()),
             entry_id=_entry_id(added, workflow_path),
             created_at=_timestamp(added),
             remedy=remedy,
@@ -614,7 +618,7 @@ def _report(entry: Entry) -> None:
     """What an Entry looks like once it is queued. One place, so that a batch
     reports each of its Entries exactly as a single one is reported."""
     print(f"queued {entry.id}")
-    print(f"  branch {entry.working_branch}   in {entry.target_repo}")
+    print(f"  branch {_branch_shown(entry)}   in {entry.target_repo}")
 
 
 def _queue_list(arguments: argparse.Namespace) -> int:
@@ -650,9 +654,16 @@ def _queue_line(entry: Entry, runs: RunStore) -> str:
     became = status_of(entry, runs)
     line = (
         f"{entry.id}  {became:<7}  {_shortened(entry.target_repo)}  "
-        f"{entry.working_branch}  {entry.task}"
+        f"{_branch_shown(entry)}  {entry.task}"
     )
     return line if entry.run_id is None else f"{line}  ({entry.run_id})"
+
+
+def _branch_shown(entry: Entry) -> str:
+    """A branchless Entry has no name yet — the agent derives one inside the
+    Run — and `None` on an operator's screen would read as a branch called
+    None rather than as the absence of one."""
+    return entry.working_branch or "-"
 
 
 def _shortened(path: Path) -> str:

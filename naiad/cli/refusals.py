@@ -1,8 +1,8 @@
 """What describing a piece of work is refused for, before the work exists.
 
-Four checks — a Workflow that cannot be run, a start State the Workflow does
-not declare, a start State whose Prompt names a Subject with none given, and a
-missing Working branch — made both by kickoff and by enqueue, for the same
+Three checks — a Workflow that cannot be run, a start State the Workflow does
+not declare, and a start State whose Prompt names a Subject with none given —
+made both by kickoff and by enqueue, for the same
 reason: whoever asked is standing right there and pays the error message only.
 An Entry makes them when it is queued rather than when it starts, so that a
 night's backlog cannot fail at three in the morning on a typo.
@@ -37,7 +37,6 @@ class Remedy:
     here.
     """
 
-    branch: str
     # Names {state}, because which State wanted a Subject is not known until
     # the Workflow has been read.
     subject: str
@@ -50,10 +49,7 @@ def _typed(how: str) -> Remedy:
     """The remedy for work described in shell arguments: the line the operator
     typed, with the missing option added — something they can retype rather
     than a rule they have to translate."""
-    return Remedy(
-        branch=f"try: {how} --branch <branch>",
-        subject=f"try: {how} --at {{state}} --subject <value>",
-    )
+    return Remedy(subject=f"try: {how} --at {{state}} --subject <value>")
 
 
 # The remedies a refusal quotes back, named for where the work was described
@@ -64,21 +60,18 @@ RUN_COMMAND = _typed("naiad run <workflow> <task>")
 ADD_COMMAND = _typed("naiad queue add <workflow> <task>")
 # Work described in a batch file. The refusal names the file and the Entry's
 # position, so what is left to say is which key that Entry is missing.
-BATCH_ENTRY = Remedy(
-    branch='try: giving that entry a `branch = "<branch>"`',
-    subject='try: giving that entry a `subject = "<value>"`',
-)
+BATCH_ENTRY = Remedy(subject='try: giving that entry a `subject = "<value>"`')
 
 
 @dataclass(frozen=True)
 class Start:
     """What survived the checks: the Workflow, the State the work begins at,
-    and the Working branch — no longer optional, because a caller holding one
-    of these has already been refused if it was missing."""
+    and the Working branch — still optional, because omitting one is intent:
+    the agent at the head of the Run derives a name there (ADR 0022)."""
 
     workflow: Workflow
     state: State
-    working_branch: str
+    working_branch: str | None
 
 
 class MissingSubject(Exception):
@@ -88,20 +81,6 @@ class MissingSubject(Exception):
     does not reach them. Without this the first Prompt arrives with the
     placeholder rendered empty, into a session with no memory of what it was
     meant to say (ADR 0009).
-    """
-
-
-class MissingWorkingBranch(Exception):
-    """Work with no Working branch.
-
-    Naiad attempts no derivation, and none is possible: a correct branch name
-    needs the affected application and an issue number, which are conventions
-    of the target repository, and Naiad knows no repository's conventions
-    (ADR 0015). So it is supplied or the work does not start.
-
-    The alternative — accepting it anyway and letting {branch} render empty —
-    surfaces at review time, on commits already made to whatever branch
-    happened to be checked out.
     """
 
 
@@ -119,16 +98,9 @@ def check_start(
     so that every message ends in something they can act on rather than a rule
     they have to translate.
 
-    The Working branch is checked first because it needs nothing else: it is a
-    fact about the work rather than about the Workflow, so nothing has to be
-    read to know it is missing.
+    The Working branch is not among the checks: given, it is carried verbatim,
+    and absent, the agent at the head of the Run derives one (ADR 0022).
     """
-    if not working_branch:
-        raise MissingWorkingBranch(
-            "no working branch was given to do the work on, and naiad cannot "
-            f"derive one from your repository's conventions; {remedy.branch}"
-        )
-
     workflow = load_workflow(workflow_path)
     first = resolve_start_state(workflow, start_state)
     if not subject and first.prompt and SUBJECT_PLACEHOLDER in first.prompt:
@@ -144,7 +116,6 @@ __all__ = [
     "BATCH_ENTRY",
     "RUN_COMMAND",
     "MissingSubject",
-    "MissingWorkingBranch",
     "Remedy",
     "Start",
     "check_start",

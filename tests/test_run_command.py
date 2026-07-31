@@ -187,14 +187,15 @@ def test_running_appends_rather_than_jumping_the_queue(home, repo, monkeypatch):
 # The kickoff-time refusals, now at enqueue: nothing queued and nothing started.
 
 
-def test_running_without_a_working_branch_is_refused(home, repo, monkeypatch, capsys):
-    refuse_supervising(monkeypatch)
+def test_running_without_a_working_branch_queues_branchless_work(home, repo, monkeypatch):
+    """Omission is intent (ADR 0022): the Entry records no Working branch, and
+    the agent at the head of its Run derives and declares one there."""
+    supervision(monkeypatch)
 
-    assert run(repo) == 2
+    assert run(repo) == 0
 
-    error = capsys.readouterr().err
-    assert "--branch" in error and "naiad run" in error
-    assert queue_of(home).all() == []
+    (queued,) = queue_of(home).all()
+    assert queued.working_branch is None
 
 
 def test_running_at_a_state_the_workflow_does_not_declare_is_refused(

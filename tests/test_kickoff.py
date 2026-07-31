@@ -1,7 +1,7 @@
 import pytest
 
 from naiad.cli.kickoff import start_run
-from naiad.cli.refusals import MissingSubject, MissingWorkingBranch
+from naiad.cli.refusals import MissingSubject
 from naiad.domain.transitions import UnknownState
 from naiad.domain.workflow import WorkflowError
 from naiad.runtime.resolve import RUN_ID_VARIABLE, RunResolver
@@ -223,24 +223,14 @@ def test_the_run_remembers_the_branch_it_was_started_with(repo, store, sessions)
     assert reloaded.predecessor == "MC-AGENT-8000"
 
 
-def test_a_run_started_without_a_working_branch_is_refused(repo, store, sessions):
-    """No derivation is attempted and none is possible: a correct branch name
-    needs the affected application and an issue number, which are conventions
-    of the target repository (ADR 0015)."""
-    with pytest.raises(MissingWorkingBranch) as caught:
-        start(repo, store, sessions, working_branch=None)
+def test_a_run_started_without_a_working_branch_records_none(repo, store, sessions):
+    """Omission is intent (ADR 0022): the Run starts with no Working branch,
+    and the agent at its head derives a name in the repository and declares
+    it. Naiad still attempts no derivation of its own (ADR 0015)."""
+    run = start(repo, store, sessions, working_branch=None)
 
-    assert "--branch" in str(caught.value)
-
-
-def test_a_run_refused_for_want_of_a_branch_creates_nothing(repo, store, sessions):
-    """The same trade the missing-Subject refusal makes: an operator standing
-    at the terminal pays the error message only."""
-    with pytest.raises(MissingWorkingBranch):
-        start(repo, store, sessions, working_branch=None)
-
-    assert sessions.spawned == []
-    assert store.all() == []
+    assert store.load(run.id).working_branch is None
+    assert len(sessions.spawned) == 1
 
 
 def _naming_the_branch(repo):

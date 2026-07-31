@@ -175,6 +175,25 @@ def status_of(entry: Entry, runs: RunStore) -> Status:
     return PARKED if notified else RUNNING
 
 
+def branch_of(entry: Entry, runs: RunStore) -> str | None:
+    """The Working branch an Entry claims, resolved through its Run when the
+    Entry's own record carries none.
+
+    Read rather than copied back onto the Entry, for the reason status is
+    (ADR 0013): a second copy could disagree with the first. An Entry queued
+    without a branch starts a Run with none, and the agent at its head declares
+    the name it derived on the Run — so the Run is where the fact lives, and
+    until it is declared (or for a Run whose directory has gone) there is no
+    name and nothing is claimed.
+    """
+    if entry.working_branch is not None:
+        return entry.working_branch
+    if entry.run_id is None:
+        return None
+    run = runs.load(entry.run_id)
+    return run.working_branch if run is not None else None
+
+
 def _document(entry: Entry) -> dict[str, Any]:
     return {
         "id": entry.id,
@@ -197,5 +216,6 @@ __all__ = [
     "RUNNING",
     "WAITING",
     "Queue",
+    "branch_of",
     "status_of",
 ]

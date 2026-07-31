@@ -30,9 +30,11 @@ class Entry:
     workflow_path: Path
     task: str
     target_repo: Path
-    # Required of every Entry and refused before one exists, because Naiad
-    # derives no branch name from a repository's conventions (ADR 0015).
-    working_branch: str
+    # Given verbatim or absent, never invented: Naiad derives no branch name
+    # from a repository's conventions (ADR 0015). Absent means the agent at the
+    # head of the Run derives one there and declares it on the Run, so the
+    # Entry's own record stays as the work was described (ADR 0022).
+    working_branch: str | None
     created_at: str
     # Optional and opaque: recorded and passed on without being read.
     pinned_base: str | None = None

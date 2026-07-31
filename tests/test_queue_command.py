@@ -131,11 +131,21 @@ def test_entries_added_in_a_row_each_get_their_own_place_in_the_queue(home, repo
     ]
 
 
-def test_adding_an_entry_with_no_working_branch_is_refused(home, repo, capsys):
-    assert add(repo) == 2
+def test_adding_an_entry_with_no_working_branch_queues_branchless_work(home, repo, capsys):
+    """Omission is intent (ADR 0022): the Entry records no Working branch, and
+    the agent at the head of its Run derives and declares one there."""
+    assert add(repo) == 0
 
-    assert "--branch" in capsys.readouterr().err
-    assert queue_of(home).all() == []
+    (queued,) = queue_of(home).all()
+    assert queued.working_branch is None
+    assert "None" not in capsys.readouterr().out
+
+
+def test_two_branchless_entries_for_the_same_repository_coexist(home, repo):
+    assert add(repo) == 0
+    assert add(repo) == 0
+
+    assert [held.working_branch for held in queue_of(home).all()] == [None, None]
 
 
 def test_adding_an_entry_on_a_branch_another_entry_claims_is_refused(home, repo, capsys):

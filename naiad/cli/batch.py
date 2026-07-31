@@ -26,6 +26,7 @@ from naiad.cli.enqueue import REFUSALS, Work, prepare
 from naiad.cli.refusals import BATCH_ENTRY
 from naiad.domain.entry import Entry
 from naiad.runtime.queue import Queue
+from naiad.runtime.run import RunStore
 
 # The table an Entry is declared in, plural and repeated the way a Workflow
 # declares its States.
@@ -111,6 +112,7 @@ def enqueue_batch(
     works: Sequence[Work],
     *,
     queue: Queue,
+    runs: RunStore,
     entry_ids: Sequence[str],
     created_at: str,
     source: str,
@@ -132,6 +134,7 @@ def enqueue_batch(
                 prepare(
                     work,
                     claimed=[*held, *prepared],
+                    runs=runs,
                     entry_id=entry_id,
                     created_at=created_at,
                     remedy=BATCH_ENTRY,
@@ -158,9 +161,9 @@ def _work(fields: dict[str, Any], *, position: int, reject: Reject, repo: Path) 
         workflow_path=_path(_required(fields, WORKFLOW, bad)),
         task=_required(fields, TASK, bad),
         target_repo=_path(named_repo) if named_repo else repo,
-        # Left to the refusals every entrance shares: an Entry with no Working
-        # branch is turned away with the same message a command line's is,
-        # rather than with one this file invented (ADR 0015).
+        # Optional, as `--branch` is: an Entry that names none starts a Run
+        # with no Working branch, and the agent at its head derives and
+        # declares one there (ADR 0022).
         working_branch=_text(fields, BRANCH, bad),
         pinned_base=_text(fields, BASE, bad),
         start_state=_text(fields, AT, bad),

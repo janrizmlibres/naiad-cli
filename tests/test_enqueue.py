@@ -12,7 +12,7 @@ import pytest
 
 from naiad.cli.batch import BatchError, enqueue_batch
 from naiad.cli.enqueue import BranchAlreadyClaimed, Work, enqueue
-from naiad.cli.refusals import ADD_COMMAND, MissingSubject, MissingWorkingBranch
+from naiad.cli.refusals import ADD_COMMAND, MissingSubject
 from naiad.domain.transitions import UnknownState
 from naiad.domain.workflow import WorkflowError
 from naiad.runtime.queue import Queue
@@ -68,10 +68,17 @@ def work(repo, **overrides):
     return Work(**fields)
 
 
+def runs_beside(queue):
+    """The Run store the Queue's claims resolve through, where the commands
+    keep it: beside the Queue under the same Naiad-owned home."""
+    return RunStore(queue.root.parent / "runs")
+
+
 def add(repo, queue, entry_id="20260722-120000-feature-431", **overrides):
     return enqueue(
         work(repo, **overrides),
         queue=queue,
+        runs=runs_beside(queue),
         entry_id=entry_id,
         created_at="2026-07-22T12:00:00Z",
         # Which vocabulary the refusals quote back. Every entrance enqueues, so
@@ -111,12 +118,23 @@ def test_adding_an_entry_supervises_nothing(repo, queue, tmp_path):
     assert RunStore(tmp_path / "naiad" / "runs").all() == []
 
 
-def test_an_entry_with_no_working_branch_is_refused(repo, queue):
-    with pytest.raises(MissingWorkingBranch) as caught:
-        add(repo, queue, working_branch=None)
+def test_an_entry_with_no_working_branch_joins_the_queue(repo, queue):
+    """Omission is intent (ADR 0022): the agent at the head of the Run derives
+    a name there, so work described without one is queued rather than turned
+    away."""
+    add(repo, queue, working_branch=None)
 
-    assert "--branch" in str(caught.value)
-    assert queue.all() == []
+    (queued,) = queue.all()
+    assert queued.working_branch is None
+
+
+def test_two_branchless_entries_for_the_same_repository_coexist(repo, queue):
+    """A branchless Entry claims no branch, so queueing a second is never
+    blocked by a name that does not exist yet."""
+    add(repo, queue, entry_id="one", working_branch=None)
+    add(repo, queue, entry_id="two", task="something else", working_branch=None)
+
+    assert [held.id for held in queue.all()] == ["one", "two"]
 
 
 def test_a_working_branch_already_claimed_in_the_same_repository_is_refused(repo, queue):
@@ -154,6 +172,46 @@ def test_the_same_repository_reached_by_another_path_still_claims_its_branch(rep
         add(repo, queue, entry_id="two", target_repo=repo / "." / ".." / repo.name)
 
     assert [held.id for held in queue.all()] == ["one"]
+
+
+def test_a_branch_a_branchless_entrys_run_has_recorded_is_claimed(repo, queue):
+    """An Entry with no recorded branch but a Run that holds one claims that
+    branch. The claim resolves through the Run rather than being copied back
+    onto the Entry (the `status_of` pattern, ADR 0013), so a Derived branch
+    cannot be collided with invisibly."""
+    branchless = add(repo, queue, entry_id="one", working_branch=None)
+    runs_beside(queue).create(
+        run_id="20260722-121500-feature",
+        workflow_path=repo / "workflow.toml",
+        task="add dark mode",
+        target_repo=repo,
+        created_at="2026-07-22T12:15:00Z",
+        working_branch="MC-AGENT-8546",
+    )
+    queue.attach_run(branchless, run_id="20260722-121500-feature")
+
+    with pytest.raises(BranchAlreadyClaimed) as caught:
+        add(repo, queue, entry_id="two", task="something else")
+
+    assert "MC-AGENT-8546" in str(caught.value)
+    assert "one" in str(caught.value)
+
+
+def test_a_branchless_entry_whose_run_holds_no_branch_yet_claims_nothing(repo, queue):
+    """Until the Run's branch is declared, there is no name to collide with."""
+    branchless = add(repo, queue, entry_id="one", working_branch=None)
+    runs_beside(queue).create(
+        run_id="20260722-121500-feature",
+        workflow_path=repo / "workflow.toml",
+        task="add dark mode",
+        target_repo=repo,
+        created_at="2026-07-22T12:15:00Z",
+    )
+    queue.attach_run(branchless, run_id="20260722-121500-feature")
+
+    add(repo, queue, entry_id="two", task="something else")
+
+    assert [held.id for held in queue.all()] == ["one", "two"]
 
 
 def test_a_branch_is_free_again_once_the_entry_claiming_it_is_removed(repo, queue):
@@ -214,6 +272,7 @@ def batch(queue, *works, source="batch.toml"):
     return enqueue_batch(
         works,
         queue=queue,
+        runs=runs_beside(queue),
         entry_ids=[f"entry-{position}" for position in range(1, len(works) + 1)],
         created_at="2026-07-22T12:00:00Z",
         source=source,
@@ -323,16 +382,16 @@ def test_a_batched_entry_claiming_a_branch_the_queue_already_holds_is_refused(re
     assert [held.id for held in queue.all()] == ["already-queued"]
 
 
-def test_a_batched_entry_with_no_working_branch_is_refused_in_the_files_own_terms(repo, queue):
-    """Every single-Entry refusal applies, but a reader of a file told to type
-    `--branch` would be told to do something the file has no room for."""
-    with pytest.raises(BatchError) as caught:
-        batch(queue, work(repo, working_branch=None))
+def test_named_and_branchless_entries_compose_in_one_file(repo, queue):
+    """Each behaviour applies per Entry: a batch mixing given branches and
+    omissions queues both as they were described."""
+    batch(
+        queue,
+        work(repo, task="named"),
+        work(repo, task="branchless", working_branch=None),
+    )
 
-    assert "entry 1" in str(caught.value)
-    assert "branch" in str(caught.value)
-    assert "--branch" not in str(caught.value)
-    assert queue.all() == []
+    assert [held.working_branch for held in queue.all()] == ["MC-AGENT-8546", None]
 
 
 def test_a_batched_entry_whose_start_state_needs_a_subject_and_has_none_is_refused(repo, queue):

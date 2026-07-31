@@ -34,9 +34,9 @@ def start_run(
     task: str,
     target_repo: Path,
     # Required rather than defaulted, so that a caller cannot forget it and
-    # quietly leave the Run without one. Still typed as optional, because what
-    # arrives is what an Entry was queued with and being handed nothing is the
-    # case the refusal exists for.
+    # quietly leave the Run without one. Optional in value: an Entry queued
+    # without a branch starts a Run with none, and the agent at its head
+    # derives and declares a name there (ADR 0022).
     working_branch: str | None,
     store: RunStore,
     sessions: Sessions,
@@ -50,7 +50,7 @@ def start_run(
     # absent for work that stands on nothing (ADR 0015).
     predecessor: str | None = None,
 ) -> Run:
-    # Every refusal first, so that a mistyped State or a missing branch costs
+    # Every refusal first, so that a mistyped State or a missing Subject costs
     # the operator nothing but the error message: no Run directory, no session.
     checked = check_start(
         workflow_path=workflow_path,

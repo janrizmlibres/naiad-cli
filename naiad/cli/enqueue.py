@@ -18,12 +18,13 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
-from naiad.cli.refusals import MissingSubject, MissingWorkingBranch, Remedy, check_start
+from naiad.cli.refusals import MissingSubject, Remedy, check_start
 from naiad.domain.entry import Entry
 from naiad.domain.transitions import UnknownState
 from naiad.domain.workflow import WorkflowError
 from naiad.runtime.home import real_path
-from naiad.runtime.queue import Queue
+from naiad.runtime.queue import Queue, branch_of
+from naiad.runtime.run import RunStore
 
 
 @dataclass(frozen=True)
@@ -35,9 +36,9 @@ class Work:
     two vocabularies, and giving that thing a name is what lets a batch reach
     the single-Entry path rather than a parallel one that could drift from it.
 
-    The Working branch is still optional here because it is refused rather than
-    defaulted (ADR 0015): work described without one exists long enough to be
-    turned away.
+    The Working branch is optional because omitting it is intent (ADR 0022):
+    work described without one starts a Run with none, and the agent at its
+    head derives and declares a name there.
     """
 
     workflow_path: Path
@@ -58,10 +59,11 @@ class BranchAlreadyClaimed(Exception):
     Entry's work stacks into the first's invisibly — and the symptom is a pull
     request carrying somebody else's commits.
 
-    A claim is a fact recorded on the Entry rather than a question about its
-    Run, so every Entry in the Queue holds its branch until it is removed. That
-    keeps the refusal from depending on what became of a Run (ADR 0013), and
-    removing the Entry is what frees the branch.
+    A claim is usually a fact recorded on the Entry, held until the Entry is
+    removed — the refusal does not depend on what became of a Run (ADR 0013).
+    An Entry queued without a branch is the one exception: its record carries
+    none, so its claim is read through its Run, where the agent declares the
+    name it derived (ADR 0022). Until then it claims nothing.
     """
 
 
@@ -72,7 +74,6 @@ class BranchAlreadyClaimed(Exception):
 REFUSALS = (
     BranchAlreadyClaimed,
     MissingSubject,
-    MissingWorkingBranch,
     UnknownState,
     WorkflowError,
 )
@@ -82,6 +83,9 @@ def enqueue(
     work: Work,
     *,
     queue: Queue,
+    # Where a branchless Entry's claim is read from: its Run holds the branch
+    # the agent declared, and the Entry's own record stays as described.
+    runs: RunStore,
     entry_id: str,
     created_at: str,
     # Which remedy a refusal quotes back. Required rather than defaulted,
@@ -100,6 +104,7 @@ def enqueue(
         prepare(
             work,
             claimed=queue.all(),
+            runs=runs,
             entry_id=entry_id,
             created_at=created_at,
             remedy=remedy,
@@ -114,6 +119,7 @@ def prepare(
     # and — for a batch validated whole before any of it is written — the
     # Entries the same file has already declared.
     claimed: Sequence[Entry],
+    runs: RunStore,
     entry_id: str,
     created_at: str,
     remedy: Remedy,
@@ -136,7 +142,7 @@ def prepare(
     # `../repo` reaching one checkout must not read as two.
     target_repo = real_path(work.target_repo)
     _refuse_a_claimed_branch(
-        claimed, target_repo=target_repo, working_branch=checked.working_branch
+        claimed, runs=runs, target_repo=target_repo, working_branch=checked.working_branch
     )
 
     return Entry(
@@ -154,13 +160,25 @@ def prepare(
 
 
 def _refuse_a_claimed_branch(
-    claimed: Sequence[Entry], *, target_repo: Path, working_branch: str
+    claimed: Sequence[Entry],
+    *,
+    runs: RunStore,
+    target_repo: Path,
+    working_branch: str | None,
 ) -> None:
     """Checked per repository, because a branch name from another repository is
     not a fact about this one: two projects may each have a `main` and each
-    have an Entry working on it."""
+    have an Entry working on it.
+
+    Work with no Working branch claims none, so nothing is checked for it and
+    two branchless Entries for one repository coexist: each is claim-checked at
+    its own declaration, against the claims existing then (ADR 0022). A held
+    Entry's claim is resolved through its Run when its own record carries no
+    branch, so a name an agent derived is found here too."""
+    if working_branch is None:
+        return
     for held in claimed:
-        if held.target_repo == target_repo and held.working_branch == working_branch:
+        if held.target_repo == target_repo and branch_of(held, runs) == working_branch:
             raise BranchAlreadyClaimed(
                 f"entry '{held.id}' already works on '{working_branch}' in {target_repo}; "
                 f"two entries on one branch would stack one's work into the other's, "
