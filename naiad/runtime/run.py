@@ -35,9 +35,9 @@ class Run:
     # them and a Cleared State still knows its branch. Opaque strings: Naiad
     # runs no git and reads neither of them (ADR 0015).
     #
-    # A Working branch is required of anything that starts a Run, and refused
-    # before the Run exists. It is optional here because a Run written before
-    # the field existed has none, and because a store is a store.
+    # A Working branch is given or derived, never invented by Naiad (ADR
+    # 0022): a Run created from a branchless Entry starts with none, and the
+    # agent at its head derives a name and declares it with `naiad branch`.
     working_branch: str | None = None
     predecessor: str | None = None
     # How this Run resolves its next State. Options of the Run rather than of

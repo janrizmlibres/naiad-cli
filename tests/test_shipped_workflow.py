@@ -166,7 +166,7 @@ def only_sentence(prompt, phrase):
     return matching[0]
 
 
-def delivered(workflow, state_name, subject=SUBJECT, predecessor=PREDECESSOR):
+def delivered(workflow, state_name, subject=SUBJECT, branch=BRANCH, predecessor=PREDECESSOR):
     """A State's Prompt as the agent actually reads it, with the successor the
     Workflow resolves interpolated — which is what Naiad sends (naiad.runtime.loop).
 
@@ -181,7 +181,7 @@ def delivered(workflow, state_name, subject=SUBJECT, predecessor=PREDECESSOR):
         task=TASK,
         next_states=next_states(workflow, state_name),
         subject=subject,
-        branch=BRANCH,
+        branch=branch,
         predecessor=predecessor,
     )
 
@@ -345,6 +345,67 @@ def test_each_branch_head_chooses_the_base_before_it_creates_the_branch(workflow
 
     assert f"git checkout -b {BRANCH} <the branch you chose>" in prompt
     assert "choose what to base it on before you create it" in prompt
+
+
+@pytest.mark.parametrize("head", BRANCH_HEADS)
+def test_each_branch_head_derives_a_name_when_the_branch_line_is_empty(workflow, head):
+    """A branchless Entry starts a Run whose Working branch line renders empty,
+    and the empty line is the Prompt's cue (ADR 0022): the rule lives in prose
+    the Workflow owns, keyed to the one thing a Cleared context can still see.
+    The derivation looks at the repository's own conventions rather than
+    inventing a scheme, because the agent is standing in the repository with the
+    recent branch names and the pull request list in front of it — which is the
+    whole reason the name is derived there and not at the terminal."""
+    prompt = delivered(workflow, head, branch=None)
+
+    assert "derive" in only_sentence(prompt, "is empty")
+    assert "conventions" in only_sentence(prompt, "is empty")
+
+
+@pytest.mark.parametrize("head", BRANCH_HEADS)
+def test_each_branch_head_names_the_fallback_prefixes(workflow, head):
+    """A repository with no discernible convention must not leave the agent
+    inventing a scheme from nothing, so the fallback is stated: a conventional
+    prefix plus a slug of the task. All three prefixes in one sentence, so the
+    fallback cannot half-apply."""
+    fallback = only_sentence(delivered(workflow, head, branch=None), "feat/")
+
+    assert "fix/" in fallback
+    assert "chore/" in fallback
+    assert "slug" in fallback
+
+
+@pytest.mark.parametrize("head", BRANCH_HEADS)
+def test_each_branch_head_declares_the_derived_branch_in_the_same_turn(workflow, head):
+    """Naiad carries opaque branch names and reads no git (ADR 0015), so a
+    derived name it is never told is a Predecessor the next Entry cannot
+    resolve. The declaration command and its moment — the same turn the branch
+    is created — are in the Prompt, because forgetting is refused only one
+    State later and the cheap fix is to never forget."""
+    declaring = only_sentence(delivered(workflow, head, branch=None), "naiad branch")
+
+    assert "same turn" in declaring
+
+
+def test_only_the_branch_heads_carry_the_derive_rule(workflow):
+    """The rule rides the same two Prompts that prepare the branch, and for the
+    same reason there is no third copy anywhere else: every State after a head
+    inherits the checkout, and the classifying State writes nothing."""
+    naming = [name for name in DELIVERING if "naiad branch" in delivered(workflow, name)]
+
+    assert sorted(naming) == sorted(BRANCH_HEADS)
+
+
+@pytest.mark.parametrize("head", BRANCH_HEADS)
+def test_a_given_branch_leaves_the_derive_rule_dormant(workflow, head):
+    """Given, a branch is used verbatim and never second-guessed (ADR 0022):
+    the derive rule is conditioned on the empty line alone, so a filled line
+    reads past it. What is assertable in prose is that the condition names the
+    line's emptiness and nothing else triggers a derivation."""
+    prompt = delivered(workflow, head)
+
+    assert BRANCH in prompt
+    assert "derive" in only_sentence(prompt, "is empty")
 
 
 @pytest.mark.parametrize("head", BRANCH_HEADS)

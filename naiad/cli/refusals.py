@@ -7,7 +7,7 @@ reason: whoever asked is standing right there and pays the error message only.
 An Entry makes them when it is queued rather than when it starts, so that a
 night's backlog cannot fail at three in the morning on a typo.
 
-One copy of these four rather than one per caller, so that neither can quietly
+One copy of these checks rather than one per caller, so that neither can quietly
 stop making one of them. Not every refusal is here: the Queue's own —
 a Working branch another Entry has claimed — needs the Queue's contents and
 lives with the enqueue, and the announce command's missing-Subject check is a

@@ -104,6 +104,14 @@ Say in a sentence which it is and why, then announce grill or diagnose. Do no ot
 # reversed, it answers every question backwards, and the symptom is a wrong
 # stack read at review time rather than a failure during the Run.
 #
+# When the Entry named no branch, the Working branch line renders empty, and
+# the empty line is the cue (ADR 0022): the agent derives a name from the
+# repository's own conventions, falls back to conventional prefixes where none
+# are discernible, and declares the name with `naiad branch` in the same turn
+# it creates the branch — Naiad carries opaque names it is told and invents
+# none itself (ADR 0015), so a name never declared is a Predecessor the next
+# Entry cannot resolve.
+#
 # This is the one Prompt that writes its successors out rather than
 # interpolating {next_state}, for the same reason the implement loop writes its
 # own name: the placeholder renders every candidate as one joined phrase, which
@@ -122,6 +130,8 @@ Before you change anything, put this Run on its own branch.
 
 Working branch: {branch}
 Predecessor: {predecessor}
+
+If the Working branch line above is empty, none was given and the name is yours to derive: read this repository's own conventions — the recent branch names, the pull request list, the team's prefixes — and derive a name the team would have chosen, falling back to `feat/`, `fix/` or `chore/` plus a short slug of the task where no convention is discernible. Use that name wherever these instructions say the Working branch, and in the same turn you create the branch, declare it to Naiad — `naiad branch <name>` — which cannot know a name it was never told.
 
 If the Working branch already exists, check it out as it is and leave it alone — a resumed or re-entered Run finds the branch waiting for it, which is ordinary rather than a failure.
 
@@ -174,6 +184,8 @@ Before you change anything, put this Run on its own branch.
 
 Working branch: {branch}
 Predecessor: {predecessor}
+
+If the Working branch line above is empty, none was given and the name is yours to derive: read this repository's own conventions — the recent branch names, the pull request list, the team's prefixes — and derive a name the team would have chosen, falling back to `feat/`, `fix/` or `chore/` plus a short slug of the task where no convention is discernible. Use that name wherever these instructions say the Working branch, and in the same turn you create the branch, declare it to Naiad — `naiad branch <name>` — which cannot know a name it was never told.
 
 If the Working branch already exists, check it out as it is and leave it alone — a resumed or re-entered Run finds the branch waiting for it, which is ordinary rather than a failure.
 

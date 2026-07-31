@@ -7,7 +7,7 @@ The checks are made again here even so. Everything a Run can be refused for was
 already refused at enqueue — that is where an operator who mistyped pays the
 error message, standing at the terminal rather than at three in the morning —
 but an Entry queued last night is started now, and the Workflow file it names
-may have been edited in between. One copy of the four in naiad.cli.refusals, so
+may have been edited in between. One copy of the checks in naiad.cli.refusals, so
 that the two moments cannot come to disagree about what is startable.
 """
 
