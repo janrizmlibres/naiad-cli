@@ -122,8 +122,32 @@ def test_an_answer_wins_over_an_escalation_in_the_same_reply():
         f"{ANSWER_MARKER} Option C, TTL 15 minutes\n"
         f"{ESCALATE_MARKER} Nothing. Both halves are settled in-repo."
     )
+    outcome = parse_outcome(reply)
 
-    assert parse_outcome(reply) == Answered(text="Option C, TTL 15 minutes")
+    assert isinstance(outcome, Answered)
+    assert outcome.text.startswith("Option C, TTL 15 minutes")
+
+
+def test_an_escalation_beside_an_answer_is_carried_into_the_answer():
+    """Not every escalation beside an answer is redundant. A real one read
+    'Option A ... run a pre-flight count' and escalated *conditionally* — stop
+    and wake a human only if that count comes back non-zero, because choosing
+    between conflicting PHI rows is a compliance call. The answer carried the
+    instruction and the escalation carried the consequence, so dropping the
+    escalation would have sent the agent to run a check with no reason to stop.
+
+    Carried into the answer rather than escalated: the Run keeps moving, and a
+    condition the agent can only evaluate by working is one it should be told
+    about rather than one the operator should be woken for."""
+    reply = (
+        f"{ANSWER_MARKER} Option A, and run a pre-flight count\n"
+        f"{ESCALATE_MARKER} Only if that count is non-zero: it is a HIPAA call."
+    )
+    outcome = parse_outcome(reply)
+
+    assert isinstance(outcome, Answered)
+    assert "Option A, and run a pre-flight count" in outcome.text
+    assert "Only if that count is non-zero: it is a HIPAA call." in outcome.text
 
 
 def test_a_reply_with_no_marked_line_escalates_rather_than_guessing():

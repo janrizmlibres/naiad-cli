@@ -30,6 +30,11 @@ from naiad.domain.question import Question
 ANSWER_MARKER = "ANSWER:"
 ESCALATE_MARKER = "ESCALATE:"
 
+# How an escalation found beside an answer reaches the agent. Attributed rather
+# than run on to the answer, so the agent can weigh a caveat the Answerer was
+# unsure enough to mark for a human differently from the answer itself.
+CAVEAT_PREFIX = "The Answerer also flagged, for a human: "
+
 # How long the Answerer may take over one Question. A bound rather than none
 # because a consultation that never returns stalls the whole Run in silence,
 # and an operator woken by an Escalation can act where one woken by nothing
@@ -153,20 +158,34 @@ def parse_outcome(reply: str) -> Answered | Escalated:
     stalls the Run in silence until a human notices, whereas an answer the
     agent doubts is one it can argue back against.
 
+    The escalation is carried into the answer rather than dropped, because it
+    is not always redundant. An Answerer answered 'Option A, and run a
+    pre-flight count' and escalated *conditionally* — wake a human only if that
+    count comes back non-zero. The answer held the instruction and the
+    escalation held the consequence, so keeping only the answer would have sent
+    the agent to run a check with no reason to stop. A condition the agent can
+    evaluate only by working is one to tell it about, not one to wake the
+    operator for: if it comes true, the agent raises it as a Question of its own.
+
     A reply with no marked line at all is an Escalation rather than an error.
     Naiad cannot tell an unparseable answer from a wrong one, and sending
     something it does not understand into the session is worse than waking the
     operator — Escalation is already the answer to 'nobody here can settle this'.
     """
+    answer: str | None = None
     escalation: Escalated | None = None
     for line in reversed(reply.splitlines()):
         line = line.strip()
-        if line.startswith(ANSWER_MARKER):
-            answer = line[len(ANSWER_MARKER) :].strip()
-            if answer:
-                return Answered(text=answer)
+        if line.startswith(ANSWER_MARKER) and answer is None:
+            candidate = line[len(ANSWER_MARKER) :].strip()
+            if candidate:
+                answer = candidate
         if line.startswith(ESCALATE_MARKER) and escalation is None:
             escalation = Escalated(reason=line[len(ESCALATE_MARKER) :].strip() or "no reason given")
+    if answer is not None:
+        if escalation is not None:
+            return Answered(text=f"{answer}\n\n{CAVEAT_PREFIX}{escalation.reason}")
+        return Answered(text=answer)
     if escalation is not None:
         return escalation
     return Escalated(reason="the Answerer's reply did not end with an answer or an escalation")
@@ -174,6 +193,7 @@ def parse_outcome(reply: str) -> Answered | Escalated:
 
 __all__ = [
     "ANSWER_MARKER",
+    "CAVEAT_PREFIX",
     "CONSULTATION_TIMEOUT_SECONDS",
     "ESCALATE_MARKER",
     "Answered",
