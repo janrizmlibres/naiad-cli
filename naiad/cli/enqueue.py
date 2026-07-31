@@ -1,11 +1,12 @@
 """Adding one Entry to the Queue.
 
-Never supervises. This is the command an agent inside a session uses, so it
-records the Entry and returns; a tool call that became a process blocking for
-hours is the failure the Queue exists to avoid.
+Supervises nothing itself. `naiad queue add` returns here and stops, which is
+what an agent inside a session needs — a tool call that became a process
+blocking for hours is the failure the Queue exists to avoid — and `naiad run`
+goes on to adopt or become a Supervisor afterwards (ADR 0014).
 
 The Entry is validated before it exists, so that everything which used to fail
-at kickoff fails while the operator is still standing at the terminal.
+at kickoff fails while whoever typed it is still standing at the terminal.
 """
 
 from __future__ import annotations
@@ -16,9 +17,6 @@ from naiad.cli.refusals import check_start
 from naiad.domain.entry import Entry
 from naiad.runtime.home import real_path
 from naiad.runtime.queue import Queue
-
-# The line an operator can retype, quoted back at them by every refusal below.
-COMMAND = "naiad queue add <workflow> <task>"
 
 
 class BranchAlreadyClaimed(Exception):
@@ -47,6 +45,10 @@ def enqueue(
     queue: Queue,
     entry_id: str,
     created_at: str,
+    # Which line a refusal quotes back. Required rather than defaulted, because
+    # both entrances land here and an operator told to retype the other command
+    # would be told to do something they did not ask for.
+    how: str,
     pinned_base: str | None = None,
     start_state: str | None = None,
     subject: str | None = None,
@@ -57,7 +59,7 @@ def enqueue(
         start_state=start_state,
         subject=subject,
         working_branch=working_branch,
-        how=COMMAND,
+        how=how,
     )
     # Settled to one spelling before anything compares it, as a Run's target
     # repository already is: the branch claim is per repository, so `.` and

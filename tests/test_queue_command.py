@@ -9,6 +9,7 @@ import json
 
 import pytest
 
+from naiad.adapters.lock import SupervisorLock
 from naiad.cli.main import main
 from naiad.domain.decide import Finish
 from naiad.domain.entry import Entry
@@ -291,6 +292,24 @@ def test_watching_the_queue_starts_a_run_carrying_everything_the_entry_held(
     assert run.start_state == "implement"
     assert run.skip_gates is True
     assert no_tmux.spawned
+
+
+def test_a_second_supervisor_is_refused(home, monkeypatch, capsys):
+    """Two Supervisors each take the first waiting Entry and put two agents in
+    one working tree, which is the single thing one-at-a-time exists to
+    prevent. Refused rather than queued behind the first, since a command that
+    silently waited for hours would look like one that had started."""
+
+    def fake(**_arguments):
+        raise AssertionError("a second supervisor was started")
+
+    monkeypatch.setattr("naiad.cli.main.supervise_queue", fake)
+
+    with SupervisorLock(home / "supervisor.lock").taken() as mine:
+        assert mine
+        assert main(["queue", "watch"]) == 2
+
+    assert "already running" in capsys.readouterr().err
 
 
 def test_interrupting_the_supervisor_leaves_nothing_to_clean_up(home, monkeypatch):

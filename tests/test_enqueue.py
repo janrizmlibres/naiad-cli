@@ -9,7 +9,7 @@ in the morning.
 import pytest
 
 from naiad.cli.enqueue import BranchAlreadyClaimed, enqueue
-from naiad.cli.refusals import MissingSubject, MissingWorkingBranch
+from naiad.cli.refusals import ADD_COMMAND, MissingSubject, MissingWorkingBranch
 from naiad.domain.transitions import UnknownState
 from naiad.domain.workflow import WorkflowError
 from naiad.runtime.queue import Queue
@@ -63,6 +63,9 @@ def add(repo, queue, **overrides):
         queue=queue,
         entry_id="20260722-120000-feature-431",
         created_at="2026-07-22T12:00:00Z",
+        # Which line the refusals quote back. Both entrances enqueue, so there
+        # is no default to fall back on; these tests are the queueing one's.
+        how=ADD_COMMAND,
     )
     fields.update(overrides)
     return enqueue(**fields)

@@ -1,9 +1,13 @@
 """The entry point, for the operator and for the agent.
 
-Builds the real dependencies and hands them to the kickoff or to the agent's
-command. Everything identifying a Run — its id, its Claude session id, the
-moment it started — is made here and passed in, so the code under it stays
-testable over plain data.
+Builds the real dependencies and hands them to the Queue, to the Supervisor's
+loop or to the agent's command. Everything identifying a Run — its id, its
+Claude session id, the moment it started — is made here and passed in, so the
+code under it stays testable over plain data.
+
+Starting a Run goes through the Queue and nowhere else (ADR 0014): `naiad run`
+adds an Entry and then adopts or becomes the Supervisor, and nothing here opens
+a session except by taking an Entry off the Queue.
 """
 
 from __future__ import annotations
@@ -19,6 +23,7 @@ from pathlib import Path
 
 from naiad.adapters.answerer import HeadlessAnswerer
 from naiad.adapters.executable import naiad_command
+from naiad.adapters.lock import SupervisorLock
 from naiad.adapters.notify import DesktopNotifications
 from naiad.adapters.tmux import TmuxError, TmuxSessions
 from naiad.cli.announce import AnnounceError, announce_state
@@ -26,7 +31,12 @@ from naiad.cli.ask import AskError, ask_question
 from naiad.cli.enqueue import BranchAlreadyClaimed, enqueue
 from naiad.cli.kickoff import start_run
 from naiad.cli.protocol import injection_for
-from naiad.cli.refusals import MissingSubject, MissingWorkingBranch
+from naiad.cli.refusals import (
+    ADD_COMMAND,
+    RUN_COMMAND,
+    MissingSubject,
+    MissingWorkingBranch,
+)
 from naiad.cli.supervisor import supervise_queue
 from naiad.cli.watch import watch
 from naiad.domain.entry import Entry
@@ -34,7 +44,12 @@ from naiad.domain.transitions import UnknownState
 from naiad.domain.workflow import WorkflowError, load_workflow
 from naiad.hooks.install import DEFAULT_SETTINGS_PATH, install_hooks
 from naiad.runtime.announcements import Announcements
-from naiad.runtime.home import StorageError, default_queue_root, default_runs_root
+from naiad.runtime.home import (
+    StorageError,
+    default_lock_path,
+    default_queue_root,
+    default_runs_root,
+)
 from naiad.runtime.queue import Queue, status_of
 from naiad.runtime.records import Turns
 from naiad.runtime.resolve import NoRunError, RunResolver
@@ -62,9 +77,11 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="naiad")
     subcommands = parser.add_subparsers(dest="command", required=True)
 
-    run = subcommands.add_parser("run", help="start a Run of a Workflow against a task")
+    run = subcommands.add_parser(
+        "run", help="queue a Workflow against a task, and supervise if nothing else is"
+    )
     _describe_the_work(run)
-    run.set_defaults(handler=_start)
+    run.set_defaults(handler=_run)
 
     queue = subcommands.add_parser("queue", help="the backlog of Entries waiting to run")
     queue_commands = queue.add_subparsers(dest="queue_command", required=True)
@@ -265,6 +282,19 @@ def _install_hooks(arguments: argparse.Namespace) -> int:
 
 
 def _watch(arguments: argparse.Namespace) -> int:
+    """Drive one named Run — and not while a Supervisor is driving the Queue.
+
+    The Queue is sequential, so a held lock means the Supervisor is driving the
+    only live Run, and a second ticker on one Run delivers everything twice.
+    """
+    if SupervisorLock(default_lock_path()).held():
+        print(
+            "naiad: a supervisor is already driving the queue's live run; "
+            "a second watch would deliver everything twice",
+            file=sys.stderr,
+        )
+        return 2
+
     try:
         run = _named_run(arguments.run_id) if arguments.run_id else _current_run()
         _drive(run)
@@ -285,7 +315,10 @@ def _drive(run: Run) -> None:
     One place, so that the Run an operator named and the Run the Supervisor
     took off the Queue are driven by the same loop with the same dependencies.
     """
-    print(f"watching {run.id} ({run.tmux_session})")
+    # The line the operator needs to look in on the work, printed where the Run
+    # is driven rather than where it was queued: an Entry queued tonight is
+    # started hours later, and the session it names does not exist until then.
+    print(f"watching {run.id}   (tmux attach -t {run.tmux_session})")
     watch(
         run=run,
         workflow=load_workflow(run.workflow_path),
@@ -321,35 +354,31 @@ def _attached_run() -> Run | None:
     return RunResolver(store, os.environ).resolve(tmux_pane=os.environ.get("TMUX_PANE"))
 
 
-def _start(arguments: argparse.Namespace) -> int:
-    workflow_path = arguments.workflow.expanduser().resolve()
-    target_repo = (arguments.repo or Path.cwd()).expanduser().resolve()
-    started = datetime.now(timezone.utc)
+def _run(arguments: argparse.Namespace) -> int:
+    """The one entrance to starting Runs (ADR 0014): add one Entry, then adopt
+    or become.
 
-    try:
-        run = start_run(
-            workflow_path=workflow_path,
-            task=arguments.task,
-            target_repo=target_repo,
-            working_branch=arguments.branch,
-            predecessor=arguments.base,
-            store=RunStore(default_runs_root()),
-            sessions=TmuxSessions(),
-            run_id=_run_id(started, workflow_path),
-            claude_session_id=str(uuid.uuid4()),
-            created_at=_timestamp(started),
-            start_state=arguments.start_state,
-            skip_gates=arguments.skip_gates,
-            subject=arguments.subject,
-        )
-    except FAILURES as error:
-        print(f"naiad: {error}", file=sys.stderr)
+    It spawns no session of its own. A second entrance would bypass the guard
+    that matters most — nothing would stop an immediate Run putting a second
+    agent into the working tree a Supervisor is already driving a Run in — and
+    an invariant with two places to break it is a convention.
+
+    So the Entry is appended rather than jumped ahead: the command stopped
+    meaning 'start this now' the moment a Queue existed, and where the Entry
+    lands is the honest place for that to show.
+    """
+    queued = _queued(arguments, how=RUN_COMMAND)
+    if queued is None:
         return 2
 
-    print(f"run {run.id}")
-    print(f"  session  {run.tmux_session}   (tmux attach -t {run.tmux_session})")
-    print(f"  metadata {run.metadata_path}")
-    return 0
+    with SupervisorLock(default_lock_path()).taken() as mine:
+        if not mine:
+            # Fire-and-forget. Adding work never blocks on work already
+            # running, and the Supervisor holding the lock takes this Entry in
+            # its turn.
+            print("a supervisor is already running; it will take this in turn")
+            return 0
+        return _supervise(following=False)
 
 
 def _queue_add(arguments: argparse.Namespace) -> int:
@@ -357,6 +386,17 @@ def _queue_add(arguments: argparse.Namespace) -> int:
     no watching — because this is the command an agent inside a session uses,
     and a tool call that became a process blocking for hours is the failure the
     Queue exists to avoid."""
+    return 0 if _queued(arguments, how=ADD_COMMAND) is not None else 2
+
+
+def _queued(arguments: argparse.Namespace, *, how: str) -> Entry | None:
+    """One Entry from what was typed, or nothing when it was refused.
+
+    Shared by both entrances so that neither can queue something the other
+    would have refused, and so that an Entry means the same thing whichever
+    command made it. `how` is the command the operator actually typed, quoted
+    back by every refusal so the line they read is one they can retype.
+    """
     workflow_path = arguments.workflow.expanduser().resolve()
     target_repo = (arguments.repo or Path.cwd()).expanduser().resolve()
     added = datetime.now(timezone.utc)
@@ -374,14 +414,15 @@ def _queue_add(arguments: argparse.Namespace) -> int:
             start_state=arguments.start_state,
             skip_gates=arguments.skip_gates,
             subject=arguments.subject,
+            how=how,
         )
     except FAILURES as error:
         print(f"naiad: {error}", file=sys.stderr)
-        return 2
+        return None
 
     print(f"queued {entry.id}")
     print(f"  branch {entry.working_branch}   in {entry.target_repo}")
-    return 0
+    return entry
 
 
 def _queue_list(arguments: argparse.Namespace) -> int:
@@ -435,6 +476,28 @@ def _queue_watch(arguments: argparse.Namespace) -> int:
     """Supervise: take the Queue in order, and keep following it once it is
     empty so that Entries added later are picked up.
 
+    A second Supervisor is refused rather than queued behind the first, because
+    two of them each take the first waiting Entry and put two agents in one
+    working tree — which is the single thing one-at-a-time exists to prevent.
+    """
+    with SupervisorLock(default_lock_path()).taken() as mine:
+        if not mine:
+            print(
+                "naiad: a supervisor is already running, and only one may drive "
+                "the queue; queue work with `naiad run` or `naiad queue add` instead",
+                file=sys.stderr,
+            )
+            return 2
+        return _supervise(following=True)
+
+
+def _supervise(*, following: bool) -> int:
+    """Drive the Queue, with the lock already in hand.
+
+    One loop for both entrances, differing only in what it does with nothing to
+    do: `naiad run` drains and gives the operator their prompt back, while
+    `naiad queue watch` follows so that Entries added later are picked up.
+
     It holds no rules of its own. Which Entry is next, whether it is started or
     resumed, and what its work stands on are naiad.domain.supervise's to say;
     this builds the real dependencies and hands them over.
@@ -445,7 +508,7 @@ def _queue_watch(arguments: argparse.Namespace) -> int:
             runs=RunStore(default_runs_root()),
             start=_start_entry,
             drive=_drive,
-            following=True,
+            following=following,
         )
     except FAILURES as error:
         print(f"naiad: {error}", file=sys.stderr)
@@ -454,6 +517,7 @@ def _queue_watch(arguments: argparse.Namespace) -> int:
         # The operator stopping the night. The Queue is on disk and every
         # session is left alive, so there is nothing to clean up — and a
         # Supervisor started again picks up the Entry it was in the middle of.
+        # The lock goes with the process, so nothing is left to reconcile.
         pass
     return 0
 

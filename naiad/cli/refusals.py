@@ -24,6 +24,12 @@ from naiad.domain.prompt import SUBJECT_PLACEHOLDER
 from naiad.domain.transitions import start_state as resolve_start_state
 from naiad.domain.workflow import State, Workflow, load_workflow
 
+# The lines a refusal quotes back, so that whoever reads one is told something
+# they can retype rather than a rule they have to translate. They live beside
+# the checks rather than with either command, because the checks are what
+# quote them and a caller's only job is to name the line its reader typed.
+RUN_COMMAND = "naiad run <workflow> <task>"
+ADD_COMMAND = "naiad queue add <workflow> <task>"
 
 
 @dataclass(frozen=True)
@@ -96,6 +102,8 @@ def check_start(
 
 
 __all__ = [
+    "ADD_COMMAND",
+    "RUN_COMMAND",
     "MissingSubject",
     "MissingWorkingBranch",
     "Start",

@@ -43,6 +43,16 @@ def default_queue_root() -> Path:
     return naiad_home() / "queue"
 
 
+def default_lock_path() -> Path:
+    """What the one Supervisor holds while it drives the Queue.
+
+    Under the same home as the Queue it guards, so that an operator who moves
+    the home moves the lock with it — two homes are two Queues, and a lock left
+    behind in the first would refuse a Supervisor for the second.
+    """
+    return naiad_home() / "supervisor.lock"
+
+
 def refuse_inside_repository(root: Path, target_repo: Path, *, what: str) -> None:
     """Nothing Naiad owns may lie inside a target repository, so that what
     Naiad writes cannot turn up in the pull request the work produces and the
@@ -71,6 +81,7 @@ def real_path(path: Path) -> Path:
 __all__ = [
     "HOME_VARIABLE",
     "StorageError",
+    "default_lock_path",
     "default_queue_root",
     "default_runs_root",
     "naiad_home",

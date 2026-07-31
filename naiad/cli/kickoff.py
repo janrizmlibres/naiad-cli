@@ -1,10 +1,14 @@
 """Starting a Run: read the Workflow, open a session, deliver the first Prompt.
 
-The order matters. Everything starting a Run can be refused for is refused
-before the Run directory or the session exists, so an operator who mistyped
-pays the error message only. Those four checks live in naiad.cli.refusals,
-which the Queue's enqueue makes too — one copy, so that neither can quietly
-stop making one of them.
+Reached only by the Supervisor taking an Entry off the Queue, since that is the
+one entrance to starting Runs (ADR 0014).
+
+The checks are made again here even so. Everything a Run can be refused for was
+already refused at enqueue — that is where an operator who mistyped pays the
+error message, standing at the terminal rather than at three in the morning —
+but an Entry queued last night is started now, and the Workflow file it names
+may have been edited in between. One copy of the four in naiad.cli.refusals, so
+that the two moments cannot come to disagree about what is startable.
 """
 
 from __future__ import annotations
@@ -12,15 +16,12 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Protocol
 
-from naiad.cli.refusals import check_start
+from naiad.cli.refusals import ADD_COMMAND, check_start
 from naiad.domain.prompt import render_prompt
 from naiad.domain.session import SessionSpec, session_name
 from naiad.domain.transitions import next_states
 from naiad.runtime.resolve import RUN_ID_VARIABLE
 from naiad.runtime.run import Run, RunStore
-
-# The line an operator can retype, quoted back at them by every refusal.
-COMMAND = "naiad run <workflow> <task>"
 
 
 class Sessions(Protocol):
@@ -32,8 +33,10 @@ def start_run(
     workflow_path: Path,
     task: str,
     target_repo: Path,
-    # Required rather than defaulted, so that a second entrance to starting a
-    # Run cannot forget it and quietly leave the Run without one.
+    # Required rather than defaulted, so that a caller cannot forget it and
+    # quietly leave the Run without one. Still typed as optional, because what
+    # arrives is what an Entry was queued with and being handed nothing is the
+    # case the refusal exists for.
     working_branch: str | None,
     store: RunStore,
     sessions: Sessions,
@@ -54,7 +57,11 @@ def start_run(
         start_state=start_state,
         subject=subject,
         working_branch=working_branch,
-        how=COMMAND,
+        # Work refused here already has an Entry, so the line quoted back is the
+        # one that queues it again — once the stale Entry has been removed —
+        # rather than `naiad run`, which would queue a second Entry for work the
+        # Queue is already holding and start supervising on top of it.
+        how=ADD_COMMAND,
     )
     first = checked.state
     successors = next_states(checked.workflow, first.name, skip_gates=skip_gates)
