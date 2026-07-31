@@ -32,6 +32,7 @@ from naiad.adapters.tmux import TmuxError, TmuxSessions
 from naiad.cli.announce import AnnounceError, announce_state
 from naiad.cli.ask import AskError, ask_question
 from naiad.cli.batch import BatchError, enqueue_batch, load_batch
+from naiad.cli.branch import BranchError, declare_branch
 from naiad.cli.enqueue import REFUSALS, Work, enqueue
 from naiad.cli.kickoff import start_run
 from naiad.cli.protocol import injection_for
@@ -62,6 +63,7 @@ FAILURES = (
     AnnounceError,
     AskError,
     BatchError,
+    BranchError,
     WaitError,
     NoRunError,
     StorageError,
@@ -146,6 +148,12 @@ def main(argv: list[str] | None = None) -> int:
         help="how long the wait may run before you are reminded (default: ten minutes)",
     )
     wait_parser.set_defaults(handler=_wait)
+
+    branch_parser = subcommands.add_parser(
+        "branch", help="declare the working branch you created for this run"
+    )
+    branch_parser.add_argument("name", help="the branch's name, exactly as you created it")
+    branch_parser.set_defaults(handler=_branch)
 
     stopped = subcommands.add_parser("stopped", help="record that a turn ended (Stop hook)")
     stopped.set_defaults(handler=_stopped)
@@ -289,6 +297,23 @@ def _wait(arguments: argparse.Namespace) -> int:
         f'waiting on "{arguments.reason}" for {int(granted)}s '
         f"({int(remaining)}s of wait budget left); end your turn"
     )
+    return 0
+
+
+def _branch(arguments: argparse.Namespace) -> int:
+    try:
+        run = _current_run()
+        declare_branch(
+            arguments.name,
+            run=run,
+            queue=Queue(default_queue_root()),
+            runs=RunStore(default_runs_root()),
+        )
+    except FAILURES as error:
+        print(f"naiad: {error}", file=sys.stderr)
+        return 2
+
+    print(f"declared working branch '{arguments.name}'; this run's work belongs on it")
     return 0
 
 

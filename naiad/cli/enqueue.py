@@ -180,10 +180,37 @@ def _refuse_a_claimed_branch(
     for held in claimed:
         if held.target_repo == target_repo and branch_of(held, runs) == working_branch:
             raise BranchAlreadyClaimed(
-                f"entry '{held.id}' already works on '{working_branch}' in {target_repo}; "
-                f"two entries on one branch would stack one's work into the other's, "
-                f"so name another branch or remove that entry"
+                claimed_branch_message(
+                    held,
+                    working_branch=working_branch,
+                    target_repo=target_repo,
+                    remedy="name another branch or remove that entry",
+                )
             )
 
 
-__all__ = ["REFUSALS", "BranchAlreadyClaimed", "Work", "enqueue", "prepare"]
+def claimed_branch_message(
+    held: Entry, *, working_branch: str, target_repo: Path, remedy: str
+) -> str:
+    """The two-Entries-one-branch refusal, worded once.
+
+    Shared with the declaration command (ADR 0022), which refuses the same
+    collision at a different moment to a different reader: only the remedy
+    differs — an operator can rename or remove, while an agent mid-turn derives
+    another name — and two prose copies of the rest would drift apart.
+    """
+    return (
+        f"entry '{held.id}' already works on '{working_branch}' in {target_repo}; "
+        f"two entries on one branch would stack one's work into the other's, "
+        f"so {remedy}"
+    )
+
+
+__all__ = [
+    "REFUSALS",
+    "BranchAlreadyClaimed",
+    "Work",
+    "claimed_branch_message",
+    "enqueue",
+    "prepare",
+]

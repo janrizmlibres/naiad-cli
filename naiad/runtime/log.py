@@ -178,6 +178,15 @@ class RunLog:
             )
         )
 
+    def record_branch(self, name: str) -> None:
+        """The agent's declaration of the Run's Working branch (ADR 0022).
+
+        Recorded like the other received protocol acts, so that a human asking
+        "where did this branch name come from" reads the answer in the
+        narrative rather than inferring it from run.json's silence.
+        """
+        self._append(LogLine(kind="declared", detail=f"working branch: {name}"))
+
     def record(self, action: Action, *, seq: int | None = None) -> None:
         """What Naiad did about it. Nothing is not written down."""
         entry = _entry_for(action)
