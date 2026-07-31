@@ -84,6 +84,32 @@ prompt = "/finish"
 terminal = true
 """
 
+# Both kinds of Gate State in one file: `review` sits in the declared order and
+# `no-repro` is named as a candidate. The pair is the whole of ADR 0007, so it
+# is asserted over one Workflow rather than two.
+BOTH_KINDS_OF_GATE = """
+name = "both"
+
+[[states]]
+name = "grill"
+prompt = "/grill"
+
+[[states]]
+name = "review"
+
+[[states]]
+name = "diagnose"
+prompt = "/diagnose"
+next = ["no-repro", "done"]
+
+[[states]]
+name = "no-repro"
+
+[[states]]
+name = "done"
+terminal = true
+"""
+
 
 @pytest.fixture
 def workflow():
@@ -162,6 +188,18 @@ def test_a_gate_state_named_as_a_candidate_is_never_skipped(branching):
     agent may choose is a destination rather than a routine checkpoint, and
     deleting it would tell an agent that could not reproduce a bug to finish."""
     assert next_states(branching, "diagnose", skip_gates=True) == ("no-repro", "done")
+
+
+def test_gate_skipping_tells_the_two_kinds_of_gate_state_apart():
+    """ADR 0007, both halves at once. `review` is a routine checkpoint an
+    unattended Run may decline; `no-repro` is a destination the agent chose, and
+    deleting it would overrule the judgment ADR 0001 gives away. One Workflow
+    holds both, because it is the pair that carries the distinction.
+    """
+    workflow = parse_workflow(BOTH_KINDS_OF_GATE)
+
+    assert next_states(workflow, "grill", skip_gates=True) == ("diagnose",)
+    assert next_states(workflow, "diagnose", skip_gates=True) == ("no-repro", "done")
 
 
 def test_a_run_starts_at_the_first_state_unless_one_is_named(workflow):
