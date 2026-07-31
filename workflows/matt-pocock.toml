@@ -2,8 +2,10 @@
 #
 # A Prompt that runs a skill opens with its slash command: Claude Code reads a
 # slash command only at the start of a message, so prose in front of it would
-# send the skill's name as chat. That is a mechanical constraint on Prompts that
-# invoke a skill, not a requirement that every State run one — the classifying
+# send the skill's name as chat. Opening with it is necessary and not
+# sufficient — the Prompt must also arrive as typed input, which is the
+# adapter's business and ADR 0011's. That is a mechanical constraint on Prompts
+# that invoke a skill, not a requirement that every State run one — the classifying
 # State below runs none and opens with prose. What follows a command is the
 # argument the human would have typed — which work, which input — and never a
 # procedure: a skill's own logic stays in the skill, or it is maintained in two

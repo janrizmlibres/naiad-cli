@@ -16,11 +16,14 @@ from naiad.domain.session import SessionSpec
 
 TMUX = "tmux"
 CLAUDE = "claude"
-BUFFER = "naiad"
 
-# Multi-line text typed key by key would submit at the first newline, so it is
-# pasted instead. The threshold is only about which mechanism types faster.
-PASTE_ABOVE = 200
+# A newline typed as Enter would submit the Prompt at its first line break.
+# Alt-Enter is the TUI's own "newline, don't send", so a multi-line Prompt can
+# be typed rather than pasted — and it has to be typed, because Claude Code
+# reads a slash command out of typed input only. Bracketed paste arrives as
+# `[Pasted text #1]` and is submitted as prose, which silently turns a Prompt
+# that runs a skill into one that merely describes it.
+NEWLINE = "M-Enter"
 
 # A Clear is a slash command the TUI must process before the Prompt behind it
 # lands in the same input. Empirical, and verified by manual smoke rather than
@@ -45,12 +48,8 @@ class TmuxSessions:
         capturing the pane and matching against the TUI's input box, which
         broke on every change to the box's chrome; ADR 0002 rules that out.
         """
-        if "\n" in text or len(text) > PASTE_ABOVE:
-            self._run([TMUX, "load-buffer", "-b", BUFFER, "-"], stdin=text)
-            self._run([TMUX, "paste-buffer", "-p", "-d", "-b", BUFFER, "-t", pane])
-        else:
-            self._run([TMUX, "send-keys", "-t", pane, "-l", text])
-        self._run([TMUX, "send-keys", "-t", pane, "Enter"])
+        for argv in keystrokes_for(pane, text):
+            self._run(argv)
 
     def clear(self, pane: str) -> None:
         """Discard the session's context, then let the TUI act on it before
@@ -58,8 +57,8 @@ class TmuxSessions:
         self.send(pane, "/clear")
         time.sleep(CLEAR_SETTLE_SECONDS)
 
-    def _run(self, argv: list[str], stdin: str | None = None) -> str:
-        finished = subprocess.run(argv, capture_output=True, text=True, input=stdin)
+    def _run(self, argv: list[str]) -> str:
+        finished = subprocess.run(argv, capture_output=True, text=True)
         if finished.returncode != 0:
             raise TmuxError(f"{' '.join(argv)} failed: {(finished.stderr or '').strip()}")
         return finished.stdout
@@ -86,10 +85,26 @@ def _claude_argv(spec: SessionSpec) -> list[str]:
     return argv
 
 
+def keystrokes_for(pane: str, text: str) -> list[list[str]]:
+    """The tmux commands that put text in the input box and submit it.
+
+    Exposed so what reaches the TUI can be asserted without a session in front
+    of it — that a Prompt is typed rather than pasted is the whole point, and
+    reading the pane back to check would be the thing ADR 0002 forbids.
+    """
+    keys: list[list[str]] = []
+    for position, line in enumerate(text.split("\n")):
+        if position:
+            keys.append([TMUX, "send-keys", "-t", pane, NEWLINE])
+        if line:
+            keys.append([TMUX, "send-keys", "-t", pane, "-l", line])
+    return keys + [[TMUX, "send-keys", "-t", pane, "Enter"]]
+
+
 def command_for(spec: SessionSpec) -> list[str]:
     """Exposed so the command a spec produces can be asserted without opening a
     session — the permission mode in particular."""
     return _new_session_argv(spec)
 
 
-__all__ = ["TmuxError", "TmuxSessions", "command_for"]
+__all__ = ["TmuxError", "TmuxSessions", "command_for", "keystrokes_for"]
