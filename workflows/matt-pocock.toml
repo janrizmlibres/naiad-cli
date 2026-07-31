@@ -325,14 +325,26 @@ next = ["implement", "pull-request"]
 # describe the last ticket as though it were the whole pull request; Cleared,
 # the branch is compared against its base and all of them are seen.
 #
+# Reads how the tail ends from the project rather than fixing one ending (ADR
+# 0018). It asks first, before opening anything: a repository with no remote to
+# open against, or one whose naiad.toml opts out, has nowhere for the work to
+# land — the agent announces done, and the branch, the open and the ten-minute
+# wait are all skipped, so a local-first Run pays for none of them. done is
+# already a declared successor (ADR 0017), so the third ending needed no new
+# wiring, only the Prompt asking the question in the right order.
+#
 # Opens the pull request generically, and names no project (ADR 0016). The
 # Prompt says "open a pull request"; the agent, in the repository with its
-# remote in front of it, finds the GitHub MCP server that fits and opens it. The
-# HCGPS monorepo is the one exception the Prompt names, and it names the skill
-# rather than inlining the reviewers, base and build the skill holds — so even
-# the one project mentioned is a reference and not a description. That is why
-# this is the second Prompt after the classifier to open with prose: /hcgps-pr
-# is named mid-sentence, not at the start, so it is not read as a slash command.
+# remote in front of it, finds the MCP server for that repository's host —
+# GitHub or Gitea — and opens it. The host-neutral open is ADR 0018 extending
+# 0016: Gitea has pull requests and a server of its own, so "the GitHub MCP
+# server" was one host's world written into the file, the same fault 0016 named.
+# The HCGPS monorepo is the one exception the Prompt names, and it names the
+# skill rather than inlining the reviewers, base and build the skill holds — so
+# even the one project mentioned is a reference and not a description. That is
+# why this Prompt opens with prose, as the classifier does: the no-pull-request
+# check leads, and /hcgps-pr is named mid-sentence rather than at the start, so
+# it is not read as a slash command.
 #
 # This State waits, which no other one does. The review the next State fixes is
 # produced after the pull request opens, so announcing as soon as it is open
@@ -373,7 +385,9 @@ name = "pull-request"
 clear = true
 next = ["review-fix", "done"]
 prompt = """
-Open a pull request. For the HCGPS monorepo, use /hcgps-pr; for any other repository open it directly with that repository's GitHub MCP server, taking the description from the branch compared against its base.
+Before anything else, decide whether this repository opens a pull request at all. It does not if it has no remote to open one against, or if a naiad.toml at its root says not to open one — a local-first project lands its work locally, and once the work is committed there is nothing left to do. In either case announce done, and do not open a pull request, choose a base, or wait for a review: done is where this State ends when it opens nothing.
+
+Otherwise, open a pull request. For the HCGPS monorepo, use /hcgps-pr; for any other repository open it directly through the MCP server for that repository's host — GitHub, Gitea — taking the description from the branch compared against its base.
 
 Predecessor: {predecessor}
 

@@ -763,6 +763,31 @@ def test_the_pull_request_state_announces_even_if_no_review_arrives(workflow):
     assert "if no review" in delivered(workflow, "pull-request").lower()
 
 
+def test_the_pull_request_state_opens_on_whatever_host_can_open_one(workflow):
+    """No longer GitHub-only: a Gitea repository has pull requests and an MCP
+    server of its own, so the open path names the host generically rather than
+    GitHub alone (ADR 0018). The one named exception stays HCGPS, whose
+    conventions are rich enough to earn a skill (ADR 0016)."""
+    prompt = delivered(workflow, "pull-request")
+
+    assert "Gitea" in prompt
+    assert "/hcgps-pr" in prompt
+
+
+def test_the_pull_request_state_ends_at_done_when_it_opens_nothing(workflow):
+    """How the tail ends is read from the project (ADR 0018): a repository that
+    opts out with a naiad.toml marker, or one with no remote to open against,
+    has nowhere for the work to land and announces done — already a declared
+    successor of this State (ADR 0017). The check comes before the review wait,
+    so a local-first Run neither opens a pull request nor waits its ten minutes
+    for a review that is never coming."""
+    prompt = delivered(workflow, "pull-request")
+
+    assert "naiad.toml" in prompt
+    assert "no remote" in prompt
+    assert prompt.index("naiad.toml") < prompt.index("automated review")
+
+
 def test_the_review_fix_state_tolerates_a_pull_request_with_no_findings(workflow):
     """The timeout path announces review-fix anyway, and Clearing means the
     Prompt arrives in a context that never heard the timeout announced. Without
