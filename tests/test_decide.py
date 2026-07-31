@@ -93,3 +93,16 @@ def test_a_state_with_no_prompt_is_not_delivered(workflow):
 
 def test_delivery_names_the_next_state_in_declared_order(workflow):
     assert decide(workflow, signals("implement")).next_state == "done"
+
+
+def test_with_gates_skipped_delivery_names_the_next_state_that_has_a_prompt(workflow):
+    assert decide(workflow, signals("grill"), skip_gates=True).next_state == "implement"
+
+
+def test_with_gates_skipped_delivery_is_otherwise_unchanged(workflow):
+    """Skipping Gates is a resolution-time filter and nothing more: the same
+    Prompt is delivered, of the same State, Clearing or not as declared."""
+    kept = decide(workflow, signals("grill"))
+    skipped = decide(workflow, signals("grill"), skip_gates=True)
+
+    assert (skipped.state, skipped.prompt, skipped.clear) == (kept.state, kept.prompt, kept.clear)

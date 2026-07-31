@@ -6,19 +6,15 @@ that its Announcement went nowhere.
 """
 
 import json
-import shutil
 import subprocess
 
 import pytest
 
 from naiad.runtime.announcements import STATE_FILENAME
 from naiad.runtime.run import RunStore
+from naiad_command import NAIAD, naiad_environment, requires_installed_naiad
 
-NAIAD = shutil.which("naiad")
-
-pytestmark = pytest.mark.skipif(
-    NAIAD is None, reason="the naiad command is not installed; run `uv sync` or `pip install -e .`"
-)
+pytestmark = requires_installed_naiad
 
 WORKFLOW = """
 name = "feature"
@@ -58,11 +54,7 @@ def announce(run, *arguments, run_id="a-run"):
         [NAIAD, "state", *arguments],
         capture_output=True,
         text=True,
-        env={
-            "PATH": "/usr/bin:/bin",
-            "NAIAD_HOME": str(run.root.parents[1]),
-            "NAIAD_RUN_ID": run_id,
-        },
+        env=naiad_environment(run, run_id=run_id),
         cwd=str(run.target_repo),
     )
 

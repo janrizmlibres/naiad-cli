@@ -39,6 +39,7 @@ def tick(*, run: Run, workflow: Workflow, session: Session) -> Action:
             handled_seq=handled.seq(),
             stopped=turns.ended_since(announcement),
         ),
+        skip_gates=run.skip_gates,
     )
 
     if isinstance(action, Deliver) and announcement is not None:

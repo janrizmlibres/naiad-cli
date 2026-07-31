@@ -77,13 +77,6 @@ def test_a_state_may_declare_multiple_candidate_successors():
     assert workflow.state("bug").next_candidates == ()
 
 
-def test_successor_follows_declared_order():
-    workflow = parse_workflow(WELL_FORMED)
-
-    assert workflow.successor("grill").name == "review"
-    assert workflow.successor("done") is None
-
-
 @pytest.mark.parametrize(
     "source, expected",
     [

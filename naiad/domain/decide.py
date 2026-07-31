@@ -10,6 +10,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from naiad.domain.announcement import Announcement
+from naiad.domain.transitions import next_state
 from naiad.domain.workflow import Workflow
 
 
@@ -50,7 +51,12 @@ NOTHING = Nothing()
 Action = Deliver | Nothing
 
 
-def decide(workflow: Workflow, signals: Signals) -> Action:
+def decide(workflow: Workflow, signals: Signals, *, skip_gates: bool = False) -> Action:
+    """skip_gates is an option of the Run rather than a signal of it — it does
+    not change from tick to tick — so it is a parameter rather than a Signal.
+    It only ever changes which State is interpolated into the Prompt; Naiad
+    still never writes the State file (ADR 0001).
+    """
     announcement = signals.announcement
     if announcement is None:
         return NOTHING
@@ -69,7 +75,7 @@ def decide(workflow: Workflow, signals: Signals) -> Action:
     if state is None or state.prompt is None:
         return NOTHING
 
-    successor = workflow.successor(state.name)
+    successor = next_state(workflow, state.name, skip_gates=skip_gates)
     return Deliver(
         state=state.name,
         prompt=state.prompt,

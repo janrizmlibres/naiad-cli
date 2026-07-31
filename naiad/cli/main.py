@@ -21,8 +21,11 @@ from pathlib import Path
 from naiad.adapters.tmux import TmuxError, TmuxSessions
 from naiad.cli.announce import AnnounceError, announce_state
 from naiad.cli.kickoff import start_run
+from naiad.cli.protocol import injection_for
 from naiad.domain.decide import Deliver
+from naiad.domain.transitions import UnknownState
 from naiad.domain.workflow import WorkflowError, load_workflow
+from naiad.hooks.install import DEFAULT_SETTINGS_PATH, install_hooks
 from naiad.runtime.announcements import Announcements
 from naiad.runtime.loop import tick
 from naiad.runtime.records import Turns
@@ -33,7 +36,7 @@ Handler = Callable[[argparse.Namespace], int]
 
 # Everything a command can fail with that the operator or agent should read as
 # a message rather than a traceback.
-FAILURES = (AnnounceError, NoRunError, StorageError, TmuxError, WorkflowError)
+FAILURES = (AnnounceError, NoRunError, StorageError, TmuxError, UnknownState, WorkflowError)
 
 # Fast enough that a finished turn is picked up promptly, slow enough that a
 # Run waiting on a human is not spinning.
@@ -53,7 +56,17 @@ def main(argv: list[str] | None = None) -> int:
         default=None,
         help="the target repository (default: the working directory)",
     )
-
+    run.add_argument(
+        "--at",
+        dest="start_state",
+        default=None,
+        help="start at this State rather than the first (default: the first)",
+    )
+    run.add_argument(
+        "--skip-gates",
+        action="store_true",
+        help="resolve past Gate States, for an unattended run of a supervised Workflow",
+    )
     run.set_defaults(handler=_start)
 
     state = subcommands.add_parser("state", help="announce the State you are in")
@@ -62,6 +75,22 @@ def main(argv: list[str] | None = None) -> int:
 
     stopped = subcommands.add_parser("stopped", help="record that a turn ended (Stop hook)")
     stopped.set_defaults(handler=_stopped)
+
+    protocol = subcommands.add_parser(
+        "protocol", help="print the Protocol for a fresh context (SessionStart hook)"
+    )
+    protocol.set_defaults(handler=_protocol)
+
+    install = subcommands.add_parser(
+        "install-hooks", help="install Naiad's hooks into your Claude Code settings"
+    )
+    install.add_argument(
+        "--settings",
+        type=Path,
+        default=DEFAULT_SETTINGS_PATH,
+        help=f"which settings file to install into (default: {DEFAULT_SETTINGS_PATH})",
+    )
+    install.set_defaults(handler=_install_hooks)
 
     watch = subcommands.add_parser("watch", help="drive a Run's session until interrupted")
     watch.add_argument("run_id", nargs="?", default=None, help="which Run (default: this session)")
@@ -93,6 +122,32 @@ def _stopped(arguments: argparse.Namespace) -> int:
 
     latest = Announcements(run.root).latest()
     Turns(run.root).record_end(latest_seq=latest.seq if latest else None)
+    return 0
+
+
+def _protocol(arguments: argparse.Namespace) -> int:
+    """The SessionStart hook, run on startup, on Clear and on compaction — the
+    three moments a context is created or destroyed. Like the Stop hook it is
+    installed independently of any Run, so a session nobody is driving prints
+    nothing and succeeds rather than failing."""
+    run = _attached_run()
+    if run is None:
+        return 0
+
+    print(injection_for(run))
+    return 0
+
+
+def _install_hooks(arguments: argparse.Namespace) -> int:
+    """Installed once for the machine rather than per Run: the hooks do nothing
+    when no Run is attached to the session that fired them."""
+    try:
+        path = install_hooks(settings_path=arguments.settings)
+    except (OSError, ValueError) as error:
+        print(f"naiad: {error}", file=sys.stderr)
+        return 2
+
+    print(f"installed naiad's hooks into {path}")
     return 0
 
 
@@ -154,6 +209,8 @@ def _start(arguments: argparse.Namespace) -> int:
             run_id=_run_id(started, workflow_path),
             claude_session_id=str(uuid.uuid4()),
             created_at=started.isoformat().replace("+00:00", "Z"),
+            start_state=arguments.start_state,
+            skip_gates=arguments.skip_gates,
         )
     except FAILURES as error:
         print(f"naiad: {error}", file=sys.stderr)

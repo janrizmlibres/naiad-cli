@@ -49,15 +49,6 @@ class Workflow:
                 return state
         return None
 
-    def successor(self, name: str) -> State | None:
-        """The next State in declared order — the one a State is expected to
-        announce. Branching States may name others (see next_candidates)."""
-        for index, state in enumerate(self.states):
-            if state.name == name:
-                remaining = self.states[index + 1 :]
-                return remaining[0] if remaining else None
-        return None
-
 
 def load_workflow(path: Path) -> Workflow:
     try:

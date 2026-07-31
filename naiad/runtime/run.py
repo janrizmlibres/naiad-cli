@@ -41,6 +41,10 @@ class Run:
     task: str
     target_repo: Path
     created_at: str
+    # How this Run resolves its next State. Options of the Run rather than of
+    # the Workflow: the same Workflow file runs supervised or unattended.
+    skip_gates: bool = False
+    start_state: str | None = None
     tmux_session: str | None = None
     tmux_pane: str | None = None
     claude_session_id: str | None = None
@@ -73,6 +77,8 @@ class Run:
             "task": self.task,
             "target_repo": str(self.target_repo),
             "created_at": self.created_at,
+            "skip_gates": self.skip_gates,
+            "start_state": self.start_state,
             "tmux_session": self.tmux_session,
             "tmux_pane": self.tmux_pane,
             "claude_session_id": self.claude_session_id,
@@ -94,6 +100,8 @@ class RunStore:
         task: str,
         target_repo: Path,
         created_at: str,
+        skip_gates: bool = False,
+        start_state: str | None = None,
     ) -> Run:
         target_repo = _real(target_repo)
         root = _real(self.root)
@@ -115,6 +123,8 @@ class RunStore:
             task=task,
             target_repo=target_repo,
             created_at=created_at,
+            skip_gates=skip_gates,
+            start_state=start_state,
         )
         run.save()
         return run
@@ -140,6 +150,8 @@ class RunStore:
             task=document["task"],
             target_repo=Path(document["target_repo"]),
             created_at=document["created_at"],
+            skip_gates=document.get("skip_gates", False),
+            start_state=document.get("start_state"),
             tmux_session=document["tmux_session"],
             tmux_pane=document["tmux_pane"],
             claude_session_id=document["claude_session_id"],

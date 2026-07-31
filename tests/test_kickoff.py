@@ -1,6 +1,7 @@
 import pytest
 
 from naiad.cli.kickoff import start_run
+from naiad.domain.transitions import UnknownState
 from naiad.domain.workflow import WorkflowError
 from naiad.runtime.resolve import RUN_ID_VARIABLE, RunResolver
 from naiad.runtime.run import RunStore
@@ -133,6 +134,52 @@ def test_a_gate_state_first_leaves_the_session_untouched(repo, store, sessions):
 
     (spawn,) = sessions.spawned
     assert spawn.initial_prompt is None
+
+
+def test_a_run_started_at_a_named_state_delivers_that_states_prompt_first(repo, store, sessions):
+    (repo / "later.toml").write_text(
+        'name = "w"\n'
+        "[[states]]\nname = 'grill'\nprompt = '/grill'\n"
+        "[[states]]\nname = 'spec'\nprompt = '/to-spec {task}'\n"
+        "[[states]]\nname = 'done'\nterminal = true\n"
+    )
+
+    start(repo, store, sessions, workflow_path=repo / "later.toml", start_state="spec")
+
+    (spawn,) = sessions.spawned
+    assert spawn.initial_prompt == "/to-spec add dark mode"
+
+
+def test_a_run_started_at_a_state_the_workflow_does_not_declare_is_rejected(
+    repo, store, sessions
+):
+    """Rejected before a session exists, so a typo costs the operator nothing
+    but the error message."""
+    with pytest.raises(UnknownState) as caught:
+        start(repo, store, sessions, start_state="spek")
+
+    assert "spek" in str(caught.value)
+    assert sessions.spawned == []
+    assert store.all() == []
+
+
+def test_the_run_remembers_the_options_it_was_started_with(repo, store, sessions):
+    """The tick loop resolves the next State on every delivery, in a process
+    that outlives kickoff, so the options must survive on the Run."""
+    run = start(repo, store, sessions, start_state="review", skip_gates=True)
+
+    reloaded = store.load(run.id)
+    assert reloaded.skip_gates is True
+    assert reloaded.start_state == "review"
+
+
+def test_a_run_started_with_gates_skipped_names_the_next_state_that_has_a_prompt(
+    repo, store, sessions
+):
+    start(repo, store, sessions, skip_gates=True)
+
+    (spawn,) = sessions.spawned
+    assert spawn.initial_prompt.endswith("Then announce done.")
 
 
 def test_a_malformed_workflow_creates_no_run_directory_and_no_session(repo, store, sessions):

@@ -141,6 +141,37 @@ def test_a_run_with_no_pane_recorded_is_refused_rather_than_sent_anywhere(
     assert session.sent == []
 
 
+def test_a_run_started_with_gates_skipped_delivers_the_next_state_that_has_a_prompt(
+    tmp_path, session
+):
+    """The option is recorded on the Run at kickoff and read back here, since
+    the loop runs in a process that outlives the kickoff that chose it."""
+    repo = tmp_path / "gated"
+    repo.mkdir()
+    workflow_path = repo / "workflow.toml"
+    workflow_path.write_text(
+        'name = "gated"\n'
+        "[[states]]\nname = 'grill'\nprompt = 'work, then announce {next_state}'\n"
+        "[[states]]\nname = 'review'\n"
+        "[[states]]\nname = 'spec'\nprompt = '/to-spec'\n"
+        "[[states]]\nname = 'done'\nterminal = true\n"
+    )
+    run = RunStore(tmp_path / "gated-runs").create(
+        run_id="gated-run",
+        workflow_path=workflow_path,
+        task="t",
+        target_repo=repo,
+        created_at="2026-07-19T12:00:00Z",
+        skip_gates=True,
+    )
+    run.attach_session(tmux_session="naiad-gated-run", tmux_pane="%7")
+    announce(run, "grill")
+
+    tick(run=run, workflow=parse_workflow(workflow_path.read_text()), session=session)
+
+    assert session.sent == [("send", "%7", "work, then announce spec")]
+
+
 def test_a_turn_ending_before_the_announcement_is_not_a_turn_ending_since_it(
     run, workflow, session
 ):

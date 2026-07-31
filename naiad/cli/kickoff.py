@@ -11,6 +11,8 @@ from typing import Protocol
 
 from naiad.domain.prompt import render_prompt
 from naiad.domain.session import SessionSpec, session_name
+from naiad.domain.transitions import next_state
+from naiad.domain.transitions import start_state as resolve_start_state
 from naiad.domain.workflow import load_workflow
 from naiad.runtime.resolve import RUN_ID_VARIABLE
 from naiad.runtime.run import Run, RunStore
@@ -30,10 +32,15 @@ def start_run(
     run_id: str,
     claude_session_id: str,
     created_at: str,
+    start_state: str | None = None,
+    skip_gates: bool = False,
 ) -> Run:
+    # Both the Workflow and the State to begin at are resolved before anything
+    # exists, so a bad file or a mistyped State costs the operator nothing but
+    # the error message.
     workflow = load_workflow(workflow_path)
-    first = workflow.states[0]
-    successor = workflow.successor(first.name)
+    first = resolve_start_state(workflow, start_state)
+    successor = next_state(workflow, first.name, skip_gates=skip_gates)
 
     run = store.create(
         run_id=run_id,
@@ -41,6 +48,8 @@ def start_run(
         task=task,
         target_repo=target_repo,
         created_at=created_at,
+        skip_gates=skip_gates,
+        start_state=start_state,
     )
 
     # The first State's Clear flag is deliberately not acted on: the session is
