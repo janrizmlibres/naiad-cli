@@ -69,24 +69,42 @@ If tickets remain after it, announce implement again to take the next. If that w
 # soon as it is open would hand /fix-review an empty pull request. The wait has
 # to happen inside the turn: an agent that stops without announcing is Nudged
 # twice and then parks the Run, and no review arriving later would wake it.
+#
+# Three numbers are load-bearing and none of them is arbitrary (ADR 0006). The
+# wait is one blocking command rather than a loop of checks, because a loop
+# re-sends the accumulated context every time round and that is the whole cost.
+# Ten minutes because that is the Bash tool's ceiling, so the budget the Prompt
+# states and the cap the tool enforces are one number; the review itself takes
+# about three, and the Run's outer bound is the hang rule's thirty. And the wait
+# names the review check alone: the build checks on this repository run past
+# fourteen minutes, so waiting on all of them would overrun for a reason that
+# has nothing to do with the review.
 [[states]]
 name = "pull-request"
 clear = true
 prompt = """
 /hcgps-pr
 
-Once the pull request is open, wait for Claude Code Review to post its findings on it. Poll it — without ending your turn, because nothing will wake you again if you stop. When the findings are there, announce {next_state}.
+Once the pull request is open, wait for the Claude Code Review check to complete — that check alone, and not every check on the pull request, because the build checks run far longer than the review does. Wait in a single long-running command with a ten-minute timeout, rather than a loop of separate checks, and do not end your turn: nothing will wake you again if you stop. When the check has completed, read its findings from the pull request and announce {next_state}.
 
-If no review has appeared after fifteen minutes, or this repository runs none, say so in the session and announce {next_state} anyway: there is then simply nothing to fix.
+If no review check has completed after ten minutes, or this repository runs none, say so in the session and announce {next_state} anyway: there is then simply nothing to fix.
 """
 
 # Names the pull request by its branch rather than as the one just opened: this
 # Prompt arrives in a Cleared context, which remembers opening nothing.
+#
+# The empty case is named for the same reason. The State before this one
+# announces it anyway when no review arrives inside its budget, and the Clear
+# discards the context that heard it say so — so without this the State is told
+# to fetch findings that are not there, and /fix-review, whose contract is that
+# its findings are handed to it, is the State most likely to stop and ask.
 [[states]]
 name = "review-fix"
 clear = true
 prompt = """
 /fix-review the Claude Code Review posted on the open pull request for this branch — fetch its findings from the pull request.
+
+If the pull request carries no review findings, there is nothing to fix: say so and announce {next_state}.
 
 When the review is addressed and pushed, announce {next_state}.
 """

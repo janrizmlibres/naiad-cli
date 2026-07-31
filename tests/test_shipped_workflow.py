@@ -114,20 +114,47 @@ def test_the_pull_request_state_waits_for_the_review_before_announcing(workflow)
     has posted its findings, so the wait belongs before the Announcement rather
     than after it — announcing early delivers /fix-review an empty pull request.
 
-    The agent is told to keep checking rather than end its turn, because
-    nothing wakes it: a turn that ends without an Announcement is Nudged twice
-    and then parks the Run for a human (naiad.domain.decide).
+    The wait happens inside the turn, because nothing wakes an agent that ends
+    one: a turn that ends without an Announcement is Nudged twice and then parks
+    the Run for a human (naiad.domain.decide). Naiad gains nothing for this —
+    the Prompt carries it (ADR 0006).
     """
     prompt = delivered(workflow, "pull-request")
 
     assert "Claude Code Review" in prompt
-    assert "without ending your turn" in prompt
+    assert "single long-running command" in prompt
+
+
+def test_the_pull_request_state_waits_in_one_command_within_the_tool_timeout(workflow):
+    """The cost of the wait is the Prompt's business, and one blocking command
+    is what makes it cheap: a loop of separate checks re-sends the accumulated
+    context every time round. Ten minutes because that is the Bash tool's
+    ceiling, so the budget and the cap are one number rather than two."""
+    assert "ten-minute timeout" in delivered(workflow, "pull-request")
+
+
+def test_the_pull_request_state_waits_only_on_the_review_check(workflow):
+    """Waiting on every check would overrun the budget for a reason that has
+    nothing to do with the review: the build checks on an HCGPS pull request run
+    far longer than the review, which finishes in about three minutes."""
+    prompt = delivered(workflow, "pull-request")
+
+    assert "not every check" in prompt
 
 
 def test_the_pull_request_state_announces_even_if_no_review_arrives(workflow):
     """A repository that runs no review would otherwise hold the Run at a State
     waiting for something that is never coming."""
     assert "if no review" in delivered(workflow, "pull-request").lower()
+
+
+def test_the_review_fix_state_tolerates_a_pull_request_with_no_findings(workflow):
+    """The timeout path announces review-fix anyway, and Clearing means the
+    Prompt arrives in a context that never heard the timeout announced. Without
+    this the State is told to fetch findings that are not there, and /fix-review
+    — whose contract is that its findings are handed to it — is the State most
+    likely to stop and ask a human nobody is awake to be."""
+    assert "no review findings" in delivered(workflow, "review-fix")
 
 
 def test_no_prompt_after_a_clearing_state_refers_back_to_the_cleared_context(workflow):
