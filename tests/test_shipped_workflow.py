@@ -101,6 +101,11 @@ BRANCH_HEADS = ["diagnose", "grill"]
 # classifier, which runs none.
 DELIVERING = ["classify", *sorted(SKILLS)]
 
+# The States told what the work stands on: the two heads, which decide what to
+# base a new branch on, and the pull request, which asks the same question again
+# because the Predecessor may have landed while the Run was working.
+STANDING_ON_THE_PREDECESSOR = [*BRANCH_HEADS, "pull-request"]
+
 # The States told the task in words. The classifier is told it because it has
 # nothing else to read; the two branch heads because they Clear, and what the
 # classifier made of the task is exactly what must not survive that Clear.
@@ -109,24 +114,70 @@ TOLD_THE_TASK = ["classify", *BRANCH_HEADS]
 TASK = "add dark mode"
 BRANCH = "MC-AGENT-8546"
 
+# What the Entry before this one left behind, as a Run is handed it: an opaque
+# branch name Naiad neither reads nor asks git about (ADR 0015). Distinct from
+# BRANCH and not a substring of it, so an assertion about one cannot pass on the
+# other.
+PREDECESSOR = "MC-AGENT-8500"
+
+# The one command the branch rule is allowed to be, written with its operands in
+# the order that answers the question asked. One question with a terminal
+# answer, needing no API and working offline; merge status is a taxonomy, and it
+# answers wrongly for a Predecessor parked at `handover` — commits, and no pull
+# request at all.
+#
+# The operands are part of the constant rather than left to prose. Reversed, the
+# command answers every case backwards while still reading correctly, and the
+# symptom is a wrong stack noticed at review time rather than a Run that fails.
+ANCESTRY_TEST = "git merge-base --is-ancestor <predecessor> <base branch>"
+
 
 @pytest.fixture
 def workflow():
     return load_workflow(WORKFLOW_PATH)
 
 
-def delivered(workflow, state_name, subject=SUBJECT):
+def sentences(prompt):
+    """A Prompt's sentences, so that a claim can be pinned to the case it
+    belongs to.
+
+    The branch rule names two outcomes and attaches an opposite instruction to
+    each, so a whole-Prompt assertion passes just as well with the two swapped —
+    which is the one way this rule can be wrong while reading correctly, and the
+    way whose symptom is a wrong stack at review time rather than a Run that
+    fails. The classifying State's criterion is asserted the same way and for
+    the same reason.
+    """
+    return [part.strip() for part in prompt.replace("\n", " ").split(".") if part.strip()]
+
+
+def only_sentence(prompt, phrase):
+    """The one sentence carrying a phrase. Exactly one, because two sentences
+    describing the same outcome are two places for the rule to disagree with
+    itself."""
+    matching = [sentence for sentence in sentences(prompt) if phrase in sentence]
+
+    assert len(matching) == 1, f"expected one sentence containing {phrase!r}, found {matching}"
+    return matching[0]
+
+
+def delivered(workflow, state_name, subject=SUBJECT, predecessor=PREDECESSOR):
     """A State's Prompt as the agent actually reads it, with the successor the
     Workflow resolves interpolated — which is what Naiad sends (naiad.runtime.loop).
 
     A Subject is supplied to every State, not only the one that names it: a
     Prompt with no slot for one is unaffected, and passing it everywhere means
-    no assertion here silently depends on which States use it."""
+    no assertion here silently depends on which States use it. The Working
+    branch and the Predecessor are supplied everywhere for the same reason, and
+    because Naiad genuinely does interpolate them into every Prompt a Run
+    delivers rather than only its first."""
     return render_prompt(
         workflow.state(state_name).prompt,
         task=TASK,
         next_states=next_states(workflow, state_name),
         subject=subject,
+        branch=BRANCH,
+        predecessor=predecessor,
     )
 
 
@@ -243,6 +294,130 @@ def test_each_branch_head_clears_and_so_restates_the_task(workflow, head):
     holds itself."""
     assert workflow.state(head).clear
     assert TASK in delivered(workflow, head)
+
+
+@pytest.mark.parametrize("head", BRANCH_HEADS)
+def test_each_branch_head_puts_the_run_on_its_working_branch(workflow, head):
+    """The branch is prepared at the two heads rather than in a State of its
+    own, because a State of its own would be skipped by exactly the Entries
+    that pre-classify — a design Run starts at `grill` and a bug Run at
+    `diagnose`, and both would step straight over it (ADR 0015).
+
+    Named rather than described: Naiad holds the Working branch and
+    interpolates it, so a Prompt saying 'your branch' would be telling an agent
+    to find out something it has already been told. What to do with it once it
+    exists and what to base it on when it does not are asserted below, each
+    against its own case.
+
+    Before anything is written, because the Prompt cannot be reordered: the
+    slash command has to open the message or Claude Code reads it as chat, so
+    the instruction that comes first in time is written second."""
+    prompt = delivered(workflow, head)
+
+    assert "{branch}" not in prompt
+    assert BRANCH in prompt
+    assert "Before you change anything" in prompt
+
+
+@pytest.mark.parametrize("head", BRANCH_HEADS)
+def test_each_branch_head_is_safe_to_repeat(workflow, head):
+    """A resumed or re-entered Run finds the branch already there, which is
+    ordinary rather than an error: a bare `git checkout -b` would fail the Run
+    on its second entrance to the same State."""
+    prompt = delivered(workflow, head)
+
+    assert "check it out" in only_sentence(prompt, "already exists")
+
+
+@pytest.mark.parametrize("head", BRANCH_HEADS)
+def test_each_branch_head_chooses_the_base_before_it_creates_the_branch(workflow, head):
+    """The working tree is shared, so whatever is checked out when a Run arrives
+    is where the last Run left it. A branch created first and reasoned about
+    afterwards is a branch cut from another Run's work — which looks like
+    obedience and reads as a wrong stack days later, so the Prompt gives the
+    command with its base as an operand."""
+    prompt = delivered(workflow, head)
+
+    assert f"git checkout -b {BRANCH} <the branch you chose>" in prompt
+    assert "choose what to base it on before you create it" in prompt
+
+
+@pytest.mark.parametrize("head", BRANCH_HEADS)
+def test_each_branch_head_stands_on_a_predecessor_that_has_not_landed(workflow, head):
+    """The Predecessor is what the Entry before this one left behind, and the
+    default is to stand on it: not stacking when the work depends means this
+    agent never sees the previous one's code, and the conflict surfaces at merge
+    after the night is spent.
+
+    Pinned to the sentence describing the failing test rather than to the whole
+    Prompt, so that swapping the two outcomes fails here — a Prompt naming both
+    passes the loose form with the rule inverted."""
+    prompt = delivered(workflow, head)
+
+    assert "{predecessor}" not in prompt
+    assert PREDECESSOR in prompt
+    assert ANCESTRY_TEST in prompt
+    assert "base the new branch on the Predecessor" in only_sentence(prompt, "a non-zero exit")
+
+
+@pytest.mark.parametrize("head", BRANCH_HEADS)
+def test_each_branch_head_falls_back_to_the_base_branch_once_the_work_has_landed(workflow, head):
+    """The other half of the rule, asserted against its own sentence for the
+    reason the first half is: a Predecessor already merged into the base branch
+    is work this Run does not stand on, and branching from it would stack on
+    nothing."""
+    prompt = delivered(workflow, head)
+
+    assert "base the new branch on the base branch" in only_sentence(prompt, "A zero exit")
+
+
+@pytest.mark.parametrize("head", BRANCH_HEADS)
+def test_each_branch_head_settles_an_absent_predecessor_before_running_any_git(workflow, head):
+    """The first Entry for a repository has no Predecessor, which is ordinary
+    and renders as nothing rather than as a name. An agent reading in order must
+    meet that case before the command, or it runs the ancestry test with an
+    empty operand — which fails, and reads as 'not an ancestor', which is the
+    answer that stacks this Run on a branch that does not exist."""
+    prompt = delivered(workflow, head, predecessor=None)
+
+    assert "Predecessor:" in prompt
+    assert prompt.index("When no Predecessor is named above") < prompt.index(ANCESTRY_TEST)
+
+
+@pytest.mark.parametrize("state_name", STANDING_ON_THE_PREDECESSOR)
+def test_no_state_that_decides_a_base_asks_whether_the_predecessor_was_merged(
+    workflow, state_name
+):
+    """Ancestry, not merge status (ADR 0015). Merge status is a taxonomy —
+    open, closed, merged, closed-unmerged — that has to be enumerated correctly
+    to be safe, and it answers wrongly for the case that matters most: a Run
+    parked at `handover` has commits and no pull request at all, so 'not
+    merged' would send this Run to the base branch and drop that work from
+    underneath it."""
+    assert "merged" not in delivered(workflow, state_name)
+
+
+def test_only_the_branch_heads_prepare_the_working_branch(workflow):
+    """The classifying State is unchanged: it writes nothing, so it needs no
+    Working branch, and every State after a head inherits the checkout, which is
+    git state and survives the Clear both heads perform.
+
+    A State of its own would be skipped by exactly the Entries that
+    pre-classify, which are most of them (ADR 0015) — so the two heads are the
+    whole of it, and this is what says so."""
+    naming = [name for name in DELIVERING if BRANCH in delivered(workflow, name)]
+
+    assert sorted(naming) == sorted(BRANCH_HEADS)
+
+
+def test_only_the_states_that_decide_a_base_are_told_the_predecessor(workflow):
+    """Twice at the start and once at the end: the head chooses what to branch
+    from, and the pull request chooses what to open against. Nothing in between
+    has a use for it, and a Prompt carrying it anyway would read as though it
+    had a decision to make."""
+    naming = [name for name in DELIVERING if PREDECESSOR in delivered(workflow, name)]
+
+    assert sorted(naming) == sorted(STANDING_ON_THE_PREDECESSOR)
 
 
 def test_every_state_that_delivers_a_prompt_is_accounted_for(workflow):
@@ -461,6 +636,40 @@ def test_the_tickets_state_names_the_first_ticket_when_it_starts_the_loop(workfl
 
     assert announcing
     assert all("subject" in line for line in announcing)
+
+
+def test_the_pull_request_state_asks_the_ancestry_question_again(workflow):
+    """The Predecessor may have landed during the Run — a stack of Entries is
+    exactly the case where that happens — so what was true at the branch head
+    is not trusted here. This State Clears as well, so it could not have
+    inherited the answer even if it wanted to."""
+    prompt = delivered(workflow, "pull-request")
+
+    assert PREDECESSOR in prompt
+    assert ANCESTRY_TEST in prompt
+
+
+def test_the_pull_request_state_passes_the_answer_as_the_base(workflow):
+    """An input to the skill rather than a copy of its logic: /hcgps-pr already
+    accepts an explicit base for stacked work and defaults to the repository's
+    base branch otherwise, so it needs telling and nothing more.
+
+    Each outcome is pinned to its own sentence, as the branch heads' are:
+    inverted, this opens every stacked pull request against the base branch and
+    every independent one against a branch it does not stand on."""
+    prompt = delivered(workflow, "pull-request")
+
+    assert "as the base" in only_sentence(prompt, "A non-zero exit")
+    assert "say nothing about a base" in only_sentence(prompt, "A zero exit")
+
+
+def test_the_pull_request_state_settles_an_absent_predecessor_before_running_any_git(workflow):
+    """The commonest case at this State — a Run that stands on nothing — and the
+    one an agent must meet before the command, for the reason it must at the
+    branch heads."""
+    prompt = delivered(workflow, "pull-request", predecessor=None)
+
+    assert prompt.index("When no Predecessor is named above") < prompt.index(ANCESTRY_TEST)
 
 
 def test_the_pull_request_state_waits_for_the_review_before_announcing(workflow):

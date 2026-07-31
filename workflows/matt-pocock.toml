@@ -79,6 +79,31 @@ Say in a sentence which it is and why, then announce grill or diagnose. Do no ot
 # choosing between the two candidates is in the Prompt, because Naiad decides
 # nothing about which branch is right and the criterion exists nowhere else.
 #
+# One of the two heads that put the Run on its Working branch, and the
+# paragraph is written out here and again at the other head rather than being
+# given a State of its own. A State of its own would be skipped by exactly the
+# Entries that pre-classify — a bug Run starts here and a design Run at
+# `grill` — and the classifying State between them writes nothing and needs no
+# branch. Both heads Clear, and a checked-out branch is git state that survives
+# a Clear, so a paragraph at each head covers all three entrances. The cost is
+# one paragraph written twice, which this file already accepts twice over for
+# the same kind of reason.
+#
+# The git knowledge lives here rather than in Naiad, which carries branch names
+# and nothing else (ADR 0015). The test is ancestry rather than merge status:
+# one question with a terminal answer, no API call, and correct for the case
+# that matters most — a Predecessor parked at `handover` has commits and no
+# pull request at all, so "not merged" would send this Run to the base branch
+# and drop that work from underneath it.
+#
+# The base is chosen before the branch is created and the branch is created from
+# it by name, because the working tree is shared: whatever is checked out when a
+# Run arrives is where the last Run left it, so a bare `git checkout -b` would
+# silently branch from another Run's work and look like it had obeyed. The
+# ancestry command is written with its operands in order for the same reason —
+# reversed, it answers every question backwards, and the symptom is a wrong
+# stack read at review time rather than a failure during the Run.
+#
 # This is the one Prompt that writes its successors out rather than
 # interpolating {next_state}, for the same reason the implement loop writes its
 # own name: the placeholder renders every candidate as one joined phrase, which
@@ -92,6 +117,15 @@ clear = true
 next = ["no-repro", "pull-request"]
 prompt = """
 /diagnosing-bugs {task}
+
+Before you change anything, put this Run on its own branch.
+
+Working branch: {branch}
+Predecessor: {predecessor}
+
+If the Working branch already exists, check it out as it is and leave it alone — a resumed or re-entered Run finds the branch waiting for it, which is ordinary rather than a failure.
+
+If it does not exist, choose what to base it on before you create it, then create it from that branch by name — `git checkout -b {branch} <the branch you chose>` — rather than from whatever is currently checked out, which belongs to whichever Run was here last. Choose like this. When no Predecessor is named above, base it on this repository's base branch. Otherwise run `git merge-base --is-ancestor <predecessor> <base branch>`, in that order: a non-zero exit says the Predecessor is not yet an ancestor of the base branch, so its work has not landed and this Run stands on it — base the new branch on the Predecessor. A zero exit says it has landed — base the new branch on the base branch.
 
 Run the discipline end to end — through the fix, its regression test, the instrumentation cleanup and the post-mortem — rather than stopping at the diagnosis.
 
@@ -122,11 +156,26 @@ next = ["pull-request"]
 # interview that opens by agreeing with it has skipped the question it exists to
 # ask. That costs nothing, because the task is the only thing that must cross
 # the fork and Naiad holds it itself.
+#
+# The other of the two heads that prepare the branch, carrying the same
+# paragraph the diagnosing State does — the reasoning for writing it twice is
+# there, beside the first copy. It is here as well as there because an operator
+# who has already classified their work starts the Run at whichever head fits
+# it, and neither head may assume the other ran.
 [[states]]
 name = "grill"
 clear = true
 prompt = """
 /grill-with-docs {task}
+
+Before you change anything, put this Run on its own branch.
+
+Working branch: {branch}
+Predecessor: {predecessor}
+
+If the Working branch already exists, check it out as it is and leave it alone — a resumed or re-entered Run finds the branch waiting for it, which is ordinary rather than a failure.
+
+If it does not exist, choose what to base it on before you create it, then create it from that branch by name — `git checkout -b {branch} <the branch you chose>` — rather than from whatever is currently checked out, which belongs to whichever Run was here last. Choose like this. When no Predecessor is named above, base it on this repository's base branch. Otherwise run `git merge-base --is-ancestor <predecessor> <base branch>`, in that order: a non-zero exit says the Predecessor is not yet an ancestor of the base branch, so its work has not landed and this Run stands on it — base the new branch on the Predecessor. A zero exit says it has landed — base the new branch on the base branch.
 
 When the interview is finished and its ADRs and glossary entries are written, announce {next_state}.
 """
@@ -267,6 +316,14 @@ next = ["implement", "pull-request"]
 # to happen inside the turn: an agent that stops without announcing is Nudged
 # twice and then parks the Run, and no review arriving later would wake it.
 #
+# The ancestry question is asked again here rather than carried down from the
+# branch head. The Predecessor may have landed during the Run — a stack of
+# Entries is exactly the case where that happens — and this State Clears, so it
+# could not have inherited the earlier answer even if that answer were still
+# worth trusting. The result is passed to the skill as the base and nothing
+# more: /hcgps-pr already accepts an explicit base for stacked work and defaults
+# to the repository's own otherwise, so it needs telling rather than teaching.
+#
 # Three numbers are load-bearing and none of them is arbitrary (ADR 0006). The
 # wait is one blocking command rather than a loop of checks, because a loop
 # re-sends the accumulated context every time round and that is the whole cost.
@@ -281,6 +338,10 @@ name = "pull-request"
 clear = true
 prompt = """
 /hcgps-pr
+
+Predecessor: {predecessor}
+
+Open the pull request against the right base. When no Predecessor is named above, say nothing about a base and let the skill use the repository's own. Otherwise run `git merge-base --is-ancestor <predecessor> <base branch>`, in that order, now — rather than relying on what was true when this Run started, because a Predecessor can land while a Run is working. A non-zero exit says the Predecessor still has not landed and this branch stands on it, so give the Predecessor to the skill as the base. A zero exit says it has landed, so say nothing about a base and let the skill use the repository's own.
 
 Once the pull request is open, wait for the Claude Code Review check to complete — that check alone, and not every check on the pull request, because the build checks run far longer than the review does. Wait in a single long-running command with a ten-minute timeout, rather than a loop of separate checks, and do not end your turn: nothing will wake you again if you stop. When the check has completed, read its findings from the pull request and announce {next_state}.
 
