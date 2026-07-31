@@ -1,15 +1,57 @@
 # The Matt Pocock feature chain and the bug branch: the only Workflow that ships.
 #
-# Every Prompt opens with the slash command of the skill it runs: Claude Code
-# reads a slash command only at the start of a message, so prose in front of it
-# would send the skill's name as chat. What follows the command is the argument
-# the human would have typed — which work, which input — and never a procedure:
-# a skill's own logic stays in the skill, or it is maintained in two places.
+# A Prompt that runs a skill opens with its slash command: Claude Code reads a
+# slash command only at the start of a message, so prose in front of it would
+# send the skill's name as chat. That is a mechanical constraint on Prompts that
+# invoke a skill, not a requirement that every State run one — the classifying
+# State below runs none and opens with prose. What follows a command is the
+# argument the human would have typed — which work, which input — and never a
+# procedure: a skill's own logic stays in the skill, or it is maintained in two
+# places.
 #
 # The Protocol is not restated in any Prompt. Naiad injects it into every fresh
 # context, including the ones the Clearing States below create.
 
 name = "matt-pocock"
+
+# Where a Run begins when the operator has said nothing about where to start:
+# they describe the task in their own words and the agent decides which kind of
+# work it is. Classification is a State rather than something Naiad owns (ADR
+# 0005) — choosing a branch is a judgment about the work, and those belong to
+# the agent. Being an ordinary State, it runs in the Run's own interactive
+# session with the repository in front of it, rather than as a headless call
+# made before any session exists.
+#
+# The one Prompt that runs no skill, and so the one that opens with prose. No
+# existing skill fits, and one whose entire body is three sentences would be
+# indirection rather than encapsulation; the criterion below exists nowhere
+# else, so writing it here copies nothing.
+#
+# No Clear — nothing precedes it — and no Artifact: the Announcement is the
+# record, the Run log already holds it, and both branch heads Clear anyway. That
+# Clear is the point rather than an inconvenience. What this State made of the
+# task must not reach the diagnosing State, whose job is to form a hypothesis
+# from evidence rather than to inherit a guess, and the only thing that has to
+# cross the boundary is the task itself, which Naiad holds and interpolates into
+# every delivered Prompt rather than only the first.
+#
+# The escape hatch, and the answer to "the classifier can be wrong": an operator
+# who already knows which kind of work they have starts the Run at the branch
+# head with `--at grill` or `--at diagnose` and skips this State entirely. That
+# needs no code — the start-state option already accepts any declared State
+# name — which is exactly why it is worth writing down here.
+[[states]]
+name = "classify"
+next = ["grill", "diagnose"]
+prompt = """
+Decide what kind of work the following task is, then announce where it starts.
+
+{task}
+
+Read it, and read as much of the codebase as you need to answer that one question — no further, and change nothing. The criterion is what the task asks of the repository. If it asks for behaviour the repository does not have yet, or for behaviour it has to change on purpose, it is a feature: announce grill. If it reports the repository already doing something other than what it intends, it is a bug: announce diagnose. A task that describes a symptom rather than an outcome is a bug.
+
+Say in a sentence which it is and why, then announce grill or diagnose. Do no other work.
+"""
 
 # The bug branch, declared before the feature chain so the file reads in the
 # order a Run moves through it, with the short branch first. One branch has to
@@ -69,11 +111,18 @@ If you cannot build a feedback loop at all, do not hypothesise without one: say 
 name = "no-repro"
 next = ["pull-request"]
 
-# Kickoff for the feature branch. Told the task in words, as the other branch
+# The head of the feature branch. Told the task in words, as the other branch
 # head is; everything after it reads the Artifacts this conversation and its
 # successors leave behind.
+#
+# Clears, for the same reason the diagnosing State does: what the classifying
+# State made of the task is a conclusion this State has no use for, and an
+# interview that opens by agreeing with it has skipped the question it exists to
+# ask. That costs nothing, because the task is the only thing that must cross
+# the fork and Naiad holds it itself.
 [[states]]
 name = "grill"
+clear = true
 prompt = """
 /grill-with-docs {task}
 

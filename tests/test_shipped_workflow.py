@@ -1,4 +1,5 @@
-"""The one Workflow that ships: the Matt Pocock feature chain.
+"""The one Workflow that ships: a classifying State, the bug branch and the
+Matt Pocock feature chain, rejoining at the pull request.
 
 Asserted as an operator and an agent meet it — the file on disk parses, its
 Prompts read as delivered rather than as templates, and a Run starts from it.
@@ -13,16 +14,17 @@ import pytest
 
 from naiad.cli.kickoff import start_run
 from naiad.domain.prompt import render_prompt
-from naiad.domain.transitions import next_states
+from naiad.domain.transitions import deviation, next_states
 from naiad.domain.workflow import load_workflow
 from naiad.runtime.run import RunStore
 
 WORKFLOW_PATH = Path(__file__).resolve().parents[1] / "workflows" / "matt-pocock.toml"
 
-# Declared order, with the short branch first: the bug branch, then the feature
+# Declared order: the classifying State, then the short branch, then the feature
 # chain, then the tail they share. No Run walks this order end to end — it is
 # the order the file reads in, and the order an implicit successor comes from.
 STATES = [
+    "classify",
     "diagnose",
     "no-repro",
     "grill",
@@ -35,7 +37,9 @@ STATES = [
     "done",
 ]
 
-# Every State that delivers something, and the skill its Prompt must invoke.
+# Every State whose Prompt runs a skill, and the skill it must invoke. The
+# classifying State is deliberately absent: it runs none, which is why it is the
+# one Prompt that does not open with a slash command.
 SKILLS = {
     "diagnose": "/diagnosing-bugs",
     "grill": "/grill-with-docs",
@@ -50,6 +54,7 @@ SKILLS = {
 # the declared order, and what each may announce. Every other successor in the
 # Workflow stays implicit.
 CANDIDATES = {
+    "classify": ("grill", "diagnose"),
     "diagnose": ("no-repro", "pull-request"),
     "no-repro": ("pull-request",),
 }
@@ -68,8 +73,19 @@ FEATURE_CHAIN = {
     "done": (),
 }
 
-# The two States a Run may be started at directly, each the head of a branch.
+# The two States a Run may be started at directly, each the head of a branch —
+# the escape hatch for an operator who already knows which kind of work they
+# have and would rather not have it classified.
 BRANCH_HEADS = ["diagnose", "grill"]
+
+# Every State that delivers a Prompt at all: the skill-running ones and the
+# classifier, which runs none.
+DELIVERING = ["classify", *sorted(SKILLS)]
+
+# The States told the task in words. The classifier is told it because it has
+# nothing else to read; the two branch heads because they Clear, and what the
+# classifier made of the task is exactly what must not survive that Clear.
+TOLD_THE_TASK = ["classify", *BRANCH_HEADS]
 
 TASK = "add dark mode"
 
@@ -124,7 +140,7 @@ def test_each_prompt_opens_by_invoking_its_skill(workflow, state_name, skill):
     assert delivered(workflow, state_name).startswith(skill)
 
 
-@pytest.mark.parametrize("state_name", sorted(SKILLS))
+@pytest.mark.parametrize("state_name", DELIVERING)
 def test_each_prompt_names_the_state_to_announce_next(workflow, state_name):
     """The Workflow file owns the ordering, so a Prompt names its successors by
     interpolation rather than by hand — and the agent is told names it can
@@ -143,14 +159,14 @@ def test_each_prompt_names_the_state_to_announce_next(workflow, state_name):
 def test_each_state_that_declares_candidates_declares_the_right_ones(
     workflow, state_name, candidates
 ):
-    """Only one of these branches: `no-repro` declares a single candidate, and
+    """Two of these three branch: `no-repro` declares a single candidate, and
     declares it because its implicit successor would be the feature chain it
     must not fall into. The rejoin is declared from the short branch, so it sits
     a line from its own head rather than reaching across the file."""
     assert workflow.state(state_name).next_candidates == candidates
 
 
-def test_nothing_outside_the_bug_branch_declares_candidates(workflow):
+def test_no_state_outside_that_table_declares_candidates(workflow):
     """Every other successor stays implicit, supplied by the declared order —
     which is what leaves the existing feature chain untouched."""
     declared = {state.name for state in workflow.states if state.next_candidates}
@@ -165,23 +181,109 @@ def test_the_feature_chain_keeps_every_successor_it_has_today(workflow, state_na
     assert next_states(workflow, state_name) == successors
 
 
-def test_only_the_branch_heads_are_told_the_task(workflow):
+def test_only_the_classifier_and_the_branch_heads_are_told_the_task(workflow):
     """Every later State reads the work from the Artifacts the earlier ones
     wrote, which is what makes Clearing safe. Both branch heads Clear, so both
-    restate the task; Naiad holds it and interpolates it into every Prompt."""
-    told = [name for name in SKILLS if TASK in delivered(workflow, name)]
+    restate the task; Naiad holds it and interpolates it into every Prompt
+    rather than only the first, which is what makes the fork safe by
+    construction rather than by luck."""
+    told = [name for name in DELIVERING if TASK in delivered(workflow, name)]
 
-    assert sorted(told) == BRANCH_HEADS
+    assert sorted(told) == sorted(TOLD_THE_TASK)
 
 
-def test_the_implement_loop_clears_and_the_design_phases_do_not(workflow):
+def test_the_branch_heads_and_the_implement_loop_clear_and_the_design_phases_do_not(workflow):
     """Each ticket starts fresh; the spec and the tickets are synthesised from
-    the grilling conversation and would lose it. The diagnosing State Clears so
-    that nothing upstream of it — a classifier's guess at what kind of bug this
-    is, most of all — becomes the starting hypothesis."""
+    the grilling conversation and would lose it.
+
+    Both branch heads Clear, which is what keeps the classifying State's
+    reading of the task from reaching either of them — most of all the
+    diagnosing State, whose job is to form a hypothesis from evidence rather
+    than to inherit a guess."""
     clearing = [state.name for state in workflow.states if state.clear]
 
-    assert clearing == ["diagnose", "implement", "pull-request", "review-fix"]
+    assert clearing == ["diagnose", "grill", "implement", "pull-request", "review-fix"]
+
+
+@pytest.mark.parametrize("head", BRANCH_HEADS)
+def test_each_branch_head_clears_and_so_restates_the_task(workflow, head):
+    """The Clear is why the task has to be restated, and Naiad interpolating it
+    into every delivered Prompt rather than only the first is why that costs
+    nothing: the one thing that must cross the fork is the only thing Naiad
+    holds itself."""
+    assert workflow.state(head).clear
+    assert TASK in delivered(workflow, head)
+
+
+def test_every_state_that_delivers_a_prompt_is_accounted_for(workflow):
+    """The two tables above split the delivering States between those that run
+    a skill and the one that does not, so a State added to the file without
+    being added to a table would otherwise be asserted by nothing."""
+    delivering = [state.name for state in workflow.states if state.prompt is not None]
+
+    assert sorted(delivering) == sorted(DELIVERING)
+
+
+def test_only_the_states_that_run_a_skill_open_with_a_slash_command(workflow):
+    """The convention's reason is mechanical — a slash command is read only at
+    the start of a message — not a requirement that every State run one. The
+    classifying State runs no skill, so its Prompt opens with prose, and the
+    file's comment says so rather than asserting the convention universally."""
+    opening = [name for name in DELIVERING if delivered(workflow, name).startswith("/")]
+
+    assert sorted(opening) == sorted(SKILLS)
+
+
+def test_the_classifying_state_is_where_a_run_begins(workflow):
+    """First in the declared order, so an operator who names no start State is
+    classified rather than dropped into whichever branch happens to be first.
+    Which candidates it declares is asserted from the table above."""
+    assert workflow.states[0].name == "classify"
+
+
+def test_the_classifying_state_neither_clears_nor_writes_anything(workflow):
+    """Nothing precedes it, so there is no context to Clear; and its
+    Announcement is the record the Run log already holds, which is all an
+    Artifact could have carried to branch heads that Clear anyway.
+
+    Naiad has no notion of an Artifact, so the only thing assertable about not
+    writing one is that the Prompt asks for no work beyond the judgment."""
+    assert not workflow.state("classify").clear
+
+    prompt = delivered(workflow, "classify")
+    assert "artifact" not in prompt.lower()
+    assert "Do no other work." in prompt
+
+
+@pytest.mark.parametrize(
+    ("kind", "head"),
+    [("feature", "grill"), ("bug", "diagnose")],
+)
+def test_the_classifying_state_attaches_its_criterion_to_the_right_branch(workflow, kind, head):
+    """Naiad decides nothing about which branch a task belongs to, and no skill
+    runs here, so if the criterion is not in the Prompt it is nowhere.
+
+    Asserted per branch and within one sentence rather than as two words
+    somewhere in the Prompt: a Prompt naming both kinds and both heads passes
+    the loose form even with the two swapped, which is the one way this Prompt
+    can be wrong while looking right."""
+    prompt = delivered(workflow, "classify")
+
+    sentences = [sentence for sentence in prompt.split(".") if f"announce {head}" in sentence]
+
+    assert any(kind in sentence for sentence in sentences)
+
+
+@pytest.mark.parametrize("head", BRANCH_HEADS)
+def test_announcing_either_branch_head_from_the_classifier_is_not_a_deviation(workflow, head):
+    """Both are declared candidates, so choosing correctly at the fork is not
+    recorded as having left the path — whichever way the choice goes.
+
+    The off-path case is asserted alongside it because an empty expectation is
+    also reported as no Deviation: without it this passes just as well against
+    a Workflow that has never heard of the classifying State."""
+    assert deviation(workflow, announced=head, previous_state="classify") == ()
+    assert deviation(workflow, announced="done", previous_state="classify") == CANDIDATES["classify"]
 
 
 def test_the_diagnosing_state_runs_the_whole_discipline_in_one_state(workflow):
@@ -304,12 +406,19 @@ def test_a_run_can_be_started_at_either_branch_head(workflow, tmp_path, sessions
         assert f"announce {successor}" in prompt
 
 
-def test_a_run_started_with_no_state_named_begins_at_the_first_declared_one(tmp_path, sessions):
-    """Which is the diagnosing State, because the bug branch is declared first.
-    Asserted against the shipped file rather than a fixture: an operator who
-    names nothing gets this Prompt, and until the classifying State is declared
-    in front of it a feature Run has to name `grill` itself."""
-    assert kickoff(tmp_path, sessions).startswith(f"/diagnosing-bugs {TASK}")
+def test_a_run_started_with_no_state_named_begins_by_classifying_the_task(
+    workflow, tmp_path, sessions
+):
+    """The operator says nothing about where to start and describes the task in
+    their own words; the agent decides which kind of work it is. Asserted
+    against the shipped file rather than a fixture, because this is the Prompt
+    an operator who names nothing actually receives."""
+    prompt = kickoff(tmp_path, sessions)
+
+    assert not prompt.startswith("/")
+    assert TASK in prompt
+    for head in next_states(workflow, "classify"):
+        assert f"announce {head}" in prompt
 
 
 def test_an_unattended_run_tells_the_two_kinds_of_gate_state_apart(workflow):
