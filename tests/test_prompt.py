@@ -80,3 +80,49 @@ def test_leaves_unrecognised_braces_untouched():
     rendered = render_prompt('return {"ok": true} for {task}', task="t", next_states=("s",))
 
     assert rendered == 'return {"ok": true} for t'
+
+
+def test_interpolates_the_working_branch():
+    """A Run-level fact like the task, so it reaches every Prompt the Run
+    delivers rather than only the first, and survives a Clear."""
+    rendered = render_prompt(
+        "check out {branch}", task="t", next_states=("s",), branch="MC-AGENT-8546"
+    )
+
+    assert rendered == "check out MC-AGENT-8546"
+
+
+def test_interpolates_the_predecessor():
+    """Substituted without being read, exactly as a Subject is: whether to
+    actually stand on it is decided in the Prompt (ADR 0015)."""
+    rendered = render_prompt(
+        "based on {predecessor}", task="t", next_states=("s",), predecessor="MC-AGENT-8000"
+    )
+
+    assert rendered == "based on MC-AGENT-8000"
+
+
+def test_a_missing_predecessor_renders_as_nothing():
+    """The Predecessor is optional — the first Entry for a repository has
+    none — so a Prompt naming one renders empty rather than raising."""
+    rendered = render_prompt("based on {predecessor}", task="t", next_states=("s",))
+
+    assert rendered == "based on "
+
+
+def test_a_missing_working_branch_renders_as_nothing():
+    """Nothing here guards it. The refusal belongs at kickoff, where the
+    operator is standing at the terminal and can retype the command."""
+    rendered = render_prompt("check out {branch}", task="t", next_states=("s",))
+
+    assert rendered == "check out "
+
+
+def test_leaves_a_placeholder_naiad_does_not_define_untouched():
+    """`--base` is a flag, not a placeholder: the Prompt names {predecessor}.
+    Only the placeholders Naiad defines are replaced."""
+    rendered = render_prompt(
+        "{base} then {branch}", task="t", next_states=("s",), branch="B", predecessor="P"
+    )
+
+    assert rendered == "{base} then B"

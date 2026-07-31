@@ -23,7 +23,7 @@ from naiad.adapters.notify import DesktopNotifications
 from naiad.adapters.tmux import TmuxError, TmuxSessions
 from naiad.cli.announce import AnnounceError, announce_state
 from naiad.cli.ask import AskError, ask_question
-from naiad.cli.kickoff import MissingSubject, start_run
+from naiad.cli.kickoff import MissingSubject, MissingWorkingBranch, start_run
 from naiad.cli.protocol import injection_for
 from naiad.cli.watch import watch
 from naiad.domain.transitions import UnknownState
@@ -42,6 +42,7 @@ FAILURES = (
     AnnounceError,
     AskError,
     MissingSubject,
+    MissingWorkingBranch,
     NoRunError,
     StorageError,
     TmuxError,
@@ -62,6 +63,24 @@ def main(argv: list[str] | None = None) -> int:
         type=Path,
         default=None,
         help="the target repository (default: the working directory)",
+    )
+    # Required, but not by argparse: the refusal lives in start_run, so that
+    # every entrance to starting a Run is guarded by the same check and the
+    # message can say why Naiad invents no Working branch (ADR 0015).
+    #
+    # The flags read as an operator types them — `--branch`, `--base` — while
+    # what they set is named as the glossary names it. The translation happens
+    # here, at the boundary, and nowhere else.
+    run.add_argument(
+        "--branch",
+        default=None,
+        help="the working branch this Run's commits belong on (required)",
+    )
+    run.add_argument(
+        "--base",
+        dest="predecessor",
+        default=None,
+        help="the branch this Run's work stands on (default: nothing)",
     )
     run.add_argument(
         "--at",
@@ -265,6 +284,8 @@ def _start(arguments: argparse.Namespace) -> int:
             workflow_path=workflow_path,
             task=arguments.task,
             target_repo=target_repo,
+            working_branch=arguments.branch,
+            predecessor=arguments.predecessor,
             store=RunStore(default_runs_root()),
             sessions=TmuxSessions(),
             run_id=_run_id(started, workflow_path),

@@ -107,6 +107,7 @@ DELIVERING = ["classify", *sorted(SKILLS)]
 TOLD_THE_TASK = ["classify", *BRANCH_HEADS]
 
 TASK = "add dark mode"
+BRANCH = "MC-AGENT-8546"
 
 
 @pytest.fixture
@@ -528,6 +529,7 @@ def kickoff(tmp_path, sessions, **options):
         workflow_path=WORKFLOW_PATH,
         task=TASK,
         target_repo=repo,
+        working_branch=BRANCH,
         store=RunStore(tmp_path / "runs"),
         sessions=sessions,
         run_id="20260720-120000-matt-pocock",

@@ -41,6 +41,16 @@ class Run:
     task: str
     target_repo: Path
     created_at: str
+    # The git branch this Run's work belongs on, and what that work stands on.
+    # Facts of the Run like the task, so that every Prompt it delivers can name
+    # them and a Cleared State still knows its branch. Opaque strings: Naiad
+    # runs no git and reads neither of them (ADR 0015).
+    #
+    # A Working branch is required of anything that starts a Run, and refused
+    # before the Run exists. It is optional here because a Run written before
+    # the field existed has none, and because a store is a store.
+    working_branch: str | None = None
+    predecessor: str | None = None
     # How this Run resolves its next State. Options of the Run rather than of
     # the Workflow: the same Workflow file runs supervised or unattended.
     skip_gates: bool = False
@@ -89,6 +99,8 @@ class Run:
             "task": self.task,
             "target_repo": str(self.target_repo),
             "created_at": self.created_at,
+            "working_branch": self.working_branch,
+            "predecessor": self.predecessor,
             "skip_gates": self.skip_gates,
             "start_state": self.start_state,
             "tmux_session": self.tmux_session,
@@ -113,6 +125,8 @@ class RunStore:
         task: str,
         target_repo: Path,
         created_at: str,
+        working_branch: str | None = None,
+        predecessor: str | None = None,
         skip_gates: bool = False,
         start_state: str | None = None,
     ) -> Run:
@@ -136,6 +150,8 @@ class RunStore:
             task=task,
             target_repo=target_repo,
             created_at=created_at,
+            working_branch=working_branch,
+            predecessor=predecessor,
             skip_gates=skip_gates,
             start_state=start_state,
         )
@@ -163,6 +179,10 @@ class RunStore:
             task=document["task"],
             target_repo=Path(document["target_repo"]),
             created_at=document["created_at"],
+            # Read with a default, as skip_gates is: a Run written before these
+            # fields existed still loads, and simply never had a branch.
+            working_branch=document.get("working_branch"),
+            predecessor=document.get("predecessor"),
             skip_gates=document.get("skip_gates", False),
             start_state=document.get("start_state"),
             tmux_session=document["tmux_session"],

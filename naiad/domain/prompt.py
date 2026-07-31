@@ -30,7 +30,13 @@ def render_candidates(candidates: Sequence[str]) -> str:
 
 
 def render_prompt(
-    prompt: str, *, task: str, next_states: Sequence[str], subject: str | None = None
+    prompt: str,
+    *,
+    task: str,
+    next_states: Sequence[str],
+    subject: str | None = None,
+    branch: str | None = None,
+    predecessor: str | None = None,
 ) -> str:
     """next_states is plural even though most States have exactly one: at a
     Branching State the Prompt reads as naming both exits, and the Prompt's own
@@ -49,11 +55,37 @@ def render_prompt(
     needed one is unrenderable either way, and the useful place to say so is
     the announce command, where the agent is still in its own turn and can
     correct itself — raising here would only reach a human.
+
+    branch and predecessor are Run-level facts like the task rather than
+    Announcement-level ones like the Subject, which is why they reach every
+    Prompt a Run delivers and not only its first: both heads of the shipped
+    Workflow Clear, and a State that has forgotten everything can still name
+    the branch it is working on.
+
+    They stay separate arguments rather than one object grouping the three
+    Run-level facts. The type that object wants to be already exists and is
+    called Run — both callers pass exactly its fields — but this module is
+    domain and the Run is runtime, so taking one would invert the layering
+    every other rule here observes. A second type holding a copy of three of
+    the Run's fields buys nothing but a place for them to drift, and it would
+    guard against a sixth placeholder the spec does not foresee: the set is
+    closed at the task, the next State, the Subject, the branch and what it
+    stands on.
+
+    Both are opaque. The Predecessor especially is substituted without being
+    read — Naiad neither asks git whether that branch exists nor decides
+    whether the Run should stand on it, which is the Prompt's judgment to make
+    (ADR 0015). An absent Predecessor is ordinary, being what the first Entry
+    for a repository has, and renders as nothing. An absent Working branch is
+    not, but it is refused at kickoff rather than here, for the reason a
+    missing Subject is refused where the mistake can still be corrected.
     """
     return (
         prompt.replace("{task}", task)
         .replace("{next_state}", render_candidates(next_states))
         .replace("{subject}", subject or "")
+        .replace("{branch}", branch or "")
+        .replace("{predecessor}", predecessor or "")
     )
 
 

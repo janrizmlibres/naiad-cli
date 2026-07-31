@@ -8,6 +8,24 @@ from naiad.runtime.run import default_runs_root
 STARTED = datetime(2026, 7, 19, 12, 0, 0, tzinfo=timezone.utc)
 
 
+def _repo(tmp_path):
+    """Beside the Naiad home rather than around it, since a run directory
+    inside the target repository is refused."""
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    return repo
+
+
+def _workflow(tmp_path):
+    workflow = tmp_path / "workflow.toml"
+    workflow.write_text(
+        'name = "w"\n'
+        "[[states]]\nname = 'grill'\nprompt = '/grill'\n"
+        "[[states]]\nname = 'done'\nterminal = true\n"
+    )
+    return workflow
+
+
 def test_runs_live_under_the_operators_naiad_directory(monkeypatch):
     monkeypatch.delenv("NAIAD_HOME", raising=False)
 
@@ -44,14 +62,12 @@ def test_starting_at_a_state_the_workflow_does_not_declare_is_refused(
     """Refused before a session is created, so the operator reads an error
     naming the valid States rather than watching a run start in the wrong one."""
     monkeypatch.setenv("NAIAD_HOME", str(tmp_path / "naiad"))
-    workflow = tmp_path / "workflow.toml"
-    workflow.write_text(
-        'name = "w"\n'
-        "[[states]]\nname = 'grill'\nprompt = '/grill'\n"
-        "[[states]]\nname = 'done'\nterminal = true\n"
-    )
+    workflow = _workflow(tmp_path)
 
-    assert main(["run", str(workflow), "a task", "--repo", str(tmp_path), "--at", "grrill"]) == 2
+    # A branch is supplied so that the refusal under test is the one asserted:
+    # a Run started without one is refused first, and for its own reason.
+    command = ["run", str(workflow), "a task", "--repo", str(tmp_path)]
+    assert main([*command, "--branch", "MC-AGENT-8546", "--at", "grrill"]) == 2
 
     error = capsys.readouterr().err
     assert "grrill" in error and "grill" in error
@@ -81,6 +97,70 @@ def test_installing_hooks_over_an_unreadable_settings_file_is_reported_not_a_tra
 
     assert main(["install-hooks", "--settings", str(settings)]) == 2
     assert "not valid JSON" in capsys.readouterr().err
+
+
+def test_starting_a_run_without_a_working_branch_is_refused(monkeypatch, tmp_path, capsys):
+    """Refused before the Run directory or the session exists, and the error
+    names the flag to pass, the way the missing-Subject one names the command
+    to retype. Naiad derives no branch name (ADR 0015)."""
+    monkeypatch.setenv("NAIAD_HOME", str(tmp_path / "naiad"))
+    workflow = _workflow(tmp_path)
+
+    assert main(["run", str(workflow), "a task", "--repo", str(tmp_path)]) == 2
+
+    assert "--branch" in capsys.readouterr().err
+    assert not (tmp_path / "naiad" / "runs").exists()
+
+
+def test_the_working_branch_and_the_pinned_base_reach_the_run(monkeypatch, tmp_path, sessions):
+    """`--base` names what the work stands on; the Run records it as its
+    Predecessor, verbatim and unread."""
+    monkeypatch.setenv("NAIAD_HOME", str(tmp_path / "naiad"))
+    monkeypatch.setattr("naiad.cli.main.TmuxSessions", lambda: sessions)
+    workflow = _workflow(tmp_path)
+
+    code = main(
+        [
+            "run",
+            str(workflow),
+            "a task",
+            "--repo",
+            str(_repo(tmp_path)),
+            "--branch",
+            "MC-AGENT-8546",
+            "--base",
+            "MC-AGENT-8000",
+        ]
+    )
+
+    assert code == 0
+    (metadata,) = (tmp_path / "naiad" / "runs").glob("*/run.json")
+    recorded = json.loads(metadata.read_text())
+    assert recorded["working_branch"] == "MC-AGENT-8546"
+    assert recorded["predecessor"] == "MC-AGENT-8000"
+
+
+def test_a_run_started_with_no_pinned_base_has_no_predecessor(monkeypatch, tmp_path, sessions):
+    """The Predecessor is optional: work that stands on nothing is ordinary."""
+    monkeypatch.setenv("NAIAD_HOME", str(tmp_path / "naiad"))
+    monkeypatch.setattr("naiad.cli.main.TmuxSessions", lambda: sessions)
+    workflow = _workflow(tmp_path)
+
+    code = main(
+        [
+            "run",
+            str(workflow),
+            "a task",
+            "--repo",
+            str(_repo(tmp_path)),
+            "--branch",
+            "MC-AGENT-8546",
+        ]
+    )
+
+    assert code == 0
+    (metadata,) = (tmp_path / "naiad" / "runs").glob("*/run.json")
+    assert json.loads(metadata.read_text())["predecessor"] is None
 
 
 def test_run_ids_of_concurrent_runs_differ():

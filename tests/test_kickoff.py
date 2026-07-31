@@ -1,6 +1,6 @@
 import pytest
 
-from naiad.cli.kickoff import MissingSubject, start_run
+from naiad.cli.kickoff import MissingSubject, MissingWorkingBranch, start_run
 from naiad.domain.transitions import UnknownState
 from naiad.domain.workflow import WorkflowError
 from naiad.runtime.resolve import RUN_ID_VARIABLE, RunResolver
@@ -45,6 +45,7 @@ def start(repo, store, sessions, **overrides):
         workflow_path=repo / "workflow.toml",
         task="add dark mode",
         target_repo=repo,
+        working_branch="MC-AGENT-8546",
         store=store,
         sessions=sessions,
         run_id="20260719-120000-feature",
@@ -209,6 +210,77 @@ def test_a_run_started_with_gates_skipped_names_the_next_state_that_has_a_prompt
 
     (spawn,) = sessions.spawned
     assert spawn.initial_prompt.endswith("Then announce implement.")
+
+
+def test_the_run_remembers_the_branch_it_was_started_with(repo, store, sessions):
+    """The tick loop interpolates them into every later Prompt, in a process
+    that outlives kickoff, so they must survive on the Run."""
+    run = start(repo, store, sessions, working_branch="MC-AGENT-8546", predecessor="MC-AGENT-8000")
+
+    reloaded = store.load(run.id)
+    assert reloaded.working_branch == "MC-AGENT-8546"
+    assert reloaded.predecessor == "MC-AGENT-8000"
+
+
+def test_a_run_started_without_a_working_branch_is_refused(repo, store, sessions):
+    """No derivation is attempted and none is possible: a correct branch name
+    needs the affected application and an issue number, which are conventions
+    of the target repository (ADR 0015)."""
+    with pytest.raises(MissingWorkingBranch) as caught:
+        start(repo, store, sessions, working_branch=None)
+
+    assert "--branch" in str(caught.value)
+
+
+def test_a_run_refused_for_want_of_a_branch_creates_nothing(repo, store, sessions):
+    """The same trade the missing-Subject refusal makes: an operator standing
+    at the terminal pays the error message only."""
+    with pytest.raises(MissingWorkingBranch):
+        start(repo, store, sessions, working_branch=None)
+
+    assert sessions.spawned == []
+    assert store.all() == []
+
+
+def _naming_the_branch(repo):
+    """A Workflow whose first State's Prompt names both, so what the opening
+    delivery does with them is what is asserted."""
+    path = repo / "branching.toml"
+    path.write_text(
+        'name = "w"\n'
+        "[[states]]\nname = 'grill'\nprompt = 'work on {branch} based on {predecessor}'\n"
+        "[[states]]\nname = 'done'\nterminal = true\n"
+    )
+    return path
+
+
+def test_the_first_prompt_names_the_branch_and_the_predecessor(repo, store, sessions):
+    start(
+        repo,
+        store,
+        sessions,
+        workflow_path=_naming_the_branch(repo),
+        working_branch="MC-AGENT-8546",
+        predecessor="MC-AGENT-8000",
+    )
+
+    (spawn,) = sessions.spawned
+    assert spawn.initial_prompt == "work on MC-AGENT-8546 based on MC-AGENT-8000"
+
+
+def test_a_run_with_no_predecessor_delivers_the_prompt_with_it_empty(repo, store, sessions):
+    """A Run whose work stands on nothing is ordinary — it is what the first
+    Entry for a repository is — so the Prompt renders rather than raising."""
+    start(
+        repo,
+        store,
+        sessions,
+        workflow_path=_naming_the_branch(repo),
+        working_branch="MC-AGENT-8546",
+    )
+
+    (spawn,) = sessions.spawned
+    assert spawn.initial_prompt == "work on MC-AGENT-8546 based on "
 
 
 def test_a_malformed_workflow_creates_no_run_directory_and_no_session(repo, store, sessions):

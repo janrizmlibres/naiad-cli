@@ -113,6 +113,12 @@ def tick(
                 task=run.task,
                 next_states=action.next_states,
                 subject=action.subject,
+                # Read off the Run rather than off the Action: the branch and
+                # what it stands on are facts of the Run like the task, so they
+                # reach every delivery rather than being decided per
+                # Announcement as the Subject is.
+                branch=run.working_branch,
+                predecessor=run.predecessor,
             ),
         )
         handled.record(announcement.seq, turns=turns.count())

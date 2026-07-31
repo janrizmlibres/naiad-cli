@@ -232,6 +232,73 @@ def test_a_run_started_with_gates_skipped_delivers_the_next_state_that_has_a_pro
     assert session.sent == [("send", "%7", "work, then announce spec")]
 
 
+def _branching_run(tmp_path, **overrides):
+    """A Run whose Workflow names the Working branch in a State that Clears —
+    the case the fields exist for, since a Cleared context has forgotten the
+    branch it was told about at kickoff."""
+    repo = tmp_path / "branched"
+    repo.mkdir()
+    workflow_path = repo / "workflow.toml"
+    workflow_path.write_text(
+        'name = "branched"\n'
+        "[[states]]\nname = 'grill'\nprompt = 'work'\n"
+        "[[states]]\nname = 'implement'\n"
+        "prompt = 'work on {branch} based on {predecessor}'\nclear = true\n"
+        "[[states]]\nname = 'done'\nterminal = true\n"
+    )
+    fields = dict(
+        run_id="branched-run",
+        workflow_path=workflow_path,
+        task="t",
+        target_repo=repo,
+        created_at="2026-07-19T12:00:00Z",
+        working_branch="MC-AGENT-8546",
+    )
+    fields.update(overrides)
+    run = RunStore(tmp_path / "branched-runs").create(**fields)
+    run.attach_session(tmux_session="naiad-branched-run", tmux_pane="%7")
+    return run, parse_workflow(workflow_path.read_text())
+
+
+def test_a_prompt_after_the_first_still_names_the_branch_and_the_predecessor(
+    tmp_path, session
+):
+    """Run-level facts, read back off the Run rather than remembered from
+    kickoff: the loop runs in a process that outlives it, and the State that
+    reads them Clears first."""
+    run, workflow = _branching_run(tmp_path, predecessor="MC-AGENT-8000")
+    announce(run, "implement")
+
+    drive(run, workflow, session)
+
+    assert session.sent == [
+        ("clear", "%7", None),
+        ("send", "%7", "work on MC-AGENT-8546 based on MC-AGENT-8000"),
+    ]
+
+
+def test_the_branch_reaches_every_delivery_not_only_the_first(tmp_path, session):
+    """A State repeating over a series is delivered the branch each time, for
+    the reason it is delivered its Subject each time."""
+    run, workflow = _branching_run(tmp_path, predecessor="MC-AGENT-8000")
+    announce(run, "implement")
+    drive(run, workflow, session)
+    announce(run, "implement")
+    drive(run, workflow, session)
+
+    delivered = [message for kind, _, message in session.sent if kind == "send"]
+    assert delivered == ["work on MC-AGENT-8546 based on MC-AGENT-8000"] * 2
+
+
+def test_a_run_with_no_predecessor_delivers_the_prompt_with_it_empty(tmp_path, session):
+    run, workflow = _branching_run(tmp_path)
+    announce(run, "implement")
+
+    drive(run, workflow, session)
+
+    assert ("send", "%7", "work on MC-AGENT-8546 based on ") in session.sent
+
+
 def test_a_turn_ending_before_the_announcement_is_not_a_turn_ending_since_it(
     run, workflow, session
 ):
