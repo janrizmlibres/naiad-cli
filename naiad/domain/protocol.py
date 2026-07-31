@@ -88,20 +88,19 @@ def render_nudge(*, attempt: int, naiad: str = DEFAULT_NAIAD) -> str:
 
 
 _ANSWER = """\
-The answer to the question you asked:
-
-{answer}
-
-That is settled. Carry on with the phase you are in, and announce when it is done."""
+Answer: {answer}"""
 
 
 def render_answer(answer: str) -> str:
     """How an answer arrives in the agent's session.
 
-    Framed as an answer rather than sent bare, because it lands as a message in
-    a session that has been working on other things: an unattributed sentence
-    reads as a new instruction, and the agent would act on it instead of
-    resuming what it asked about.
+    Labelled rather than sent bare, because it lands as a message in a session
+    that has been working on other things: an unattributed sentence reads as a
+    new instruction, and the agent would act on it instead of resuming what it
+    asked about. One word carries that, so it is a label and not a preamble —
+    a sentence announcing the answer and another telling the agent to carry on
+    say nothing the agent does not already know, having asked the question and
+    being mid-State when the reply arrives.
     """
     return _ANSWER.format(answer=answer)
 

@@ -108,9 +108,14 @@ The question:
 The options the agent was weighing:
 {options}
 
-Reply with your reasoning, then end with exactly one final line:
+Reply with your reasoning, then end with ONE final line. Choose which of these
+two it is — emit exactly one of them, never both. If you settled the question,
+the answer line is the only line; there is no "nothing to escalate" to report.
 
 {answer_marker} <the answer, stated so the agent can act on it directly>
+
+or, if and only if you did not settle it:
+
 {escalate_marker} <what a human must decide, and why it is not in this repository>
 """
 
@@ -135,22 +140,35 @@ def render_consultation(question: Question, *, task: str) -> str:
 def parse_outcome(reply: str) -> Answered | Escalated:
     """What the Answerer's reply amounts to.
 
-    The last marked line wins, so a reply quoting the instructions before
-    answering is read by its answer rather than by the quotation.
+    An answer beats an escalation in the same reply, and the last of either
+    marker beats the earlier ones. Position alone is not enough: the two
+    markers are printed above as a pair, and a reply that fills the pair in
+    rather than choosing between them ends on the escalation. Reading that by
+    position discards a settled answer and wakes the operator to be told that
+    nothing needs them.
+
+    Answer over escalation rather than the reverse, because an Escalation
+    asserts 'I cannot settle this' and a reply that also states an answer has
+    settled it. It is also the recoverable direction: a needless Escalation
+    stalls the Run in silence until a human notices, whereas an answer the
+    agent doubts is one it can argue back against.
 
     A reply with no marked line at all is an Escalation rather than an error.
     Naiad cannot tell an unparseable answer from a wrong one, and sending
     something it does not understand into the session is worse than waking the
     operator — Escalation is already the answer to 'nobody here can settle this'.
     """
+    escalation: Escalated | None = None
     for line in reversed(reply.splitlines()):
         line = line.strip()
         if line.startswith(ANSWER_MARKER):
             answer = line[len(ANSWER_MARKER) :].strip()
             if answer:
                 return Answered(text=answer)
-        if line.startswith(ESCALATE_MARKER):
-            return Escalated(reason=line[len(ESCALATE_MARKER) :].strip() or "no reason given")
+        if line.startswith(ESCALATE_MARKER) and escalation is None:
+            escalation = Escalated(reason=line[len(ESCALATE_MARKER) :].strip() or "no reason given")
+    if escalation is not None:
+        return escalation
     return Escalated(reason="the Answerer's reply did not end with an answer or an escalation")
 
 

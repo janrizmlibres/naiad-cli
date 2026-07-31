@@ -49,6 +49,44 @@ def test_the_consultation_carries_the_task_the_run_is_working_on():
     assert "add dark mode" in render_consultation(RETRIES, task="add dark mode")
 
 
+def test_the_consultation_asks_for_one_marker_and_forbids_both():
+    """Printed as a pair to fill in, the markers get filled in as a pair — a
+    real Answerer settled a question and then added 'ESCALATE: Nothing', which
+    read by position discarded the answer."""
+    consultation = render_consultation(RETRIES, task="add dark mode").lower()
+
+    assert "never both" in consultation
+
+
+def _marked_lines(consultation: str, marker: str) -> list[str]:
+    return [line.strip() for line in consultation.splitlines() if line.strip().startswith(marker)]
+
+
+def test_the_brief_and_the_parser_agree_on_the_reply_format():
+    """The brief and parse_outcome are two halves of one protocol, written in
+    two places with nothing spanning them: the brief printed both markers as a
+    block to fill in, while the parser assumed a reply carried one and read the
+    last. A reply that filled the block in therefore lost its answer.
+
+    So the brief's own example lines are the fixture here — an edit to either
+    half is checked against the other, rather than each staying self-consistent
+    while the pair stops agreeing."""
+    consultation = render_consultation(RETRIES, task="add dark mode")
+    answers = _marked_lines(consultation, ANSWER_MARKER)
+    escalations = _marked_lines(consultation, ESCALATE_MARKER)
+
+    assert len(answers) == 1, "the brief must show each marker exactly once"
+    assert len(escalations) == 1
+
+    # Each line alone, replied as the brief shows it.
+    assert isinstance(parse_outcome(f"my reasoning\n{answers[0]}"), Answered)
+    assert isinstance(parse_outcome(f"my reasoning\n{escalations[0]}"), Escalated)
+
+    # And both together, which is what an Answerer reading it as a template
+    # actually sent. It settled the question, so it must read as settled.
+    assert isinstance(parse_outcome(f"my reasoning\n{answers[0]}\n{escalations[0]}"), Answered)
+
+
 def test_a_marked_answer_is_read_as_an_answer():
     reply = f"Looking at the client, it already retries.\n{ANSWER_MARKER} the client"
 
@@ -67,6 +105,25 @@ def test_the_last_marked_line_wins():
     reply = f"I must end with {ANSWER_MARKER} <x>\nActually:\n{ANSWER_MARKER} the caller"
 
     assert parse_outcome(reply) == Answered(text="the caller")
+
+
+def test_an_answer_wins_over_an_escalation_in_the_same_reply():
+    """The brief prints the two markers as a template, so a reply that fills it
+    in carries both lines with the escalation last. Read by position alone that
+    discards a settled answer and wakes the operator to be told nothing needs
+    them — which is what happened to a real consultation.
+
+    An Escalation means 'I cannot settle this'. A reply that also states an
+    answer has settled it, and the answer is the recoverable half: a needless
+    Escalation stalls the Run in silence, while an answer the agent disagrees
+    with it can argue back against."""
+    reply = (
+        "Reasoning about the ledger.\n"
+        f"{ANSWER_MARKER} Option C, TTL 15 minutes\n"
+        f"{ESCALATE_MARKER} Nothing. Both halves are settled in-repo."
+    )
+
+    assert parse_outcome(reply) == Answered(text="Option C, TTL 15 minutes")
 
 
 def test_a_reply_with_no_marked_line_escalates_rather_than_guessing():
