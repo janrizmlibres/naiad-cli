@@ -109,6 +109,27 @@ def test_the_implement_loop_tells_the_agent_to_re_announce_itself(workflow):
     assert "announce implement" in delivered(workflow, "implement")
 
 
+def test_the_pull_request_state_waits_for_the_review_before_announcing(workflow):
+    """The review-fix State has nothing to work from until Claude Code Review
+    has posted its findings, so the wait belongs before the Announcement rather
+    than after it — announcing early delivers /fix-review an empty pull request.
+
+    The agent is told to keep checking rather than end its turn, because
+    nothing wakes it: a turn that ends without an Announcement is Nudged twice
+    and then parks the Run for a human (naiad.domain.decide).
+    """
+    prompt = delivered(workflow, "pull-request")
+
+    assert "Claude Code Review" in prompt
+    assert "without ending your turn" in prompt
+
+
+def test_the_pull_request_state_announces_even_if_no_review_arrives(workflow):
+    """A repository that runs no review would otherwise hold the Run at a State
+    waiting for something that is never coming."""
+    assert "if no review" in delivered(workflow, "pull-request").lower()
+
+
 def test_no_prompt_after_a_clearing_state_refers_back_to_the_cleared_context(workflow):
     """The symptom deferred issue 02 warns about, caught where it is cheap: a
     Prompt delivered into a wiped context that says 'you just' is naming

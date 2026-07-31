@@ -63,13 +63,21 @@ If tickets remain after it, announce implement again to take the next. If that w
 # leaves behind is one ticket's context rather than the branch's, so carrying it
 # would describe the last ticket as though it were the whole pull request;
 # Cleared, the skill compares the branch against its base and sees all of them.
+#
+# This State waits, which no other one does. The review the next State fixes is
+# produced by Claude Code Review after the pull request opens, so announcing as
+# soon as it is open would hand /fix-review an empty pull request. The wait has
+# to happen inside the turn: an agent that stops without announcing is Nudged
+# twice and then parks the Run, and no review arriving later would wake it.
 [[states]]
 name = "pull-request"
 clear = true
 prompt = """
 /hcgps-pr
 
-When the pull request is open, announce {next_state}.
+Once the pull request is open, wait for Claude Code Review to post its findings on it. Poll it — without ending your turn, because nothing will wake you again if you stop. When the findings are there, announce {next_state}.
+
+If no review has appeared after fifteen minutes, or this repository runs none, say so in the session and announce {next_state} anyway: there is then simply nothing to fix.
 """
 
 # Names the pull request by its branch rather than as the one just opened: this
@@ -78,7 +86,7 @@ When the pull request is open, announce {next_state}.
 name = "review-fix"
 clear = true
 prompt = """
-/fix-review the review left on the open pull request for this branch — fetch its comments from the pull request.
+/fix-review the Claude Code Review posted on the open pull request for this branch — fetch its findings from the pull request.
 
 When the review is addressed and pushed, announce {next_state}.
 """
