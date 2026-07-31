@@ -30,8 +30,8 @@ be added or removed in between.
 
 from __future__ import annotations
 
-from collections.abc import Collection, Sequence
-from dataclasses import dataclass
+from collections.abc import Collection, Mapping, Sequence
+from dataclasses import dataclass, field
 from pathlib import Path
 
 from naiad.domain.entry import Entry
@@ -55,11 +55,19 @@ class Signals:
     following says Entries added later are to be picked up. It is the whole of
     the difference between the two modes, and it changes nothing but the answer
     to an empty Queue.
+
+    declared maps an Entry's id to the Working branch its Run declared, for
+    Entries whose own record carries none (ADR 0022). Handed in like finished,
+    and for the same reason: the fact lives on the Run, and asking each Run
+    here would keep the rules from being data in, Action out. An Entry absent
+    from the mapping has no declared branch — its Run never reached a head, or
+    never existed.
     """
 
     entries: Sequence[Entry]
     finished: Collection[str] = ()
     following: bool = False
+    declared: Mapping[str, str] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -132,7 +140,11 @@ def supervise(signals: Signals) -> Scan:
             actions.append(
                 Start(
                     entry=entry,
-                    predecessor=_predecessor(entry, preceding=signals.entries[:position]),
+                    predecessor=_predecessor(
+                        entry,
+                        preceding=signals.entries[:position],
+                        declared=signals.declared,
+                    ),
                 )
             )
         elif entry.run_id not in signals.finished:
@@ -144,10 +156,18 @@ def supervise(signals: Signals) -> Scan:
     return IDLE if signals.following else DRAINED
 
 
-def _predecessor(entry: Entry, *, preceding: Sequence[Entry]) -> str | None:
+def _predecessor(
+    entry: Entry, *, preceding: Sequence[Entry], declared: Mapping[str, str]
+) -> str | None:
     """What an Entry's work stands on: the pinned base if it has one, otherwise
     the Working branch of the nearest preceding Entry for the same repository,
     otherwise nothing.
+
+    A preceding Entry whose own record carries no branch yields the branch its
+    Run declared (ADR 0022) — the stacking chain works for Derived branches
+    exactly as for given ones. One with no branch anywhere — its Run never
+    reached a head — contributes none, exactly as a missing Predecessor
+    renders: absent, ordinary, walked past to the Entry before it.
 
     Entries for other repositories are walked over, because the Queue is global
     and a branch name from another repository is not a fact about this one:
@@ -170,8 +190,13 @@ def _predecessor(entry: Entry, *, preceding: Sequence[Entry]) -> str | None:
         return entry.pinned_base
 
     for earlier in reversed(preceding):
-        if earlier.target_repo == entry.target_repo:
-            return earlier.working_branch
+        if earlier.target_repo != entry.target_repo:
+            continue
+        branch = earlier.working_branch
+        if branch is None:
+            branch = declared.get(earlier.id)
+        if branch is not None:
+            return branch
 
     return None
 

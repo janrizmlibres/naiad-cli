@@ -30,7 +30,7 @@ from typing import assert_never
 from naiad.domain.entry import Entry
 from naiad.domain.supervise import Drained, Idle, Resume, Signals, Start, supervise
 from naiad.runtime.home import StorageError
-from naiad.runtime.queue import DONE, Queue, status_of
+from naiad.runtime.queue import DONE, Queue, branch_of, status_of
 from naiad.runtime.run import Run, RunStore
 
 # How long a following Supervisor waits before looking at the Queue again.
@@ -69,7 +69,12 @@ def supervise_queue(
     while True:
         entries = queue.all()
         scanned = supervise(
-            Signals(entries=entries, finished=_finished(entries, runs), following=following)
+            Signals(
+                entries=entries,
+                finished=_finished(entries, runs),
+                following=following,
+                declared=_declared(entries, runs),
+            )
         )
 
         if isinstance(scanned, Idle):
@@ -125,6 +130,18 @@ def _finished(entries: Sequence[Entry], runs: RunStore) -> set[str]:
         entry.run_id
         for entry in entries
         if entry.run_id is not None and status_of(entry, runs) == DONE
+    }
+
+
+def _declared(entries: Sequence[Entry], runs: RunStore) -> dict[str, str]:
+    """The branches Runs declared for Entries whose own record carries none,
+    read through the same resolver the claim check uses (ADR 0022), so that one
+    place decides what branch an Entry works on. A Run that never declared —
+    or whose directory has gone — resolves to nothing and is simply absent."""
+    return {
+        entry.id: branch
+        for entry in entries
+        if entry.working_branch is None and (branch := branch_of(entry, runs)) is not None
     }
 
 

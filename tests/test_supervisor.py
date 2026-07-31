@@ -78,9 +78,12 @@ class Supervision:
     is ticked and ticked and never ends.
     """
 
-    def __init__(self, runs, *, never_finishes=(), at_most=20):
+    def __init__(self, runs, *, never_finishes=(), declares=None, at_most=20):
         self.runs = runs
         self.never_finishes = set(never_finishes)
+        # Which Runs declare a Derived branch when ticked, and what name: what
+        # the agent at the head of a branchless Run does with `naiad branch`.
+        self.declares = declares or {}
         self.at_most = at_most
         self.started = []
         self.ticked = []
@@ -104,6 +107,9 @@ class Supervision:
         self.ticked.append(run.id)
         if len(self.ticked) > self.at_most:
             raise AssertionError("the supervisor ticked more than the test allows")
+        if run.id in self.declares and run.working_branch is None:
+            run.working_branch = self.declares[run.id]
+            run.save()
         if run.id in self.never_finishes:
             return
         RunLog(run.root).record(Finish(state="done"))
@@ -290,6 +296,53 @@ def test_an_entry_added_while_following_is_picked_up(queue, runs, repo):
 
     assert supervision.started == [("one", None)]
     assert supervision.ticked == ["run-1"]
+
+
+# The Predecessor resolves through Runs (ADR 0022): a preceding Entry whose own
+# record carries no branch yields the branch its Run declared.
+
+
+def test_the_next_entry_stands_on_the_branch_the_preceding_run_declared(queue, runs, repo):
+    """The stacking chain works for Derived branches exactly as for given ones:
+    the declared name is read off the Run, resolved by the rules, and recorded
+    on the next Run for its Prompts to render."""
+    first = queued(queue, repo, "one", working_branch=None)
+    second = queued(queue, repo, "two")
+    supervision = Supervision(runs, declares={"run-1": "feat/dark-mode"})
+
+    supervising(queue, runs, supervision)
+
+    assert supervision.started == [(first.id, None), (second.id, "feat/dark-mode")]
+    assert runs.load("run-2").predecessor == "feat/dark-mode"
+
+
+def test_a_run_that_never_declared_contributes_no_predecessor(queue, runs, repo):
+    """A branchless Entry whose Run never recorded a branch — it never reached
+    a head — contributes none, exactly as a missing Predecessor renders."""
+    first = queued(queue, repo, "one", working_branch=None)
+    second = queued(queue, repo, "two")
+    supervision = Supervision(runs)
+
+    supervising(queue, runs, supervision)
+
+    assert supervision.started == [(first.id, None), (second.id, None)]
+
+
+def test_resolution_continues_past_an_undeclared_run_to_the_branch_before_it(queue, runs, repo):
+    """Walked past rather than stopped at: behind an Entry with no branch
+    anywhere, the next Entry still stands on the nearest branch the lane holds."""
+    first = queued(queue, repo, "a-first")
+    headless = queued(queue, repo, "b-headless", working_branch=None)
+    third = queued(queue, repo, "c-third")
+    supervision = Supervision(runs)
+
+    supervising(queue, runs, supervision)
+
+    assert supervision.started == [
+        (first.id, None),
+        (headless.id, first.working_branch),
+        (third.id, first.working_branch),
+    ]
 
 
 # Crash recovery: there is no resume path, because there is no state to resume.

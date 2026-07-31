@@ -28,8 +28,8 @@ def entry(identifier, **overrides):
     return Entry(**fields)
 
 
-def draining(*entries, finished=()):
-    return Signals(entries=entries, finished=finished, following=False)
+def draining(*entries, finished=(), declared=None):
+    return Signals(entries=entries, finished=finished, following=False, declared=declared or {})
 
 
 def following(*entries, finished=()):
@@ -275,6 +275,51 @@ def test_an_entry_whose_immediate_predecessor_was_removed_takes_the_one_before_i
     assert supervise(draining(first, third, finished={"a-run"})) == [
         Start(entry=third, predecessor="MC-AGENT-one")
     ]
+
+
+def test_a_branchless_entry_stands_on_the_branch_the_preceding_run_declared():
+    """A preceding Entry whose own record carries no branch yields the branch
+    its Run declared (ADR 0022): the stacking chain works for Derived branches
+    exactly as for given ones."""
+    derived = entry("one", working_branch=None, run_id="a-run")
+    second = entry("two")
+
+    assert supervise(
+        draining(derived, second, finished={"a-run"}, declared={"one": "feat/dark-mode"})
+    ) == [Start(entry=second, predecessor="feat/dark-mode")]
+
+
+def test_a_pinned_base_wins_over_a_declared_branch():
+    derived = entry("one", working_branch=None, run_id="a-run")
+    pinned = entry("two", pinned_base="develop")
+
+    assert supervise(
+        draining(derived, pinned, finished={"a-run"}, declared={"one": "feat/dark-mode"})
+    ) == [Start(entry=pinned, predecessor="develop")]
+
+
+def test_an_entry_with_no_branch_anywhere_is_walked_past():
+    """A preceding Entry whose Run never recorded a branch (it never reached a
+    head) contributes none, exactly as a missing Predecessor renders: absent,
+    ordinary, walked past to the next preceding Entry for the repository."""
+    first = entry("one", run_id="a-run")
+    headless = entry("two", working_branch=None, run_id="another-run")
+    third = entry("three")
+
+    assert supervise(
+        draining(first, headless, third, finished={"a-run", "another-run"})
+    ) == [Start(entry=third, predecessor="MC-AGENT-one")]
+
+
+def test_a_declared_branch_in_another_repository_is_still_walked_over():
+    """A Derived branch is as much another repository's fact as a given one:
+    declared or not, an Entry for another repository contributes nothing here."""
+    interloper = entry("one", target_repo=ANOTHER_REPO, working_branch=None, run_id="a-run")
+    second = entry("two")
+
+    assert supervise(
+        draining(interloper, second, finished={"a-run"}, declared={"one": "feat/theirs"})
+    ) == [Start(entry=second, predecessor=None)]
 
 
 def test_a_preceding_entry_for_the_same_repository_is_never_skipped():
