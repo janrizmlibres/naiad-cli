@@ -6,15 +6,17 @@ operator wants to know about one are asked of its Run here.
 """
 
 import json
+from dataclasses import replace
 
 import pytest
 
 from naiad.domain.decide import Finish
+from naiad.domain.entry import Entry
 from naiad.domain.question import Question
 from naiad.runtime.announcements import Announcements
 from naiad.runtime.home import StorageError
 from naiad.runtime.log import RunLog
-from naiad.runtime.queue import DONE, PARKED, RUNNING, WAITING, Entry, Queue, status_of
+from naiad.runtime.queue import DONE, PARKED, RUNNING, WAITING, Queue, status_of
 from naiad.runtime.records import Notices
 from naiad.runtime.run import RunStore
 
@@ -108,6 +110,28 @@ def test_removing_an_entry_that_is_not_there_is_reported(queue, repo):
     queue.add(entry(repo))
 
     assert queue.remove("no-such-entry") is False
+
+
+def test_an_entry_records_the_run_it_became(queue, repo):
+    """The one thing that changes about an Entry, and the only field on it that
+    says anything about a Run (ADR 0013)."""
+    queued = queue.add(entry(repo))
+
+    attached = queue.attach_run(queued, run_id="a-run")
+
+    assert attached.run_id == "a-run"
+    assert queue.all()[0].run_id == "a-run"
+
+
+def test_recording_the_run_changes_nothing_else_about_the_entry(queue, repo):
+    """Everything else was decided when the Entry was made, so a Supervisor
+    writing the Entry again must not quietly restate any of it."""
+    queued = queue.add(entry(repo, pinned_base="MC-AGENT-8000", start_state="grill"))
+
+    queue.attach_run(queued, run_id="a-run")
+
+    (reloaded,) = queue.all()
+    assert reloaded == replace(queued, run_id="a-run")
 
 
 def test_a_queue_rooted_inside_the_target_repository_is_refused(repo):

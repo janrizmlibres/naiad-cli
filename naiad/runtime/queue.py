@@ -1,17 +1,16 @@
-"""The Queue: the Entries waiting to become Runs, and what became of each.
+"""The Queue on disk: the Entries waiting to become Runs, and what became of each.
 
-An Entry is a Run that does not exist yet. It carries what kickoff would
-otherwise be told and the id of the Run it became, and nothing else — no
-status, no position (ADR 0013).
+An Entry is a Run that does not exist yet. What one carries is
+naiad.domain.entry's to say; this is where they are kept.
 
-No status, because whether an Entry is waiting, running, parked or done is
-already recorded inside its Run by the party that observed it, and a second
-copy the Queue keeps can disagree with the first. `status_of` therefore asks
-the Run rather than reading a field.
+No status is stored, because whether an Entry is waiting, running, parked or
+done is already recorded inside its Run by the party that observed it, and a
+second copy the Queue keeps can disagree with the first (ADR 0013). `status_of`
+therefore asks the Run rather than reading a field.
 
-No position, because the id is a sortable timestamp: sorting by id *is* the
-Queue order, so removing an Entry renumbers nothing and stepping over one
-later remains possible (ADR 0012).
+No position is stored either, because the id is a sortable timestamp: sorting
+by id *is* the Queue order, so removing an Entry renumbers nothing and stepping
+over one later remains possible (ADR 0012).
 
 One file per Entry, beside the Runs under the same Naiad-owned home, so that
 adding one is a write nothing else has to be locked for.
@@ -20,10 +19,11 @@ adding one is a write nothing else has to be locked for.
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass
+from dataclasses import replace
 from pathlib import Path
 from typing import Any, Literal
 
+from naiad.domain.entry import Entry
 from naiad.runtime.announcements import Announcements
 from naiad.runtime.atomic import write_atomically
 from naiad.runtime.home import StorageError, refuse_inside_repository
@@ -45,34 +45,6 @@ PARKED: Status = "parked"
 DONE: Status = "done"
 
 
-@dataclass(frozen=True)
-class Entry:
-    """One piece of work waiting to be run.
-
-    Frozen, because everything it carries was decided when it was made. The one
-    thing that changes about an Entry — which Run it became — is recorded by
-    writing the Entry again rather than by mutating it in place, so that what is
-    on disk and what is in hand never differ.
-    """
-
-    id: str
-    workflow_path: Path
-    task: str
-    target_repo: Path
-    # Required of every Entry and refused before one exists, because Naiad
-    # derives no branch name from a repository's conventions (ADR 0015).
-    working_branch: str
-    created_at: str
-    # Optional and opaque: recorded and passed on without being read.
-    pinned_base: str | None = None
-    start_state: str | None = None
-    subject: str | None = None
-    skip_gates: bool = False
-    # What became of it: absent until the Entry starts, and the only field that
-    # says anything about the Run. Everything else is asked of the Run itself.
-    run_id: str | None = None
-
-
 class Queue:
     """The Entries on disk. Constructed with its root rather than reading a
     module-level path, so tests and a second Queue each get their own."""
@@ -88,7 +60,7 @@ class Queue:
             raise StorageError(f"entry '{entry.id}' already exists at {path}")
 
         self.root.mkdir(parents=True, exist_ok=True)
-        write_atomically(path, json.dumps(_document(entry), indent=2) + "\n")
+        self._write(entry)
         return entry
 
     def all(self) -> list[Entry]:
@@ -101,6 +73,21 @@ class Queue:
             for path in sorted(self.root.iterdir())
             if path.suffix == ENTRY_SUFFIX and path.is_file()
         ]
+
+    def attach_run(self, entry: Entry, *, run_id: str) -> Entry:
+        """Record which Run an Entry became, and return the Entry saying so.
+
+        The only thing about an Entry that ever changes, and it changes by
+        writing the Entry again rather than by mutating one in place, so that
+        what is on disk and what the Supervisor holds never differ.
+
+        Written before the Run is watched, because that is what a restarted
+        Supervisor reads to find the same Entry again rather than starting a
+        second Run for it (ADR 0013).
+        """
+        attached = replace(entry, run_id=run_id)
+        self._write(attached)
+        return attached
 
     def remove(self, entry_id: str) -> bool:
         """Take an Entry out of the Queue, and touch nothing else.
@@ -117,6 +104,12 @@ class Queue:
 
     def _path(self, entry_id: str) -> Path:
         return self.root / f"{entry_id}{ENTRY_SUFFIX}"
+
+    def _write(self, entry: Entry) -> None:
+        """One place that turns an Entry into its file, so that adding one and
+        recording what became of it cannot come to disagree about what an Entry
+        on disk looks like."""
+        write_atomically(self._path(entry.id), json.dumps(_document(entry), indent=2) + "\n")
 
     def _read(self, path: Path) -> Entry:
         """One Entry off disk, or a refusal naming the file.
@@ -200,7 +193,6 @@ __all__ = [
     "PARKED",
     "RUNNING",
     "WAITING",
-    "Entry",
     "Queue",
     "status_of",
 ]

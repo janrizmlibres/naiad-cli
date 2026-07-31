@@ -13,8 +13,9 @@ from __future__ import annotations
 from pathlib import Path
 
 from naiad.cli.refusals import check_start
+from naiad.domain.entry import Entry
 from naiad.runtime.home import real_path
-from naiad.runtime.queue import Entry, Queue
+from naiad.runtime.queue import Queue
 
 # The line an operator can retype, quoted back at them by every refusal below.
 COMMAND = "naiad queue add <workflow> <task>"

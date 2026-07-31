@@ -11,8 +11,9 @@ import pytest
 
 from naiad.cli.main import main
 from naiad.domain.decide import Finish
+from naiad.domain.entry import Entry
 from naiad.runtime.log import RunLog
-from naiad.runtime.queue import Entry, Queue
+from naiad.runtime.queue import Queue
 from naiad.runtime.run import RunStore
 
 WORKFLOW = """
@@ -228,6 +229,92 @@ def test_listing_an_empty_queue_says_so_rather_than_printing_nothing(home, capsy
     assert main(["queue", "list"]) == 0
 
     assert capsys.readouterr().out.strip() != ""
+
+
+# `naiad queue watch`. The Supervisor against a real Queue is manual smoke — a
+# loop that drives a real session through a fake tmux would be green over a
+# system that does not work — so what is held here is the wiring: that the
+# command supervises in follow mode, and that an Entry reaches the Run it
+# becomes with everything it was queued with. The loop itself is covered in
+# tests/test_supervisor.py and its rules in tests/test_supervise.py.
+
+
+def supervision(monkeypatch):
+    """Stand in for the Supervisor's loop, and record what it was wired with."""
+    wiring = {}
+
+    def fake(**arguments):
+        wiring.update(arguments)
+
+    monkeypatch.setattr("naiad.cli.main.supervise_queue", fake)
+    return wiring
+
+
+def test_watching_the_queue_supervises_in_follow_mode(home, monkeypatch):
+    """Follow rather than drain, so that Entries added after the Supervisor
+    started are picked up without starting anything again."""
+    wiring = supervision(monkeypatch)
+
+    assert main(["queue", "watch"]) == 0
+
+    assert wiring["following"] is True
+    assert wiring["queue"].root == home / "queue"
+    assert wiring["runs"].root == home / "runs"
+
+
+def test_watching_the_queue_starts_a_run_carrying_everything_the_entry_held(
+    home, repo, monkeypatch, no_tmux
+):
+    """An Entry is a Run that does not exist yet, so every field it was queued
+    with has to arrive at the Run — including the Predecessor the rules
+    resolved, which is the Entry's alone to be told."""
+    add(
+        repo,
+        "--branch",
+        "MC-AGENT-8546",
+        "--at",
+        "implement",
+        "--subject",
+        "docs/ticket.md",
+        "--skip-gates",
+    )
+    wiring = supervision(monkeypatch)
+
+    assert main(["queue", "watch"]) == 0
+
+    (queued,) = wiring["queue"].all()
+    run = wiring["start"](queued, "MC-AGENT-8000")
+    assert run.task == "add dark mode"
+    assert run.target_repo == repo
+    assert run.working_branch == "MC-AGENT-8546"
+    assert run.predecessor == "MC-AGENT-8000"
+    assert run.start_state == "implement"
+    assert run.skip_gates is True
+    assert no_tmux.spawned
+
+
+def test_interrupting_the_supervisor_leaves_nothing_to_clean_up(home, monkeypatch):
+    """Ctrl-C is how an operator stops the night. It stops a Supervisor exactly
+    as it stops a watch: the Queue is on disk and the sessions are left alive."""
+
+    def interrupted(**_arguments):
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr("naiad.cli.main.supervise_queue", interrupted)
+
+    assert main(["queue", "watch"]) == 0
+
+
+def test_a_damaged_entry_stops_the_supervisor_with_a_message(home, repo, capsys):
+    """Read as a message rather than a traceback, as listing one is: an
+    operator can see these files and so can damage one."""
+    add(repo, "--branch", "MC-AGENT-8546")
+    (document,) = (home / "queue").iterdir()
+    document.write_text("{ not json")
+
+    assert main(["queue", "watch"]) == 2
+
+    assert str(document) in capsys.readouterr().err
 
 
 def test_removing_an_entry_takes_it_out_of_the_queue(home, repo, capsys):

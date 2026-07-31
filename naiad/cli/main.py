@@ -27,13 +27,15 @@ from naiad.cli.enqueue import BranchAlreadyClaimed, enqueue
 from naiad.cli.kickoff import start_run
 from naiad.cli.protocol import injection_for
 from naiad.cli.refusals import MissingSubject, MissingWorkingBranch
+from naiad.cli.supervisor import supervise_queue
 from naiad.cli.watch import watch
+from naiad.domain.entry import Entry
 from naiad.domain.transitions import UnknownState
 from naiad.domain.workflow import WorkflowError, load_workflow
 from naiad.hooks.install import DEFAULT_SETTINGS_PATH, install_hooks
 from naiad.runtime.announcements import Announcements
 from naiad.runtime.home import StorageError, default_queue_root, default_runs_root
-from naiad.runtime.queue import Entry, Queue, status_of
+from naiad.runtime.queue import Queue, status_of
 from naiad.runtime.records import Turns
 from naiad.runtime.resolve import NoRunError, RunResolver
 from naiad.runtime.run import Run, RunStore
@@ -77,6 +79,11 @@ def main(argv: list[str] | None = None) -> int:
         "list", help="the Entries in order, each with what became of it"
     )
     queue_list.set_defaults(handler=_queue_list)
+
+    queue_watch = queue_commands.add_parser(
+        "watch", help="take the Queue in order, and keep following it for more"
+    )
+    queue_watch.set_defaults(handler=_queue_watch)
 
     queue_rm = queue_commands.add_parser(
         "rm", help="remove an Entry, leaving any Run it started alone"
@@ -260,33 +267,35 @@ def _install_hooks(arguments: argparse.Namespace) -> int:
 def _watch(arguments: argparse.Namespace) -> int:
     try:
         run = _named_run(arguments.run_id) if arguments.run_id else _current_run()
-        workflow = load_workflow(run.workflow_path)
+        _drive(run)
     except FAILURES as error:
         print(f"naiad: {error}", file=sys.stderr)
         return 2
-
-    session = TmuxSessions()
-    notifier = DesktopNotifications()
-    answerer = HeadlessAnswerer()
-    # The naiad driving this Run, so a nudged agent is told to type the command
-    # that exists rather than whatever the session's PATH happens to hold.
-    naiad = naiad_command()
-
-    print(f"watching {run.id} ({run.tmux_session})")
-    try:
-        watch(
-            run=run,
-            workflow=workflow,
-            session=session,
-            notifier=notifier,
-            answerer=answerer,
-            naiad=naiad,
-        )
     except KeyboardInterrupt:
         # The operator giving up on a Run that has not ended. The session is
         # left alive exactly as a finished Run's is.
         pass
     return 0
+
+
+def _drive(run: Run) -> None:
+    """Drive one Run until it ends, with the real session, notifier and
+    Answerer.
+
+    One place, so that the Run an operator named and the Run the Supervisor
+    took off the Queue are driven by the same loop with the same dependencies.
+    """
+    print(f"watching {run.id} ({run.tmux_session})")
+    watch(
+        run=run,
+        workflow=load_workflow(run.workflow_path),
+        session=TmuxSessions(),
+        notifier=DesktopNotifications(),
+        answerer=HeadlessAnswerer(),
+        # The naiad driving this Run, so a nudged agent is told to type the
+        # command that exists rather than whatever the session's PATH holds.
+        naiad=naiad_command(),
+    )
 
 
 def _named_run(run_id: str) -> Run:
@@ -420,6 +429,60 @@ def _shortened(path: Path) -> str:
         return f"~/{path.relative_to(Path.home())}"
     except ValueError:
         return str(path)
+
+
+def _queue_watch(arguments: argparse.Namespace) -> int:
+    """Supervise: take the Queue in order, and keep following it once it is
+    empty so that Entries added later are picked up.
+
+    It holds no rules of its own. Which Entry is next, whether it is started or
+    resumed, and what its work stands on are naiad.domain.supervise's to say;
+    this builds the real dependencies and hands them over.
+    """
+    try:
+        supervise_queue(
+            queue=Queue(default_queue_root()),
+            runs=RunStore(default_runs_root()),
+            start=_start_entry,
+            drive=_drive,
+            following=True,
+        )
+    except FAILURES as error:
+        print(f"naiad: {error}", file=sys.stderr)
+        return 2
+    except KeyboardInterrupt:
+        # The operator stopping the night. The Queue is on disk and every
+        # session is left alive, so there is nothing to clean up — and a
+        # Supervisor started again picks up the Entry it was in the middle of.
+        pass
+    return 0
+
+
+def _start_entry(entry: Entry, predecessor: str | None) -> Run:
+    """Turn one Entry into the Run it always described.
+
+    Everything identifying the Run — its id, its Claude session, the moment it
+    started — is made here rather than carried on the Entry, because an Entry
+    queued last night is started now. The Predecessor comes from the Action
+    rather than from the Entry, since what an Entry stands on is resolved when
+    it starts (ADR 0015).
+    """
+    started = datetime.now(timezone.utc)
+    return start_run(
+        workflow_path=entry.workflow_path,
+        task=entry.task,
+        target_repo=entry.target_repo,
+        working_branch=entry.working_branch,
+        predecessor=predecessor,
+        store=RunStore(default_runs_root()),
+        sessions=TmuxSessions(),
+        run_id=_run_id(started, entry.workflow_path),
+        claude_session_id=str(uuid.uuid4()),
+        created_at=_timestamp(started),
+        start_state=entry.start_state,
+        skip_gates=entry.skip_gates,
+        subject=entry.subject,
+    )
 
 
 def _queue_rm(arguments: argparse.Namespace) -> int:
