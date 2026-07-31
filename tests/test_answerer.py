@@ -190,6 +190,34 @@ def test_the_first_consultation_pins_a_new_session_id(tmp_path):
     assert argv[argv.index("--session-id") + 1] == "an-id"
 
 
+def test_the_answerers_model_and_effort_ride_as_flags(tmp_path):
+    """Declared in the Workflow's [answerer] table and passed at invocation —
+    a headless session starts clean, so flags are the whole delivery (ADR 0026)."""
+    argv = command_for(
+        ConsultationSpec(
+            cwd=tmp_path,
+            claude_session_id="an-id",
+            text="ask",
+            resume=False,
+            model="haiku",
+            effort="low",
+        )
+    )
+
+    assert argv[argv.index("--model") + 1] == "haiku"
+    assert argv[argv.index("--effort") + 1] == "low"
+    assert argv[-1] == "ask"
+
+
+def test_an_answerer_with_nothing_declared_passes_no_flags(tmp_path):
+    argv = command_for(
+        ConsultationSpec(cwd=tmp_path, claude_session_id="an-id", text="ask", resume=False)
+    )
+
+    assert "--model" not in argv
+    assert "--effort" not in argv
+
+
 def test_a_later_consultation_resumes_that_session_rather_than_starting_another(tmp_path):
     """One Answerer per Run: a fresh session would re-derive the architecture
     and disagree with what it already told the agent."""

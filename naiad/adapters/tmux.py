@@ -75,6 +75,10 @@ def _claude_argv(spec: SessionSpec) -> list[str]:
         "--session-id",
         spec.claude_session_id,
     ]
+    if spec.model is not None:
+        argv += ["--model", spec.model]
+    if spec.effort is not None:
+        argv += ["--effort", spec.effort]
     if spec.initial_prompt is not None:
         argv.append(spec.initial_prompt)
     return argv

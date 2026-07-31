@@ -130,6 +130,45 @@ def test_an_unhandled_announcement_with_a_turn_ended_delivers_that_states_prompt
     )
 
 
+def test_delivery_carries_the_states_model_and_effort(workflow):
+    """The switches ride Prompt delivery (ADR 0026): the decision hands the
+    loop the State's effective model and effort beside the Prompt itself."""
+    keyed = parse_workflow(
+        """
+        name = "feature"
+        model = "sonnet"
+        effort = "medium"
+
+        [[states]]
+        name = "grill"
+        prompt = "/grill-with-docs {task}"
+        model = "opus"
+
+        [[states]]
+        name = "done"
+        terminal = true
+        """
+    )
+
+    action = decide(keyed, signals("grill"))
+
+    assert action == Deliver(
+        state="grill",
+        prompt="/grill-with-docs {task}",
+        next_states=("done",),
+        model="opus",
+        effort="medium",
+    )
+
+
+def test_delivery_of_a_workflow_without_the_keys_carries_none(workflow):
+    action = decide(workflow, signals("grill"))
+
+    assert isinstance(action, Deliver)
+    assert action.model is None
+    assert action.effort is None
+
+
 def test_delivery_carries_the_announcements_subject(workflow):
     """The Subject rides from the Announcement to the delivered Prompt, which
     is what lets the selection be made before the Clear rather than after it

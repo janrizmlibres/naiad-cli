@@ -71,6 +71,10 @@ def command_for(spec: ConsultationSpec) -> list[str]:
         argv += ["--resume", spec.claude_session_id]
     else:
         argv += ["--session-id", spec.claude_session_id]
+    if spec.model is not None:
+        argv += ["--model", spec.model]
+    if spec.effort is not None:
+        argv += ["--effort", spec.effort]
     return argv + [spec.text]
 
 

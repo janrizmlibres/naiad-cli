@@ -115,6 +115,57 @@ def test_the_run_is_resolvable_without_the_environment_variable(repo, store, ses
     assert resolver.resolve(claude_session_id=run.claude_session_id).id == run.id
 
 
+def test_the_first_states_model_and_effort_reach_the_spawn(repo, store, sessions):
+    """At kickoff the first Prompt is handed over at launch, so its switches
+    ride the same way — as flags on the spawn (ADR 0026)."""
+    (repo / "workflow.toml").write_text(
+        """
+        name = "feature"
+        model = "sonnet"
+        effort = "medium"
+
+        [[states]]
+        name = "grill"
+        prompt = "/grill-with-docs {task}"
+        model = "opus"
+
+        [[states]]
+        name = "done"
+        terminal = true
+        """
+    )
+
+    start(repo, store, sessions)
+
+    (spawn,) = sessions.spawned
+    assert spawn.model == "opus"
+    assert spawn.effort == "medium"
+
+
+def test_a_gate_state_first_spawns_without_model_or_effort_flags(repo, store, sessions):
+    """The switches ride Prompt delivery: a Gate State delivers nothing, so
+    nothing rides (ADR 0026)."""
+    (repo / "workflow.toml").write_text(
+        """
+        name = "feature"
+        model = "sonnet"
+
+        [[states]]
+        name = "review"
+
+        [[states]]
+        name = "done"
+        terminal = true
+        """
+    )
+
+    start(repo, store, sessions)
+
+    (spawn,) = sessions.spawned
+    assert spawn.model is None
+    assert spawn.effort is None
+
+
 def test_a_gate_state_first_leaves_the_session_untouched(repo, store, sessions):
     (repo / "gate.toml").write_text(
         'name = "w"\n[[states]]\nname = "review"\n[[states]]\nname = "done"\nterminal = true\n'

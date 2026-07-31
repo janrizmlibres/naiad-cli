@@ -81,6 +81,11 @@ class ConsultationSpec:
     claude_session_id: str
     text: str
     resume: bool
+    # The Workflow's [answerer] model and effort, passed as flags on the invocation.
+    # None means no flags: a headless session starts clean, so absence has no
+    # stickiness to be ambiguous about (ADR 0026).
+    model: str | None = None
+    effort: str | None = None
 
 
 _BRIEF = """\

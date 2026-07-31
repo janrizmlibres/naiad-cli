@@ -66,3 +66,19 @@ def test_a_session_with_nothing_to_deliver_carries_no_prompt():
     argv = command_for(spec(initial_prompt=None))
 
     assert argv[-1] == "sess-1"
+
+
+def test_the_first_states_model_and_effort_ride_as_launch_flags():
+    argv = command_for(spec(model="opus", effort="high"))
+
+    assert argv[argv.index("--model") + 1] == "opus"
+    assert argv[argv.index("--effort") + 1] == "high"
+    # Flags precede the positional Prompt, which stays last.
+    assert argv[-1] == "do the work"
+
+
+def test_a_session_with_neither_key_passes_no_flags():
+    argv = command_for(spec())
+
+    assert "--model" not in argv
+    assert "--effort" not in argv

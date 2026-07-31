@@ -143,6 +143,38 @@ def test_an_announcement_with_a_turn_ended_delivers_the_prompt_into_the_pane(
     ]
 
 
+def test_the_states_model_and_effort_are_typed_ahead_of_the_prompt(run, session):
+    """The switches ride Prompt delivery, typed on every delivery (ADR 0026):
+    each is its own send, because the session reads a slash command only at the
+    start of a message."""
+    keyed = parse_workflow(
+        """
+        name = "feature"
+        model = "sonnet"
+        effort = "medium"
+
+        [[states]]
+        name = "grill"
+        prompt = "work, then announce done"
+        model = "opus"
+        effort = "high"
+
+        [[states]]
+        name = "done"
+        terminal = true
+        """
+    )
+    announce(run, "grill")
+
+    drive(run, keyed, session)
+
+    assert session.sent == [
+        ("send", "%42", "/model opus"),
+        ("send", "%42", "/effort high"),
+        ("send", "%42", "work, then announce done"),
+    ]
+
+
 def test_the_subject_reaches_the_pane_in_the_delivered_prompt(run, workflow, session):
     """The wiring hop the Subject exists for: the Clear discards the context
     that chose the ticket, and the Prompt arriving after it names the ticket
@@ -748,6 +780,34 @@ def test_the_answerer_runs_against_the_target_repository(run, workflow, session)
     drive(run, workflow, session, answerer=answerer)
 
     assert answerer.consulted[0].cwd == run.target_repo
+
+
+def test_the_workflows_answerer_keys_reach_the_consultation(run, session):
+    keyed = parse_workflow(
+        WORKFLOW
+        + """
+[answerer]
+model = "haiku"
+effort = "low"
+"""
+    )
+    ask(run, "Which module owns retries?", "the client")
+    answerer = RecordingAnswerer()
+
+    drive(run, keyed, session, answerer=answerer)
+
+    assert answerer.consulted[0].model == "haiku"
+    assert answerer.consulted[0].effort == "low"
+
+
+def test_a_workflow_without_an_answerer_table_consults_with_neither_key(run, workflow, session):
+    ask(run, "Which module owns retries?", "the client")
+    answerer = RecordingAnswerer()
+
+    drive(run, workflow, session, answerer=answerer)
+
+    assert answerer.consulted[0].model is None
+    assert answerer.consulted[0].effort is None
 
 
 def test_the_first_consultation_starts_an_answerer_session_and_records_it(run, workflow, session):

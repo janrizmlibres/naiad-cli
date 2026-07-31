@@ -77,6 +77,110 @@ def test_a_state_may_declare_multiple_candidate_successors():
     assert workflow.state("bug").next_candidates == ()
 
 
+def test_a_state_takes_the_file_level_model_and_effort_unless_it_declares_its_own():
+    workflow = parse_workflow(
+        """
+        name = "w"
+        model = "sonnet"
+        effort = "medium"
+
+        [[states]]
+        name = "grill"
+        prompt = "/grill {task}"
+        model = "opus"
+        effort = "high"
+
+        [[states]]
+        name = "review"
+
+        [[states]]
+        name = "done"
+        terminal = true
+        """
+    )
+
+    assert workflow.state("grill").model == "opus"
+    assert workflow.state("grill").effort == "high"
+    # The default reaches every State, Gate and Terminal included — delivery
+    # is what decides whether anything is typed, not parsing.
+    assert workflow.state("review").model == "sonnet"
+    assert workflow.state("done").effort == "medium"
+
+
+def test_a_workflow_mentioning_neither_key_gives_every_state_none():
+    workflow = parse_workflow(WELL_FORMED)
+
+    assert workflow.state("grill").model is None
+    assert workflow.state("grill").effort is None
+
+
+def test_model_and_effort_default_independently():
+    workflow = parse_workflow(
+        """
+        name = "w"
+        model = "sonnet"
+
+        [[states]]
+        name = "a"
+        prompt = "x"
+
+        [[states]]
+        name = "done"
+        terminal = true
+        """
+    )
+
+    assert workflow.state("a").model == "sonnet"
+    assert workflow.state("a").effort is None
+
+
+def test_an_empty_state_key_is_kept_rather_than_read_as_absent():
+    """Values are opaque (ADR 0026): an empty string is a value the session
+    will refuse, not an absence for Naiad to interpret a default into."""
+    workflow = parse_workflow(
+        """
+        name = "w"
+        model = "sonnet"
+
+        [[states]]
+        name = "a"
+        prompt = "x"
+        model = ""
+
+        [[states]]
+        name = "done"
+        terminal = true
+        """
+    )
+
+    assert workflow.state("a").model == ""
+
+
+def test_the_answerer_table_is_parsed_with_both_keys_optional():
+    workflow = parse_workflow(
+        """
+        name = "w"
+
+        [answerer]
+        model = "haiku"
+
+        [[states]]
+        name = "done"
+        terminal = true
+        """
+    )
+
+    assert workflow.answerer_model == "haiku"
+    assert workflow.answerer_effort is None
+
+
+def test_a_workflow_without_an_answerer_table_has_no_answerer_opinion():
+    workflow = parse_workflow(WELL_FORMED)
+
+    assert workflow.answerer_model is None
+    assert workflow.answerer_effort is None
+
+
 @pytest.mark.parametrize(
     "source, expected",
     [
@@ -116,6 +220,36 @@ def test_a_state_may_declare_multiple_candidate_successors():
             'name = "w"\n[[states]]\nname = "a"\nprompt = 3\n[[states]]\nname = "b"\nterminal = true',
             "state 'a': prompt must be a string",
             id="bad prompt type",
+        ),
+        pytest.param(
+            'name = "w"\n[[states]]\nname = "a"\nmodel = "opus"\n[[states]]\nname = "b"\nterminal = true',
+            "state 'a' declares a model but the workflow has no file-level model default",
+            id="state model without file default",
+        ),
+        pytest.param(
+            'name = "w"\n[[states]]\nname = "a"\neffort = "high"\n[[states]]\nname = "b"\nterminal = true',
+            "state 'a' declares an effort but the workflow has no file-level effort default",
+            id="state effort without file default",
+        ),
+        pytest.param(
+            'name = "w"\nmodel = 3\n[[states]]\nname = "b"\nterminal = true',
+            "model must be a string",
+            id="bad file-level model type",
+        ),
+        pytest.param(
+            'name = "w"\nmodel = "s"\n[[states]]\nname = "a"\nmodel = 3\n[[states]]\nname = "b"\nterminal = true',
+            "state 'a': model must be a string",
+            id="bad state model type",
+        ),
+        pytest.param(
+            'name = "w"\neffort = 3\n[[states]]\nname = "b"\nterminal = true',
+            "effort must be a string",
+            id="bad file-level effort type",
+        ),
+        pytest.param(
+            'name = "w"\n[answerer]\nmodel = 3\n[[states]]\nname = "b"\nterminal = true',
+            "answerer model must be a string",
+            id="bad answerer model type",
         ),
     ],
 )

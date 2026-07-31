@@ -167,12 +167,20 @@ class Deliver:
 
     subject is what the announcing agent said this Announcement was about,
     carried through unread so the Prompt can name it after the Clear has
-    discarded the context that chose it (ADR 0009)."""
+    discarded the context that chose it (ADR 0009).
+
+    model and effort are the State's effective values, typed as `/model` and
+    `/effort` ahead of the Prompt on every delivery — the switches ride
+    delivery, which is why they live here and not in a separate Action, and
+    why a Gate State never gets one (ADR 0026). None means the Workflow file
+    mentions the key nowhere and the session's settings are left alone."""
 
     state: str
     prompt: str
     next_states: tuple[str, ...]
     subject: str | None = None
+    model: str | None = None
+    effort: str | None = None
 
 
 @dataclass(frozen=True)
@@ -331,6 +339,8 @@ def decide(workflow: Workflow, signals: Signals, *, skip_gates: bool = False) ->
             prompt=state.prompt,
             next_states=resolve_next_states(workflow, state.name, skip_gates=skip_gates),
             subject=announcement.subject,
+            model=state.model,
+            effort=state.effort,
         )
 
     # Nothing to deliver. Either the agent is working — the common case, and

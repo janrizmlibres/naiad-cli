@@ -138,6 +138,15 @@ def tick(
         session.clear(_pane(run))
         clearing.record_attempt(announcement, landed=clears.count())
     elif isinstance(action, Deliver) and announcement is not None:
+        # The State's model and effort are typed ahead of its Prompt, each switch as its
+        # own send because a slash command is read only at the start of a
+        # message — and on every delivery, not only on change, so a switch the
+        # terminal dropped earlier is healed by the next one. Best-effort:
+        # nothing confirms it, by decision rather than omission (ADR 0026).
+        if action.model is not None:
+            session.send(_pane(run), f"/model {action.model}")
+        if action.effort is not None:
+            session.send(_pane(run), f"/effort {action.effort}")
         session.send(
             _pane(run),
             render_prompt(
@@ -155,7 +164,9 @@ def tick(
         )
         handled.record(announcement.seq, turns=turns.count())
     elif isinstance(action, Consult):
-        consultations.record(announcement, answerer.consult(_consultation(run, action.question)))
+        consultations.record(
+            announcement, answerer.consult(_consultation(run, workflow, action.question))
+        )
     elif isinstance(action, Respond) and announcement is not None:
         session.send(_pane(run), render_answer(action.answer))
         answers.record(question=action.question, answer=action.answer)
@@ -203,7 +214,7 @@ def _deviation(
     )
 
 
-def _consultation(run: Run, question: Question) -> ConsultationSpec:
+def _consultation(run: Run, workflow: Workflow, question: Question) -> ConsultationSpec:
     """One Answerer per Run, started on the first Question and resumed on every
     one after it, so that its later answers cannot contradict its earlier ones."""
     session_id = run.answerer_session_id
@@ -216,6 +227,8 @@ def _consultation(run: Run, question: Question) -> ConsultationSpec:
         claude_session_id=session_id,
         text=render_consultation(question, task=run.task),
         resume=resume,
+        model=workflow.answerer_model,
+        effort=workflow.answerer_effort,
     )
 
 

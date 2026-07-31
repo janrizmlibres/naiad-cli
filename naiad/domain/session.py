@@ -30,11 +30,19 @@ class SessionSpec:
     only honest way to know that is a supported signal — which Naiad does not
     have until the hooks arrive. Handing the Prompt over at spawn needs no such
     signal.
+
+    model and effort are the first State's, riding at launch as flags
+    for the same reason the first Prompt does: the switches ride Prompt
+    delivery, and at spawn delivery happens on the command line (ADR 0026).
+    None when the delivering State has neither key — a Gate State first among
+    them, which delivers nothing and so carries nothing.
     """
 
     name: str
     cwd: Path
     claude_session_id: str
     initial_prompt: str | None = None
+    model: str | None = None
+    effort: str | None = None
     permission_mode: str = BYPASS_PERMISSIONS
     environ: Mapping[str, str] = field(default_factory=dict)
