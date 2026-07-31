@@ -34,8 +34,8 @@ skip-gates = true
 """
 
 
-def parse(text, repo=Path("/repos/default")):
-    return parse_batch(text, source="batch.toml", repo=repo)
+def parse(text, repo=Path("/repos/default"), library=Path("/library")):
+    return parse_batch(text, source="batch.toml", repo=repo, library=library)
 
 
 def test_a_batch_file_declares_one_piece_of_work_per_entry():
@@ -146,6 +146,37 @@ def test_an_entry_naming_no_repository_stands_in_the_working_directory():
     )
 
     assert work.target_repo == Path("/repos/cwd")
+
+
+def test_a_workflow_given_as_a_bare_name_resolves_through_the_library(tmp_path):
+    library = tmp_path / "workflows"
+    library.mkdir()
+    (library / "matt-pocock.toml").write_text(
+        'name = "matt-pocock"\n\n[[states]]\nname = "done"\nterminal = true\n'
+    )
+
+    (work,) = parse(
+        'workflow = "matt-pocock"\n\n[[entries]]\ntask = "one"\nbranch = "a"\n',
+        library=library,
+    )
+
+    assert work.workflow_path == library / "matt-pocock.toml"
+
+
+def test_a_name_the_library_does_not_hold_is_rejected_naming_the_position(tmp_path):
+    library = tmp_path / "workflows"
+    library.mkdir()
+
+    with pytest.raises(BatchError) as caught:
+        parse(
+            'workflow = "matt-pocok"\n\n[[entries]]\ntask = "one"\nbranch = "a"\n',
+            library=library,
+        )
+
+    message = str(caught.value)
+    assert "batch.toml" in message
+    assert "entry 1" in message
+    assert "no workflow named 'matt-pocok'" in message
 
 
 def test_a_file_that_is_not_valid_toml_is_rejected_naming_the_file():

@@ -34,6 +34,7 @@ from naiad.cli.ask import AskError, ask_question
 from naiad.cli.batch import BatchError, enqueue_batch, load_batch
 from naiad.cli.branch import BranchError, declare_branch
 from naiad.cli.enqueue import REFUSALS, Work, enqueue
+from naiad.cli.library import LibraryError, resolve_workflow
 from naiad.cli.kickoff import start_run
 from naiad.cli.protocol import injection_for
 from naiad.cli.refusals import ADD_COMMAND, RUN_COMMAND, Remedy
@@ -46,6 +47,7 @@ from naiad.hooks.install import DEFAULT_SETTINGS_PATH, install_hooks
 from naiad.runtime.announcements import Announcements
 from naiad.runtime.home import (
     StorageError,
+    default_library_root,
     default_lock_path,
     default_queue_root,
     default_runs_root,
@@ -65,6 +67,7 @@ FAILURES = (
     BatchError,
     BranchError,
     WaitError,
+    LibraryError,
     NoRunError,
     StorageError,
     TmuxError,
@@ -205,7 +208,11 @@ def _describe_the_work(parser: argparse.ArgumentParser, *, required: bool = True
     # Nothing where the work must be described here, and what makes each
     # positional optional where a file may describe it instead.
     optional: dict[str, Any] = {} if required else {"nargs": "?", "default": None}
-    parser.add_argument("workflow", type=Path, help="path to the Workflow file", **optional)
+    parser.add_argument(
+        "workflow",
+        help="path to the Workflow file, or the bare name of one in the library",
+        **optional,
+    )
     parser.add_argument("task", help="what the work is", **optional)
     parser.add_argument(
         "--repo",
@@ -579,7 +586,7 @@ def _queued_from_file(arguments: argparse.Namespace) -> int:
     added = datetime.now(timezone.utc)
 
     try:
-        works = load_batch(path, repo=Path.cwd())
+        works = load_batch(path, repo=Path.cwd(), library=default_library_root())
         entries = enqueue_batch(
             works,
             queue=Queue(default_queue_root()),
@@ -609,11 +616,13 @@ def _queued(arguments: argparse.Namespace, *, remedy: Remedy) -> Entry | None:
     in, quoted back by every refusal so that what they read is something they
     can act on.
     """
-    workflow_path = arguments.workflow.expanduser().resolve()
     target_repo = (arguments.repo or Path.cwd()).expanduser().resolve()
     added = datetime.now(timezone.utc)
 
     try:
+        # A bare name resolves through the Workflow library here, at the
+        # entrance, and the Entry stores the path it resolved to (ADR 0023).
+        workflow_path = resolve_workflow(arguments.workflow, library=default_library_root())
         entry = enqueue(
             Work(
                 workflow_path=workflow_path,

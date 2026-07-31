@@ -23,8 +23,10 @@ from pathlib import Path
 from typing import Any
 
 from naiad.cli.enqueue import REFUSALS, Work, prepare
+from naiad.cli.library import LibraryError, resolve_workflow
 from naiad.cli.refusals import BATCH_ENTRY
 from naiad.domain.entry import Entry
+from naiad.domain.workflow import WorkflowError
 from naiad.runtime.queue import Queue
 from naiad.runtime.run import RunStore
 
@@ -63,18 +65,19 @@ class BatchError(Exception):
 Reject = Callable[[str], BatchError]
 
 
-def load_batch(path: Path, *, repo: Path) -> list[Work]:
+def load_batch(path: Path, *, repo: Path, library: Path) -> list[Work]:
     """Everything one file describes. `repo` is where an Entry that names no
     repository stands, which is the working directory, as `--repo`'s default
-    already is."""
+    already is; `library` is where a Workflow given as a bare name resolves
+    (ADR 0023)."""
     try:
         text = path.read_text()
     except OSError as error:
         raise BatchError(f"batch {path}: cannot be read ({error.strerror})") from error
-    return parse_batch(text, source=str(path), repo=repo)
+    return parse_batch(text, source=str(path), repo=repo, library=library)
 
 
-def parse_batch(text: str, *, repo: Path, source: str) -> list[Work]:
+def parse_batch(text: str, *, repo: Path, source: str, library: Path) -> list[Work]:
     """One piece of work per Entry, in the order the file writes them.
 
     Ordering follows the file because file order is what the Predecessor rule
@@ -104,7 +107,15 @@ def parse_batch(text: str, *, repo: Path, source: str) -> list[Work]:
         if not isinstance(raw, dict):
             raise reject(f"entry {position} is not a table")
         # The Entry's own keys last, so that they override the defaults above.
-        works.append(_work({**defaults, **raw}, position=position, reject=reject, repo=repo))
+        works.append(
+            _work(
+                {**defaults, **raw},
+                position=position,
+                reject=reject,
+                repo=repo,
+                library=library,
+            )
+        )
     return works
 
 
@@ -146,7 +157,9 @@ def enqueue_batch(
     return [queue.add(entry) for entry in prepared]
 
 
-def _work(fields: dict[str, Any], *, position: int, reject: Reject, repo: Path) -> Work:
+def _work(
+    fields: dict[str, Any], *, position: int, reject: Reject, repo: Path, library: Path
+) -> Work:
     def bad(problem: str) -> BatchError:
         return reject(f"entry {position}: {problem}")
 
@@ -158,7 +171,7 @@ def _work(fields: dict[str, Any], *, position: int, reject: Reject, repo: Path) 
 
     named_repo = _text(fields, REPO, bad)
     return Work(
-        workflow_path=_path(_required(fields, WORKFLOW, bad)),
+        workflow_path=_workflow(_required(fields, WORKFLOW, bad), library=library, bad=bad),
         task=_required(fields, TASK, bad),
         target_repo=_path(named_repo) if named_repo else repo,
         # Optional, as `--branch` is: an Entry that names none starts a Run
@@ -196,6 +209,16 @@ def _text(fields: dict[str, Any], key: str, bad: Reject) -> str | None:
     if not isinstance(value, str) or not value:
         raise bad(f"`{key}` must be a non-empty string")
     return value
+
+
+def _workflow(value: str, *, library: Path, bad: Reject) -> Path:
+    """A path as `_path` reads one, or a bare name resolved through the
+    Workflow library (ADR 0023) — refused naming the Entry's position, as
+    every other complaint about an Entry is."""
+    try:
+        return resolve_workflow(value, library=library)
+    except (LibraryError, WorkflowError) as error:
+        raise bad(str(error)) from error
 
 
 def _path(value: str) -> Path:

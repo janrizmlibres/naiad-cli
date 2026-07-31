@@ -43,6 +43,13 @@ def default_queue_root() -> Path:
     return naiad_home() / "queue"
 
 
+def default_library_root() -> Path:
+    """Where the Workflow library lives: the one thing under the home a human
+    writes and Naiad only reads, kept here so that moving the home still moves
+    everything (ADR 0023)."""
+    return naiad_home() / "workflows"
+
+
 def default_lock_path() -> Path:
     """What the one Supervisor holds while it drives the Queue.
 

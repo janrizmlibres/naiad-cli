@@ -117,6 +117,20 @@ def supervised(home):
 # One entrance: the Entry lands, and no session is spawned behind the Queue's back.
 
 
+def test_running_by_bare_name_queues_the_library_file_of_that_stem(home, repo, monkeypatch):
+    """`naiad run` shares the one entrance, so a bare name resolves through
+    the Workflow library here exactly as it does at `queue add` (ADR 0023)."""
+    supervision(monkeypatch)
+    library = home / "workflows"
+    library.mkdir(parents=True)
+    (library / "feature.toml").write_text(WORKFLOW)
+
+    assert main(["run", "feature", "add dark mode", "--repo", str(repo)]) == 0
+
+    (queued,) = queue_of(home).all()
+    assert queued.workflow_path == library / "feature.toml"
+
+
 def test_running_adds_an_entry_rather_than_spawning_a_session(home, repo, no_tmux, monkeypatch):
     """A second entrance to starting Runs would bypass the guard that matters
     most: nothing would stop an immediate Run putting a second agent into a

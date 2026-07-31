@@ -164,6 +164,27 @@ def test_adding_an_entry_starting_at_an_undeclared_state_is_refused(home, repo, 
     assert queue_of(home).all() == []
 
 
+def test_adding_by_bare_name_queues_the_library_file_of_that_stem(home, repo, capsys):
+    """A bare name is entrance-side shorthand: the Entry stores the resolved
+    library path exactly as it stores one typed explicitly (ADR 0023)."""
+    library = home / "workflows"
+    library.mkdir(parents=True)
+    (library / "feature.toml").write_text(WORKFLOW)
+
+    assert main(["queue", "add", "feature", "add dark mode", "--repo", str(repo)]) == 0
+
+    (queued,) = queue_of(home).all()
+    assert queued.workflow_path == library / "feature.toml"
+
+
+def test_adding_by_a_name_the_library_does_not_hold_is_refused(home, repo, capsys):
+    assert main(["queue", "add", "featuer", "add dark mode", "--repo", str(repo)]) == 2
+
+    err = capsys.readouterr().err
+    assert "no workflow named 'featuer'" in err
+    assert queue_of(home).all() == []
+
+
 def test_listing_shows_entries_in_queue_order_with_what_became_of_each(home, repo, capsys):
     add(repo, "--branch", "MC-AGENT-8546")
     add(repo, "--branch", "MC-AGENT-8547")
