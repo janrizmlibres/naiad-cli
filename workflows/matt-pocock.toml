@@ -305,57 +305,79 @@ When it is done, choose what comes next. Scan the project's issue tracker for th
 name = "handover"
 next = ["implement", "pull-request"]
 
-# Clears, though the PR skill prefers the session's context. What the loop
-# leaves behind is one ticket's context rather than the branch's, so carrying it
-# would describe the last ticket as though it were the whole pull request;
-# Cleared, the skill compares the branch against its base and sees all of them.
+# Clears, though a PR flow prefers the session's context. What the loop leaves
+# behind is one ticket's context rather than the branch's, so carrying it would
+# describe the last ticket as though it were the whole pull request; Cleared,
+# the branch is compared against its base and all of them are seen.
+#
+# Opens the pull request generically, and names no project (ADR 0016). The
+# Prompt says "open a pull request"; the agent, in the repository with its
+# remote in front of it, finds the GitHub MCP server that fits and opens it. The
+# HCGPS monorepo is the one exception the Prompt names, and it names the skill
+# rather than inlining the reviewers, base and build the skill holds — so even
+# the one project mentioned is a reference and not a description. That is why
+# this is the second Prompt after the classifier to open with prose: /hcgps-pr
+# is named mid-sentence, not at the start, so it is not read as a slash command.
 #
 # This State waits, which no other one does. The review the next State fixes is
-# produced by Claude Code Review after the pull request opens, so announcing as
-# soon as it is open would hand /fix-review an empty pull request. The wait has
-# to happen inside the turn: an agent that stops without announcing is Nudged
-# twice and then parks the Run, and no review arriving later would wake it.
+# produced after the pull request opens, so announcing as soon as it is open
+# would hand /fix-review an empty pull request. The wait has to happen inside
+# the turn: an agent that stops without announcing is Nudged twice and then
+# parks the Run, and no review arriving later would wake it. The wait names no
+# particular integration — whatever automated review the host runs, if any — for
+# the same reason the open does (ADR 0016).
+#
+# Branches on whether a review ran, not on what it said (ADR 0017). A review
+# completed: announce review-fix, which fetches the raw output and forms the
+# whole verdict on what to fix. No review — the host runs none, or none finished
+# in the budget: announce done, because there is nothing to fix. The two
+# successors are written out rather than interpolated as {next_state}, as the
+# diagnosing and implement States' are and for the same reason: the placeholder
+# renders both as one joined phrase, useless where each exit carries a different
+# condition.
 #
 # The ancestry question is asked again here rather than carried down from the
 # branch head. The Predecessor may have landed during the Run — a stack of
 # Entries is exactly the case where that happens — and this State Clears, so it
 # could not have inherited the earlier answer even if that answer were still
-# worth trusting. The result is passed to the skill as the base and nothing
-# more: /hcgps-pr already accepts an explicit base for stacked work and defaults
-# to the repository's own otherwise, so it needs telling rather than teaching.
+# worth trusting. The result is passed as the base and nothing more: /hcgps-pr
+# accepts an explicit base for stacked work and a direct open takes one too, so
+# each needs telling rather than teaching (ADR 0015).
 #
 # Three numbers are load-bearing and none of them is arbitrary (ADR 0006). The
 # wait is one blocking command rather than a loop of checks, because a loop
 # re-sends the accumulated context every time round and that is the whole cost.
 # Ten minutes because that is the Bash tool's ceiling, so the budget the Prompt
-# states and the cap the tool enforces are one number; the review itself takes
+# states and the cap the tool enforces are one number; a review itself takes
 # about three, and the Run's outer bound is the hang rule's thirty. And the wait
-# names the review check alone: the build checks on this repository run past
-# fourteen minutes, so waiting on all of them would overrun for a reason that
-# has nothing to do with the review.
+# names the review check alone: a repository's build checks run far longer, so
+# waiting on all of them would overrun for a reason that has nothing to do with
+# the review.
 [[states]]
 name = "pull-request"
 clear = true
+next = ["review-fix", "done"]
 prompt = """
-/hcgps-pr
+Open a pull request. For the HCGPS monorepo, use /hcgps-pr; for any other repository open it directly with that repository's GitHub MCP server, taking the description from the branch compared against its base.
 
 Predecessor: {predecessor}
 
-Open the pull request against the right base. When no Predecessor is named above, say nothing about a base and let the skill use the repository's own. Otherwise run `git merge-base --is-ancestor <predecessor> <base branch>`, in that order, now — rather than relying on what was true when this Run started, because a Predecessor can land while a Run is working. A non-zero exit says the Predecessor still has not landed and this branch stands on it, so give the Predecessor to the skill as the base. A zero exit says it has landed, so say nothing about a base and let the skill use the repository's own.
+Open it against the right base. When no Predecessor is named above, say nothing about a base and let it default to the repository's own. Otherwise run `git merge-base --is-ancestor <predecessor> <base branch>`, in that order, now — rather than relying on what was true when this Run started, because a Predecessor can land while a Run is working. A non-zero exit says the Predecessor still has not landed and this branch stands on it, so open it against the Predecessor as the base. A zero exit says it has landed, so say nothing about a base and let it default to the repository's own.
 
-Once the pull request is open, wait for the Claude Code Review check to complete — that check alone, and not every check on the pull request, because the build checks run far longer than the review does. Wait in a single long-running command with a ten-minute timeout, rather than a loop of separate checks, and do not end your turn: nothing will wake you again if you stop. When the check has completed, read its findings from the pull request and announce {next_state}.
+Once the pull request is open, wait for the automated review this host runs, if any — that check alone, and not every check on the pull request, because the build checks run far longer than a review does. Wait in a single long-running command with a ten-minute timeout, rather than a loop of separate checks, and do not end your turn: nothing will wake you again if you stop.
 
-If no review check has completed after ten minutes, or this repository runs none, say so in the session and announce {next_state} anyway: there is then simply nothing to fix.
+When a review has completed, announce review-fix. If no review completes within ten minutes, or this host runs none, say so in the session and announce done: there is then simply nothing to fix.
 """
 
 # Names the pull request by its branch rather than as the one just opened: this
 # Prompt arrives in a Cleared context, which remembers opening nothing.
 #
-# The empty case is named for the same reason. The State before this one
-# announces it anyway when no review arrives inside its budget, and the Clear
-# discards the context that heard it say so — so without this the State is told
-# to fetch findings that are not there, and /fix-review, whose contract is that
-# its findings are handed to it, is the State most likely to stop and ask.
+# The empty case is kept though the branch above only routes here when a review
+# completed (ADR 0017): a review can complete and still validate down to
+# nothing, or come back all praise. The guard is where that resolves to done,
+# and without it the State is told to fetch findings that are not there —
+# /fix-review, whose contract is that its findings are handed to it, is the
+# State most likely to stop and ask a human nobody is awake to be.
 [[states]]
 name = "review-fix"
 clear = true

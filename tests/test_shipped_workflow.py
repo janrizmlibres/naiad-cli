@@ -39,16 +39,17 @@ STATES = [
     "done",
 ]
 
-# Every State whose Prompt runs a skill, and the skill it must invoke. The
-# classifying State is deliberately absent: it runs none, which is why it is the
-# one Prompt that does not open with a slash command.
+# Every State whose Prompt runs a skill of its own, and the skill it must
+# invoke. Two States are deliberately absent: the classifying State runs none,
+# and the pull-request State opens a pull request generically — naming /hcgps-pr
+# only for the HCGPS monorepo, mid-Prompt rather than at the start (ADR 0016).
+# So neither opens with a slash command.
 SKILLS = {
     "diagnose": "/diagnosing-bugs",
     "grill": "/grill-with-docs",
     "spec": "/to-spec",
     "tickets": "/to-tickets",
     "implement": "/implement",
-    "pull-request": "/hcgps-pr",
     "review-fix": "/fix-review",
 }
 
@@ -62,15 +63,17 @@ CANDIDATES = {
     "tickets": ("implement", "handover"),
     "implement": ("implement", "handover", "pull-request"),
     "handover": ("implement", "pull-request"),
+    "pull-request": ("review-fix", "done"),
 }
 
-# The feature chain as it stands today, asserted rather than assumed: adding a
-# branch must not move a single one of these edges. `done` ends the Run and so
-# has nothing after it.
+# The feature chain as it stands today, asserted rather than assumed. `done`
+# ends the Run and so has nothing after it.
 #
-# `implement` is the one edge that has moved since, and deliberately: the loop
-# gained a third exit for a ticket it must decline (ADR 0010). Everything on
-# either side of it is untouched, which is what this table is for.
+# Two edges have moved since this table was first written, both deliberately.
+# `implement` gained a third exit for a ticket it must decline (ADR 0010).
+# `pull-request` gained `done` beside `review-fix`, so a Run whose host runs no
+# automated review ends rather than passing through an empty fix (ADR 0017).
+# Everything else is untouched, which is what this table is for.
 FEATURE_CHAIN = {
     "grill": ("review",),
     "review": ("spec",),
@@ -78,7 +81,7 @@ FEATURE_CHAIN = {
     "tickets": ("implement", "handover"),
     "implement": ("implement", "handover", "pull-request"),
     "handover": ("implement", "pull-request"),
-    "pull-request": ("review-fix",),
+    "pull-request": ("review-fix", "done"),
     "review-fix": ("done",),
     "done": (),
 }
@@ -98,9 +101,10 @@ SUBJECT = ".scratch/dark-mode/issues/04-toggle.md"
 # have and would rather not have it classified.
 BRANCH_HEADS = ["diagnose", "grill"]
 
-# Every State that delivers a Prompt at all: the skill-running ones and the
-# classifier, which runs none.
-DELIVERING = ["classify", *sorted(SKILLS)]
+# Every State that delivers a Prompt at all: the skill-running ones, the
+# classifier, and the pull-request State. The last two run no skill of their
+# own, so their Prompts open with prose rather than a slash command.
+DELIVERING = ["classify", "pull-request", *sorted(SKILLS)]
 
 # The States told what the work stands on: the two heads, which decide what to
 # base a new branch on, and the pull request, which asks the same question again
@@ -433,8 +437,9 @@ def test_every_state_that_delivers_a_prompt_is_accounted_for(workflow):
 def test_only_the_states_that_run_a_skill_open_with_a_slash_command(workflow):
     """The convention's reason is mechanical — a slash command is read only at
     the start of a message — not a requirement that every State run one. The
-    classifying State runs no skill, so its Prompt opens with prose, and the
-    file's comment says so rather than asserting the convention universally."""
+    classifying and pull-request States run no skill of their own, so their
+    Prompts open with prose, and the file's comments say so rather than
+    asserting the convention universally."""
     opening = [name for name in DELIVERING if delivered(workflow, name).startswith("/")]
 
     assert sorted(opening) == sorted(SKILLS)
@@ -651,9 +656,10 @@ def test_the_pull_request_state_asks_the_ancestry_question_again(workflow):
 
 
 def test_the_pull_request_state_passes_the_answer_as_the_base(workflow):
-    """An input to the skill rather than a copy of its logic: /hcgps-pr already
-    accepts an explicit base for stacked work and defaults to the repository's
-    base branch otherwise, so it needs telling and nothing more.
+    """An input to whatever opens the pull request rather than a copy of its
+    logic: /hcgps-pr accepts an explicit base for stacked work, and a direct
+    open through the GitHub MCP takes one too, so each needs telling and nothing
+    more (ADR 0016).
 
     Each outcome is pinned to its own sentence, as the branch heads' are:
     inverted, this opens every stacked pull request against the base branch and
@@ -674,9 +680,11 @@ def test_the_pull_request_state_settles_an_absent_predecessor_before_running_any
 
 
 def test_the_pull_request_state_waits_for_the_review_before_announcing(workflow):
-    """The review-fix State has nothing to work from until Claude Code Review
-    has posted its findings, so the wait belongs before the Announcement rather
-    than after it — announcing early delivers /fix-review an empty pull request.
+    """The review-fix State has nothing to work from until the host's automated
+    review has posted its findings, so the wait belongs before the Announcement
+    rather than after it — announcing early delivers /fix-review an empty pull
+    request. The wait names no particular integration, because the tail is
+    project-neutral and the review a host runs is its own (ADR 0016).
 
     The wait happens inside the turn, because nothing wakes an agent that ends
     one: a turn that ends without an Announcement is Nudged twice and then parks
@@ -685,7 +693,7 @@ def test_the_pull_request_state_waits_for_the_review_before_announcing(workflow)
     """
     prompt = delivered(workflow, "pull-request")
 
-    assert "Claude Code Review" in prompt
+    assert "automated review" in prompt
     assert "single long-running command" in prompt
 
 
@@ -699,8 +707,8 @@ def test_the_pull_request_state_waits_in_one_command_within_the_tool_timeout(wor
 
 def test_the_pull_request_state_waits_only_on_the_review_check(workflow):
     """Waiting on every check would overrun the budget for a reason that has
-    nothing to do with the review: the build checks on an HCGPS pull request run
-    far longer than the review, which finishes in about three minutes."""
+    nothing to do with the review: a repository's build checks run far longer
+    than a review does, so the wait names the review check alone."""
     prompt = delivered(workflow, "pull-request")
 
     assert "not every check" in prompt
