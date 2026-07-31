@@ -143,6 +143,24 @@ class RunLog:
         ]
         return earlier[-1].state if earlier else None
 
+    def delivered_states(self) -> list[str]:
+        """Every State whose Prompt was sent into the session, in order.
+
+        Read here rather than by callers scanning entries, because 'delivered'
+        is a kind this module writes: the one asking it — whether a Prompt
+        carrying the branch placeholder has gone out (ADR 0022) — should not
+        have to know how a delivery is spelled.
+
+        Kickoff's delivery of the first Prompt is not among them: it happens
+        before the log exists, and the State the Run began at is the Run's own
+        fact to answer with.
+        """
+        return [
+            entry.state
+            for entry in self.entries()
+            if entry.kind == "delivered" and entry.state is not None
+        ]
+
     def record_announcement(
         self, announcement: Announcement | None, *, deviated_from: Sequence[str] = ()
     ) -> None:

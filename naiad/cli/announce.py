@@ -11,9 +11,11 @@ stalling.
 from __future__ import annotations
 
 from naiad.domain.announcement import Announcement
-from naiad.domain.prompt import SUBJECT_PLACEHOLDER
-from naiad.domain.workflow import load_workflow
+from naiad.domain.prompt import BRANCH_PLACEHOLDER, SUBJECT_PLACEHOLDER
+from naiad.domain.transitions import UnknownState, start_state as resolve_start_state
+from naiad.domain.workflow import Workflow, load_workflow
 from naiad.runtime.announcements import Announcements
+from naiad.runtime.log import RunLog
 from naiad.runtime.run import Run
 
 
@@ -48,7 +50,38 @@ def announce_state(state: str, *, run: Run, subject: str | None = None) -> Annou
             f"state '{state}' needs a subject saying what this announcement is about; "
             f"announce it as: naiad state {state} --subject <value>"
         )
+    # Forgetting to declare a Derived branch is loud, not silent (ADR 0022): a
+    # branchless Run that was handed a Prompt asking for one is refused here,
+    # in a turn that can still repair it, rather than surfacing later as a
+    # silently empty Predecessor. The missing-Subject refusal's shape, on a
+    # different clerical slip.
+    if run.working_branch is None and _branch_prompt_delivered(run, workflow):
+        raise AnnounceError(
+            "this run has no working branch, and the prompt asking you to derive one "
+            "has already been delivered; declare the working branch you created first "
+            "(`git branch --show-current` names the checked-out one) as: "
+            "naiad branch <name>, then announce again"
+        )
     return Announcements(run.root).announce(state, subject=subject)
+
+
+def _branch_prompt_delivered(run: Run, workflow: Workflow) -> bool:
+    """Whether a Prompt carrying the branch placeholder has gone out, derived
+    from the Workflow file and the delivery history rather than stored: the
+    State the Run began at had its Prompt delivered at kickoff, and every
+    delivery after that is a 'delivered' line in the Run log.
+
+    A delivered State the Workflow no longer declares is skipped rather than
+    guessed at: the file may have been edited since, and a guard that cannot
+    read what was sent has no business refusing over it.
+    """
+    try:
+        delivered = [resolve_start_state(workflow, run.start_state).name]
+    except UnknownState:
+        delivered = []
+    delivered += RunLog(run.root).delivered_states()
+    states = (workflow.state(name) for name in delivered)
+    return any(state and state.prompt and BRANCH_PLACEHOLDER in state.prompt for state in states)
 
 
 __all__ = ["AnnounceError", "announce_state"]

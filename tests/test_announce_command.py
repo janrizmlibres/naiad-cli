@@ -10,7 +10,9 @@ import subprocess
 
 import pytest
 
+from naiad.domain.decide import Deliver
 from naiad.runtime.announcements import STATE_FILENAME
+from naiad.runtime.log import RunLog
 from naiad.runtime.run import RunStore
 from naiad_command import NAIAD, naiad_environment, requires_installed_naiad
 
@@ -22,6 +24,30 @@ name = "feature"
 [[states]]
 name = "grill"
 prompt = "/grill-with-docs {task}"
+
+[[states]]
+name = "implement"
+prompt = "/implement the ticket at {subject}"
+clear = true
+
+[[states]]
+name = "done"
+terminal = true
+"""
+
+# A Workflow whose head Prompt carries {branch}, behind a pre-head State that
+# does not — the shape the undeclared-branch guard is measured against
+# (ADR 0022): the guard fires only once a {branch}-carrying Prompt has gone out.
+BRANCH_WORKFLOW = """
+name = "feature"
+
+[[states]]
+name = "classify"
+prompt = "classify {task}"
+
+[[states]]
+name = "grill"
+prompt = "/grill-with-docs {task} on {branch}"
 
 [[states]]
 name = "implement"
@@ -181,3 +207,93 @@ def test_announcing_outside_a_run_is_rejected_rather_than_silently_ignored(run):
 
     assert finished.returncode != 0
     assert finished.stderr.strip() != ""
+
+
+def branch_workflow_run(tmp_path, *, start_state=None, working_branch=None):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    workflow = repo / "workflow.toml"
+    workflow.write_text(BRANCH_WORKFLOW)
+    return RunStore(tmp_path / "naiad" / "runs").create(
+        run_id="a-run",
+        workflow_path=workflow,
+        task="add dark mode",
+        target_repo=repo,
+        created_at="2026-07-19T12:00:00Z",
+        start_state=start_state,
+        working_branch=working_branch,
+    )
+
+
+def test_a_branchless_run_handed_a_branch_carrying_head_prompt_refuses_the_next_announcement(
+    tmp_path,
+):
+    """Forgetting to declare is loud, not silent (ADR 0022). The Run began at
+    the head State, so its {branch}-carrying Prompt went out at kickoff; the
+    next Announcement with the branch still absent is refused, with the fix in
+    the message."""
+    run = branch_workflow_run(tmp_path, start_state="grill")
+
+    finished = announce(run, "implement", "--subject", "01-a.md")
+
+    assert finished.returncode != 0
+    assert "naiad branch" in finished.stderr
+
+
+def test_the_undeclared_branch_refusal_does_not_alter_the_state_file(tmp_path):
+    run = branch_workflow_run(tmp_path, start_state="grill")
+
+    announce(run, "implement", "--subject", "01-a.md")
+
+    assert not (run.root / STATE_FILENAME).exists()
+
+
+def test_announcing_before_any_branch_carrying_prompt_was_delivered_is_not_refused(tmp_path):
+    """A pre-head State announces freely on a branchless Run: the Run began at
+    classify, whose Prompt does not carry {branch}, and no other Prompt has
+    been delivered yet."""
+    run = branch_workflow_run(tmp_path)
+
+    finished = announce(run, "grill")
+
+    assert finished.returncode == 0, finished.stderr
+
+
+def test_a_branch_carrying_prompt_delivered_mid_run_arms_the_guard(tmp_path):
+    """Whether a {branch}-carrying Prompt went out is derivable from the
+    Workflow file and the delivery history: a Run that began before the head
+    State is guarded from the moment the head Prompt is delivered."""
+    run = branch_workflow_run(tmp_path)
+    RunLog(run.root).record(
+        Deliver(state="grill", prompt="/grill-with-docs {task} on {branch}", next_states=("implement",))
+    )
+
+    finished = announce(run, "implement", "--subject", "01-a.md")
+
+    assert finished.returncode != 0
+    assert "naiad branch" in finished.stderr
+
+
+def test_after_declaring_the_same_announcement_succeeds(tmp_path):
+    run = branch_workflow_run(tmp_path, start_state="grill")
+    declared = subprocess.run(
+        [NAIAD, "branch", "feat/dark-mode"],
+        capture_output=True,
+        text=True,
+        env=naiad_environment(run, run_id="a-run"),
+        cwd=str(run.target_repo),
+    )
+    assert declared.returncode == 0, declared.stderr
+
+    finished = announce(run, "implement", "--subject", "01-a.md")
+
+    assert finished.returncode == 0, finished.stderr
+    assert state_file(run)["state"] == "implement"
+
+
+def test_a_run_whose_branch_was_given_is_never_touched_by_the_guard(tmp_path):
+    run = branch_workflow_run(tmp_path, start_state="grill", working_branch="feat/named")
+
+    finished = announce(run, "implement", "--subject", "01-a.md")
+
+    assert finished.returncode == 0, finished.stderr

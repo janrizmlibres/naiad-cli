@@ -9,11 +9,14 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 
-# The one placeholder anything asks a Prompt about rather than merely
-# substituting: three guards refuse work whose Prompt names a Subject with none
-# given, and they must all be asking about the same string as the substitution
-# below (ADR 0009).
+# The placeholders something asks a Prompt about rather than merely
+# substituting, which is what earns a placeholder a name here: the askers must
+# be asking about the same string as the substitution below. Three guards
+# refuse work whose Prompt names a Subject with none given (ADR 0009), and the
+# announce command refuses a branchless Run once a Prompt carrying the branch
+# placeholder has gone out (ADR 0022).
 SUBJECT_PLACEHOLDER = "{subject}"
+BRANCH_PLACEHOLDER = "{branch}"
 
 
 def render_candidates(candidates: Sequence[str]) -> str:
@@ -82,17 +85,18 @@ def render_prompt(
     read — Naiad neither asks git whether that branch exists nor decides
     whether the Run should stand on it, which is the Prompt's judgment to make
     (ADR 0015). An absent Predecessor is ordinary, being what the first Entry
-    for a repository has, and renders as nothing. An absent Working branch is
-    not, but it is refused at kickoff rather than here, for the reason a
-    missing Subject is refused where the mistake can still be corrected.
+    for a repository has, and renders as nothing. So does an absent Working
+    branch, and rendering empty is the Prompt's cue to derive and declare one
+    (ADR 0022); a declaration then forgotten is refused at the next
+    Announcement, where the agent can still correct it, rather than here.
     """
     return (
         prompt.replace("{task}", task)
         .replace("{next_state}", render_candidates(next_states))
         .replace(SUBJECT_PLACEHOLDER, subject or "")
-        .replace("{branch}", branch or "")
+        .replace(BRANCH_PLACEHOLDER, branch or "")
         .replace("{predecessor}", predecessor or "")
     )
 
 
-__all__ = ["SUBJECT_PLACEHOLDER", "render_candidates", "render_prompt"]
+__all__ = ["BRANCH_PLACEHOLDER", "SUBJECT_PLACEHOLDER", "render_candidates", "render_prompt"]
