@@ -516,6 +516,27 @@ def test_the_diagnosing_state_states_the_criterion_for_choosing_its_exit(workflo
     assert "feedback loop" in prompt
 
 
+@pytest.mark.parametrize(
+    ("head", "before"),
+    [("diagnose", "before you form a hypothesis"), ("grill", "before the interview")],
+)
+def test_each_branch_head_reads_a_referenced_image_first(workflow, head, before):
+    """Both heads receive the raw task, and a bug report or a design brief often
+    points at an image — a screenshot of the failure, a mockup to match. The
+    agent meets an issue as markdown text with the image only as a URL, and
+    Naiad reads no image itself (ADR 0002), so the instruction to fetch and Read
+    it lives in the Prompt or nowhere. It is pinned here rather than in either
+    skill for the reason the triage label and the seams are (ADR 0016): an input
+    to the skill, asserted where the rest of the Workflow's behaviour is.
+
+    Each head names its own moment — the read comes before the hypothesis on the
+    bug branch and before the interview on the feature one — so the phrase is
+    asserted per head rather than as the bare word somewhere in the Prompt."""
+    image_sentence = only_sentence(delivered(workflow, head), "image")
+
+    assert f"Read it {before}" in image_sentence
+
+
 def test_the_diagnosing_state_restates_the_task_because_it_clears(workflow):
     assert workflow.state("diagnose").clear
     assert TASK in delivered(workflow, "diagnose")
@@ -587,6 +608,28 @@ def test_the_implement_loop_names_the_pull_request_rather_than_interpolating_it(
     exhausted = [line for line in prompt.split("\n") if "remain" in line or "no tickets" in line]
 
     assert any("pull-request" in line and "handover" not in line for line in exhausted)
+
+
+def test_the_implement_loop_marks_the_finished_ticket_resolved(workflow):
+    """Agents recorded completion unreliably — sometimes marking the ticket
+    done, sometimes not — and the Status line is the only record the loop and a
+    reader have. So the Prompt makes marking it resolved explicit and first,
+    rather than left to the external skill to remember (ADR 0010, ADR 0016).
+    `resolved` is issue-tracker.md's own completion status, reused here rather
+    than a sixth triage role."""
+    assert "set that ticket's Status line to resolved" in delivered(workflow, "implement")
+
+
+def test_the_implement_loop_reads_only_unresolved_tickets_when_it_scans(workflow):
+    """The scan routes every status other than ready-for-agent to handover, so a
+    resolved ticket left in the frontier would park the loop on its own finished
+    work. The frontier is the unresolved tickets alone, and a blocking edge is
+    satisfied when the ticket it names is resolved — the meaning issue-tracker.md
+    already gives `resolved`."""
+    prompt = delivered(workflow, "implement")
+
+    assert "lowest-numbered ticket that is not resolved" in prompt
+    assert "no unresolved tickets remain" in prompt
 
 
 def test_the_handover_gate_delivers_nothing(workflow):

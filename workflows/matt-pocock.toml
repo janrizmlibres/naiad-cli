@@ -127,6 +127,8 @@ If the Working branch already exists, check it out as it is and leave it alone �
 
 If it does not exist, choose what to base it on before you create it, then create it from that branch by name — `git checkout -b {branch} <the branch you chose>` — rather than from whatever is currently checked out, which belongs to whichever Run was here last. Choose like this. When no Predecessor is named above, base it on this repository's base branch. Otherwise run `git merge-base --is-ancestor <predecessor> <base branch>`, in that order: a non-zero exit says the Predecessor is not yet an ancestor of the base branch, so its work has not landed and this Run stands on it — base the new branch on the Predecessor. A zero exit says it has landed — base the new branch on the base branch.
 
+If the task above, or an issue it links to, names an image — a screenshot of the failure, a stack-trace grab, a broken screen — fetch it with `gh` or this repository's GitHub MCP server and Read it before you form a hypothesis, since a fault you can see is not one to reconstruct from prose.
+
 Run the discipline end to end — through the fix, its regression test, the instrumentation cleanup and the post-mortem — rather than stopping at the diagnosis.
 
 If you cannot build a feedback loop at all, do not hypothesise without one: say so in the session, list what you tried and what you need, and announce no-repro. Otherwise, when the fix is in place with its regression test and the working tree is clean, announce pull-request.
@@ -176,6 +178,8 @@ Predecessor: {predecessor}
 If the Working branch already exists, check it out as it is and leave it alone — a resumed or re-entered Run finds the branch waiting for it, which is ordinary rather than a failure.
 
 If it does not exist, choose what to base it on before you create it, then create it from that branch by name — `git checkout -b {branch} <the branch you chose>` — rather than from whatever is currently checked out, which belongs to whichever Run was here last. Choose like this. When no Predecessor is named above, base it on this repository's base branch. Otherwise run `git merge-base --is-ancestor <predecessor> <base branch>`, in that order: a non-zero exit says the Predecessor is not yet an ancestor of the base branch, so its work has not landed and this Run stands on it — base the new branch on the Predecessor. A zero exit says it has landed — base the new branch on the base branch.
+
+If the task above, or an issue it links to, names an image — a mockup to match, a screenshot of the behaviour in question — fetch it with `gh` or this repository's GitHub MCP server and Read it before the interview, since a design is grounded in what you can see rather than only what is described.
 
 When the interview is finished and its ADRs and glossary entries are written, announce {next_state}.
 """
@@ -267,6 +271,15 @@ When every ticket is published with its blocking edges declared, announce {next_
 # which it found: routing an unknown label and routing ready-for-human are the
 # same action needing opposite responses — fix the label, or do the work.
 #
+# The finished ticket is marked resolved here, in the Prompt, rather than left
+# to /implement: the skill did it unreliably — sometimes marking a ticket done,
+# sometimes not — and the Status line is the only record the loop and a reader
+# have. Marking it is also what shrinks the frontier: the scan reads unresolved
+# tickets only, so a ticket left unmarked is one this loop picks again. resolved
+# is issue-tracker.md's own completion status — the wayfinding axis already uses
+# it, and an edge is unblocked when its ticket is resolved — reused here rather
+# than added as a sixth triage role, which the triage table is not (ADR 0010).
+#
 # The successors are written out rather than interpolated, as the diagnosing
 # State's are and for both of that pattern's reasons: {next_state} renders every
 # candidate as one joined phrase, which attaches no condition to each exit and
@@ -278,11 +291,13 @@ next = ["implement", "handover", "pull-request"]
 prompt = """
 /implement the ticket at {subject}, and only that one. It has been triaged as ready for you; take that as given rather than re-checking it.
 
-When it is done, choose what comes next. Scan the project's issue tracker for the lowest-numbered ticket whose blocking edges are all satisfied, and read its Status line:
+When it is done — the work complete, its tests green and the working tree clean — set that ticket's Status line to resolved and save it, before you do anything else. That line is the only record the ticket is finished: left unmarked, it is a ticket this loop's scan picks again and one a reader cannot tell from outstanding work.
+
+Then choose what comes next. Scan the project's issue tracker for the lowest-numbered ticket that is not resolved and whose blocking edges are all satisfied — an edge is satisfied when the ticket it names is resolved — and read its Status line:
 
 - ready-for-agent — announce implement, passing that ticket's file as the subject.
 - any other status, including ready-for-human, needs-info, needs-triage, wontfix, one this repository does not define, or no Status line at all — announce handover, passing that ticket's file as the subject, and say in the session which status you found and why you are stopping.
-- no tickets left to do — announce pull-request.
+- no unresolved tickets remain — announce pull-request.
 """
 
 # Where the loop puts a ticket it will not do. A Gate State: no Prompt, so Naiad
