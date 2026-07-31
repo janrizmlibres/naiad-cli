@@ -27,7 +27,7 @@ from naiad.runtime.announcements import Announcements
 from naiad.runtime.answers import AnswerLog
 from naiad.runtime.log import RunLog
 from naiad.runtime.loop import UndrivableRun, tick
-from naiad.runtime.records import Clears, Turns
+from naiad.runtime.records import Clears, Turns, Waits
 from naiad.runtime.run import RunStore
 
 WORKFLOW = """
@@ -500,6 +500,61 @@ def test_a_third_silence_notifies_instead_of_nudging(run, workflow, session):
     after = drive(run, workflow, session, notifier=notifier, now=_later(run, SILENCE_SECONDS))
     assert after is NOTHING
     assert len(notifier.notified) == 1
+
+
+def declare_wait(run, reason, *, seconds):
+    """Stand in for the agent's `naiad wait` command: the Wait recorded
+    against the Run's current Announcement, starting now."""
+    waits = Waits(run.root)
+    waits.record(
+        Announcements(run.root).latest(), reason=reason, now=_later(run, 0), seconds=seconds
+    )
+    return waits
+
+
+def test_a_declared_wait_keeps_the_silent_agent_unnudged(run, workflow, session):
+    """The screenshot case (ADR 0021): background review agents running, the
+    turn correctly ended, and the wake already guaranteed — a Nudge here buys
+    a wasted poll turn and marches toward a false parking."""
+    announce(run, "grill")
+    drive(run, workflow, session)
+    Turns(run.root).record_end(latest_seq=1)
+    declare_wait(run, "2 review agents", seconds=SILENCE_SECONDS * 4)
+    session.sent.clear()
+
+    action = drive(run, workflow, session, now=_later(run, SILENCE_SECONDS * 3))
+
+    assert action is NOTHING
+    assert session.sent == []
+
+
+def test_an_expired_wait_is_nudged_naming_what_was_waited_on(run, workflow, session):
+    announce(run, "grill")
+    drive(run, workflow, session)
+    Turns(run.root).record_end(latest_seq=1)
+    declare_wait(run, "2 review agents", seconds=SILENCE_SECONDS)
+    session.sent.clear()
+
+    action = drive(run, workflow, session, now=_later(run, SILENCE_SECONDS))
+
+    assert action == Nudge(attempt=1, expired_wait="2 review agents")
+    assert "2 review agents" in session.sent[0][2]
+
+
+def test_a_fresh_wait_re_arms_the_nudge_allowance(run, workflow, session):
+    """A re-declared Wait after a wake answers a new silence, so the count
+    starts over rather than inheriting the expired Wait's nudges (ADR 0021)."""
+    announce(run, "grill")
+    drive(run, workflow, session)
+    Turns(run.root).record_end(latest_seq=1)
+    declare_wait(run, "first agent", seconds=SILENCE_SECONDS)
+    drive(run, workflow, session, now=_later(run, SILENCE_SECONDS))
+    declare_wait(run, "second agent", seconds=SILENCE_SECONDS)
+    session.sent.clear()
+
+    action = drive(run, workflow, session, now=_later(run, SILENCE_SECONDS))
+
+    assert action == Nudge(attempt=1, expired_wait="second agent")
 
 
 def test_a_session_that_never_ends_a_turn_notifies_on_the_timeout(run, workflow, session):

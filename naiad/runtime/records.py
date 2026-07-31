@@ -18,6 +18,7 @@ from pathlib import Path
 
 from naiad.domain.announcement import Announcement
 from naiad.domain.answerer import Answered, Consultation, Escalated
+from naiad.domain.decide import WAIT_BUDGET_SECONDS, WAIT_DEFAULT_SECONDS
 from naiad.runtime.announcements import STATE_FILENAME
 from naiad.runtime.atomic import write_atomically
 from naiad.runtime.run import METADATA_FILENAME
@@ -28,6 +29,7 @@ NOTICES_FILENAME = "notices.json"
 CONSULTATIONS_FILENAME = "consultations.json"
 CLEARS_FILENAME = "clears.json"
 CLEAR_ATTEMPTS_FILENAME = "clearattempts.json"
+WAITS_FILENAME = "waits.json"
 
 # Every file whose writing means something happened. The Run's own metadata is
 # among them so that a Run which has produced no signal at all is idle since it
@@ -40,10 +42,11 @@ SIGNAL_FILENAMES = (
     CONSULTATIONS_FILENAME,
     CLEARS_FILENAME,
     CLEAR_ATTEMPTS_FILENAME,
+    WAITS_FILENAME,
     METADATA_FILENAME,
 )
 
-Document = dict[str, int | bool | str | None]
+Document = dict[str, int | float | bool | str | None]
 
 
 def _read(path: Path) -> Document:
@@ -248,23 +251,112 @@ class Notices:
     def __init__(self, run_root: Path) -> None:
         self.path = Path(run_root) / NOTICES_FILENAME
 
-    def of(self, announcement: Announcement | None) -> tuple[bool, int]:
+    def of(self, announcement: Announcement | None, *, wait_count: int = 0) -> tuple[bool, int]:
+        """wait_count is how many Waits the Announcement has declared, and a
+        mismatch re-arms the record exactly as a new Announcement does: a
+        re-declared Wait after a wake answers a new silence, so it earns a
+        fresh allowance rather than inheriting the count an earlier one ran up
+        (ADR 0021). Every reader must pass the count the writer keyed with —
+        Waits.count — or a parked Run reads as running."""
         document = _current(self.path, announcement)
+        if int(document.get("wait", 0) or 0) != wait_count:
+            return False, 0
         return bool(document.get("notified", False)), int(document.get("nudges", 0) or 0)
 
-    def record_notified(self, announcement: Announcement | None) -> None:
-        notified, nudges = self.of(announcement)
-        self._write(announcement, notified=True, nudges=nudges)
+    def record_notified(self, announcement: Announcement | None, *, wait_count: int = 0) -> None:
+        notified, nudges = self.of(announcement, wait_count=wait_count)
+        self._write(announcement, notified=True, nudges=nudges, wait_count=wait_count)
 
-    def record_nudge(self, announcement: Announcement | None) -> None:
-        notified, nudges = self.of(announcement)
-        self._write(announcement, notified=notified, nudges=nudges + 1)
+    def record_nudge(self, announcement: Announcement | None, *, wait_count: int = 0) -> None:
+        notified, nudges = self.of(announcement, wait_count=wait_count)
+        self._write(announcement, notified=notified, nudges=nudges + 1, wait_count=wait_count)
 
-    def _write(self, announcement: Announcement | None, *, notified: bool, nudges: int) -> None:
+    def _write(
+        self, announcement: Announcement | None, *, notified: bool, nudges: int, wait_count: int
+    ) -> None:
         _write(
             self.path,
-            {"seq": _seq(announcement), "notified": notified, "nudges": nudges},
+            {"seq": _seq(announcement), "notified": notified, "nudges": nudges, "wait": wait_count},
         )
+
+
+class Waits:
+    """The agent's declared Wait — what it said it was waiting on, until when,
+    and how much of the Announcement's wait budget has gone (ADR 0021).
+
+    Written by the wait command in the agent's process and read by the loop,
+    like the State file — and like it, single-writer. Kept against the
+    Announcement it belongs to and read as nothing for any other, exactly like
+    Notices: the next Announcement re-arms the budget.
+
+    The budget is charged for a Wait's lifetime rather than its claim: from
+    declaration until it is replaced or expires, capped at what it claimed.
+    Several background tasks finishing at different moments is the honest
+    pattern the verb exists for, and charging each full claim would exhaust
+    the budget in a few wakes. The wake itself is invisible to Naiad
+    (ADR 0002), so time the woken agent spends working before re-declaring is
+    charged as waited — an over-charge, accepted as the price of not reading
+    the session. An expired Wait charges no more than it claimed: silence past
+    the deadline is the silence rule's to spend.
+    """
+
+    def __init__(self, run_root: Path) -> None:
+        self.path = Path(run_root) / WAITS_FILENAME
+
+    def waiting(self, announcement: Announcement | None, *, now: float) -> bool:
+        until = _current(self.path, announcement).get("until")
+        return isinstance(until, (int, float)) and now < until
+
+    def reason(self, announcement: Announcement | None) -> str | None:
+        reason = _current(self.path, announcement).get("reason")
+        return reason if isinstance(reason, str) else None
+
+    def count(self, announcement: Announcement | None) -> int:
+        return int(_current(self.path, announcement).get("count", 0) or 0)
+
+    def remaining(self, announcement: Announcement | None, *, now: float) -> float:
+        return max(0.0, WAIT_BUDGET_SECONDS - self._spent(announcement, now=now))
+
+    def record(
+        self,
+        announcement: Announcement | None,
+        *,
+        reason: str,
+        now: float,
+        seconds: float | None = None,
+    ) -> float:
+        """Declare a Wait, replacing any outstanding one, and return what it
+        was granted. A claim past the remaining budget is clamped to it rather
+        than refused — the refusal, when the budget is spent entirely, is the
+        caller's, which is where its wording lives."""
+        spent = self._spent(announcement, now=now)
+        claim = seconds if seconds is not None else WAIT_DEFAULT_SECONDS
+        granted = min(claim, max(0.0, WAIT_BUDGET_SECONDS - spent))
+        _write(
+            self.path,
+            {
+                "seq": _seq(announcement),
+                "count": self.count(announcement) + 1,
+                "reason": reason,
+                "at": now,
+                "until": now + granted,
+                "granted": granted,
+                "spent": spent,
+            },
+        )
+        return granted
+
+    def _spent(self, announcement: Announcement | None, *, now: float) -> float:
+        """The budget gone: what earlier Waits settled at, plus what the
+        outstanding one has actually consumed — elapsed time, capped at its
+        claim."""
+        document = _current(self.path, announcement)
+        if not document:
+            return 0.0
+        settled = float(document.get("spent", 0.0) or 0.0)
+        at = float(document.get("at", 0.0) or 0.0)
+        granted = float(document.get("granted", 0.0) or 0.0)
+        return settled + min(granted, max(0.0, now - at))
 
 
 class Consultations:
@@ -313,5 +405,6 @@ __all__ = [
     "Handled",
     "Notices",
     "Turns",
+    "Waits",
     "idle_seconds",
 ]

@@ -92,6 +92,8 @@ def signals(
     subject=None,
     cleared=False,
     clear_attempts=0,
+    waiting=False,
+    wait_reason=None,
 ):
     return Signals(
         announcement=(
@@ -109,6 +111,8 @@ def signals(
         finished=finished,
         cleared=cleared,
         clear_attempts=clear_attempts,
+        waiting=waiting,
+        wait_reason=wait_reason,
     )
 
 
@@ -348,6 +352,66 @@ def test_a_third_idle_period_notifies_rather_than_nudging_again(workflow):
         notified=True,
     )
     assert decide(workflow, silenced) is NOTHING
+
+
+def test_a_declared_wait_is_not_silence(workflow):
+    """The agent said its silence was deliberate, so no reminder is owed
+    however long the silence bound has been exceeded (ADR 0021)."""
+    waiting = signals(
+        "grill",
+        seq=1,
+        handled_seq=1,
+        stopped_since_action=True,
+        idle_for=SILENCE_SECONDS * 3,
+        waiting=True,
+        wait_reason="2 review agents",
+    )
+
+    assert decide(workflow, waiting) is NOTHING
+
+
+def test_an_expired_wait_resumes_the_silence_rule_naming_the_wait(workflow):
+    """Expiry re-arms the one recovery shape rather than inventing another,
+    and the Nudge names what was waited on so the agent looks there first."""
+    expired = signals(
+        "grill",
+        seq=1,
+        handled_seq=1,
+        stopped_since_action=True,
+        idle_for=SILENCE_SECONDS,
+        waiting=False,
+        wait_reason="2 review agents",
+    )
+
+    assert decide(workflow, expired) == Nudge(attempt=1, expired_wait="2 review agents")
+
+
+def test_an_expired_wait_still_parks_past_the_nudge_limit(workflow):
+    """A Wait changes when the silence rule runs, never where it ends."""
+    exhausted = signals(
+        "grill",
+        seq=1,
+        handled_seq=1,
+        stopped_since_action=True,
+        idle_for=SILENCE_SECONDS,
+        nudges=NUDGE_LIMIT,
+        waiting=False,
+        wait_reason="2 review agents",
+    )
+
+    assert isinstance(decide(workflow, exhausted), Notify)
+
+
+def test_an_announcement_is_delivered_regardless_of_an_outstanding_wait(workflow):
+    """Announcing supersedes waiting: the phase is done, whatever the agent
+    thought it was still waiting on when it declared."""
+    announced = signals(
+        "grill", seq=2, handled_seq=1, stopped=True, waiting=True, wait_reason="a check"
+    )
+
+    action = decide(workflow, announced)
+
+    assert isinstance(action, Deliver)
 
 
 def test_nudges_are_counted_per_announcement(workflow):

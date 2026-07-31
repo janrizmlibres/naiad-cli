@@ -237,7 +237,10 @@ def _entry_for(action: Action) -> LogLine | None:
     if isinstance(action, Consult):
         return LogLine(kind="consulted", detail=_question(action.question))
     if isinstance(action, Nudge):
-        return LogLine(kind="nudged", detail=f"attempt {action.attempt}")
+        detail = f"attempt {action.attempt}"
+        if action.expired_wait is not None:
+            detail += f" after the wait on '{action.expired_wait}' expired"
+        return LogLine(kind="nudged", detail=detail)
     if isinstance(action, Notify):
         return LogLine(kind="notified", detail=action.reason)
     if isinstance(action, Finish):

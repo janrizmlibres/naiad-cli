@@ -3,12 +3,14 @@
 import pytest
 
 from naiad.domain.announcement import Announcement
+from naiad.domain.decide import WAIT_BUDGET_SECONDS, WAIT_DEFAULT_SECONDS
 from naiad.runtime.records import (
     ClearAttempts,
     Clears,
     Handled,
     Notices,
     Turns,
+    Waits,
     idle_seconds,
 )
 
@@ -117,6 +119,102 @@ def test_notices_are_kept_before_anything_has_been_announced(notices):
 
     assert notices.of(None) == (False, 1)
     assert notices.of(GRILL) == (False, 0)
+
+
+@pytest.fixture
+def waits(tmp_path):
+    return Waits(tmp_path)
+
+
+def test_no_wait_is_in_force_before_one_is_declared(waits):
+    assert waits.waiting(GRILL, now=0.0) is False
+    assert waits.reason(GRILL) is None
+    assert waits.count(GRILL) == 0
+
+
+def test_a_declared_wait_is_in_force_until_its_deadline(waits):
+    waits.record(GRILL, reason="2 review agents", now=100.0, seconds=60.0)
+
+    assert waits.waiting(GRILL, now=100.0 + 59.0) is True
+    assert waits.waiting(GRILL, now=100.0 + 60.0) is False
+    assert waits.reason(GRILL) == "2 review agents"
+
+
+def test_a_wait_names_no_duration_and_gets_the_default(waits):
+    waits.record(GRILL, reason="a check", now=0.0)
+
+    assert waits.waiting(GRILL, now=WAIT_DEFAULT_SECONDS - 1) is True
+    assert waits.waiting(GRILL, now=WAIT_DEFAULT_SECONDS) is False
+
+
+def test_a_wait_is_kept_against_its_announcement(waits):
+    """The next Announcement re-arms it, like every per-Announcement fact."""
+    waits.record(GRILL, reason="a check", now=0.0, seconds=600.0)
+
+    assert waits.waiting(IMPLEMENT, now=1.0) is False
+    assert waits.reason(IMPLEMENT) is None
+    assert waits.count(IMPLEMENT) == 0
+
+
+def test_a_new_wait_replaces_the_last_and_is_counted(waits):
+    waits.record(GRILL, reason="first agent", now=0.0, seconds=600.0)
+    waits.record(GRILL, reason="second agent", now=120.0, seconds=600.0)
+
+    assert waits.reason(GRILL) == "second agent"
+    assert waits.count(GRILL) == 2
+    assert waits.waiting(GRILL, now=120.0 + 599.0) is True
+
+
+def test_the_budget_is_charged_for_time_waited_rather_than_time_claimed(waits):
+    """An agent woken early and re-declaring — several background tasks
+    finishing at different moments — is the honest pattern the verb exists
+    for, and charging each full claim would exhaust it in a few wakes
+    (ADR 0021)."""
+    waits.record(GRILL, reason="first", now=0.0, seconds=600.0)
+    waits.record(GRILL, reason="second", now=120.0, seconds=600.0)
+
+    assert waits.remaining(GRILL, now=120.0) == pytest.approx(WAIT_BUDGET_SECONDS - 120.0)
+
+
+def test_an_expired_wait_charges_no_more_than_it_claimed(waits):
+    """Silence past the deadline is the silence rule's to spend, not the
+    budget's."""
+    waits.record(GRILL, reason="a check", now=0.0, seconds=60.0)
+
+    assert waits.remaining(GRILL, now=1000.0) == pytest.approx(WAIT_BUDGET_SECONDS - 60.0)
+
+
+def test_a_claim_past_the_remaining_budget_is_clamped_to_it(waits):
+    waits.record(GRILL, reason="a check", now=0.0, seconds=WAIT_BUDGET_SECONDS * 2)
+
+    assert waits.waiting(GRILL, now=WAIT_BUDGET_SECONDS - 1) is True
+    assert waits.waiting(GRILL, now=WAIT_BUDGET_SECONDS) is False
+    assert waits.remaining(GRILL, now=WAIT_BUDGET_SECONDS) == pytest.approx(0.0)
+
+
+def test_the_budget_belongs_to_the_announcement(waits):
+    waits.record(GRILL, reason="a check", now=0.0, seconds=600.0)
+
+    assert waits.remaining(IMPLEMENT, now=600.0) == pytest.approx(WAIT_BUDGET_SECONDS)
+
+
+def test_a_wait_re_arms_the_nudge_count(notices, waits):
+    """A re-declared Wait after a wake is the honest signal, not an evasion:
+    the silence it answers is new, so the allowance is too (ADR 0021)."""
+    notices.record_nudge(GRILL)
+    notices.record_nudge(GRILL, wait_count=1)
+
+    assert notices.of(GRILL, wait_count=1) == (False, 1)
+    assert notices.of(GRILL, wait_count=2) == (False, 0)
+
+
+def test_a_declared_wait_counts_as_a_signal_of_life(tmp_path, waits):
+    """The wait's own declaration resets idleness, so its expiry is measured
+    from it rather than from whatever signal happened before."""
+    (tmp_path / "run.json").write_text("{}")
+    waits.record(GRILL, reason="a check", now=0.0, seconds=60.0)
+
+    assert idle_seconds(tmp_path, now=_mtime(waits.path)) == pytest.approx(0, abs=0.01)
 
 
 def test_a_run_that_has_only_just_started_is_not_already_idle(tmp_path):

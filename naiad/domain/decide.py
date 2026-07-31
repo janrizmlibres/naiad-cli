@@ -44,6 +44,16 @@ SILENCE_SECONDS = 120.0
 # will ever arrive and the wall clock is the only thing left to go on.
 HANG_SECONDS = 1800.0
 
+# What a Wait claims when the agent names no duration (ADR 0021). The order of
+# a background review's runtime, so the common case ends by wake rather than by
+# expiry.
+WAIT_DEFAULT_SECONDS = 600.0
+
+# The most declared waiting one Announcement may buy, however the Waits chain.
+# The same order as the hang bound: past it an agent still waiting is a Run
+# stalled, and stalling with no human told is the failure a bound exists for.
+WAIT_BUDGET_SECONDS = 1800.0
+
 
 @dataclass(frozen=True)
 class Signals:
@@ -81,6 +91,14 @@ class Signals:
     and choosing between those is a rule. Branching on it where the Answerer is
     called would put that rule in the adapter layer (ADR 0004).
 
+    waiting says a declared Wait is in force — unexpired at the moment the
+    signals were gathered — and wait_reason is what the latest Wait of this
+    Announcement said it was for, expired or not. Two signals rather than one,
+    because they answer different questions: waiting decides whether the
+    silence rule runs at all, and wait_reason lets the Nudge that follows an
+    expiry name what was waited on (ADR 0021). Both are facts about the
+    current Announcement, re-armed by the next one like nudges.
+
     cleared and clear_attempts are the Clear handshake as signals (ADR 0019).
     cleared says this Announcement's /clear has been confirmed by the
     SessionStart hook; clear_attempts is how many times it has been typed. They
@@ -100,6 +118,8 @@ class Signals:
     finished: bool = False
     cleared: bool = False
     clear_attempts: int = 0
+    waiting: bool = False
+    wait_reason: str | None = None
 
 
 @dataclass(frozen=True)
@@ -150,9 +170,15 @@ class Deliver:
 class Nudge:
     """Remind a silent agent of the Protocol. The attempt is carried so the
     second can be worded more firmly than the first; the words themselves are
-    the Protocol's business, not a rule."""
+    the Protocol's business, not a rule.
+
+    expired_wait is what the agent's lapsed Wait said it was waiting on, when
+    the silence being answered followed one (ADR 0021). Carried so the wording
+    can send the agent to look at that thing first, rather than reading as an
+    accusation of forgetting it did not commit."""
 
     attempt: int
+    expired_wait: str | None = None
 
 
 @dataclass(frozen=True)
@@ -302,13 +328,19 @@ def decide(workflow: Workflow, signals: Signals, *, skip_gates: bool = False) ->
     # the loop's job is to stay out of its way — or it has gone quiet, and the
     # two ways of going quiet want different answers.
     if signals.stopped_since_action:
-        # A turn ended after Naiad last acted and nothing was announced: the
-        # session is alive and has most likely forgotten to announce, which a
-        # reminder fixes.
+        # A turn ended after Naiad last acted and nothing was announced. A
+        # declared Wait says that silence is deliberate — the agent is waiting
+        # on something that will come back — so nothing is owed until it
+        # expires; expiry re-arms this same rule rather than a new one, with
+        # the Nudge naming what was waited on (ADR 0021). Undeclared, the
+        # session has most likely forgotten to announce, which a reminder
+        # fixes.
+        if signals.waiting:
+            return NOTHING
         if signals.idle_for < SILENCE_SECONDS:
             return NOTHING
         if signals.nudges < NUDGE_LIMIT:
-            return Nudge(attempt=signals.nudges + 1)
+            return Nudge(attempt=signals.nudges + 1, expired_wait=signals.wait_reason)
         return _notify(signals, f"the agent went silent and did not answer {NUDGE_LIMIT} Nudges")
 
     # No turn has ended since Naiad acted. Either the agent is working on what
@@ -382,6 +414,8 @@ __all__ = [
     "NOTHING",
     "NUDGE_LIMIT",
     "SILENCE_SECONDS",
+    "WAIT_BUDGET_SECONDS",
+    "WAIT_DEFAULT_SECONDS",
     "Action",
     "Clear",
     "Consult",

@@ -17,6 +17,7 @@ import json
 import os
 import re
 import sys
+import time
 import uuid
 from collections.abc import Callable, Sequence
 from datetime import datetime, timedelta, timezone
@@ -36,6 +37,7 @@ from naiad.cli.kickoff import start_run
 from naiad.cli.protocol import injection_for
 from naiad.cli.refusals import ADD_COMMAND, RUN_COMMAND, Remedy
 from naiad.cli.supervisor import supervise_queue
+from naiad.cli.wait import WaitError, declare_wait
 from naiad.cli.watch import tick_once, watch
 from naiad.domain.entry import Entry
 from naiad.domain.workflow import load_workflow
@@ -60,6 +62,7 @@ FAILURES = (
     AnnounceError,
     AskError,
     BatchError,
+    WaitError,
     NoRunError,
     StorageError,
     TmuxError,
@@ -131,6 +134,18 @@ def main(argv: list[str] | None = None) -> int:
         help="an option you were weighing; pass one per option, and pass every one",
     )
     ask.set_defaults(handler=_ask)
+
+    wait_parser = subcommands.add_parser(
+        "wait", help="declare that you are waiting, so silence is not misread"
+    )
+    wait_parser.add_argument("reason", help="what you are waiting on")
+    wait_parser.add_argument(
+        "--seconds",
+        type=float,
+        default=None,
+        help="how long the wait may run before you are reminded (default: ten minutes)",
+    )
+    wait_parser.set_defaults(handler=_wait)
 
     stopped = subcommands.add_parser("stopped", help="record that a turn ended (Stop hook)")
     stopped.set_defaults(handler=_stopped)
@@ -252,6 +267,26 @@ def _ask(arguments: argparse.Namespace) -> int:
         return 2
 
     print(f"asked ({announcement.seq}); the answer will arrive in this session")
+    return 0
+
+
+def _wait(arguments: argparse.Namespace) -> int:
+    try:
+        run = _current_run()
+        granted, remaining = declare_wait(
+            arguments.reason, run=run, now=time.time(), seconds=arguments.seconds
+        )
+    except FAILURES as error:
+        print(f"naiad: {error}", file=sys.stderr)
+        return 2
+
+    # The granted number is said back because a claim past the remaining
+    # budget is clamped rather than refused: the agent must plan around what
+    # it actually got, not what it asked for.
+    print(
+        f'waiting on "{arguments.reason}" for {int(granted)}s '
+        f"({int(remaining)}s of wait budget left); end your turn"
+    )
     return 0
 
 

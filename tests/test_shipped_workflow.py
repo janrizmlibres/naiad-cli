@@ -728,24 +728,23 @@ def test_the_pull_request_state_waits_for_the_review_before_announcing(workflow)
     rather than after it — announcing early delivers /fix-review an empty pull
     request. The wait names no particular integration, because the tail is
     project-neutral and the review a host runs is its own (ADR 0016).
-
-    The wait happens inside the turn, because nothing wakes an agent that ends
-    one: a turn that ends without an Announcement is Nudged twice and then parks
-    the Run for a human (naiad.domain.decide). Naiad gains nothing for this —
-    the Prompt carries it (ADR 0006).
     """
     prompt = delivered(workflow, "pull-request")
 
     assert "automated review" in prompt
-    assert "single long-running command" in prompt
+    assert "declare a wait" in prompt
 
 
-def test_the_pull_request_state_waits_in_one_command_within_the_tool_timeout(workflow):
-    """The cost of the wait is the Prompt's business, and one blocking command
-    is what makes it cheap: a loop of separate checks re-sends the accumulated
-    context every time round. Ten minutes because that is the Bash tool's
-    ceiling, so the budget and the cap are one number rather than two."""
-    assert "ten-minute timeout" in delivered(workflow, "pull-request")
+def test_the_pull_request_state_declares_its_wait_rather_than_blocking(workflow):
+    """The blocking wait ADR 0006 prescribed is superseded: a declared Wait
+    ends the turn, and its expiry is the re-check (ADR 0021). Blocking would
+    burn a session slot polling, and a Prompt still saying so would have the
+    agent doing both."""
+    prompt = delivered(workflow, "pull-request")
+
+    assert "end your turn" in prompt
+    assert "single long-running command" not in prompt
+    assert "ten-minute timeout" not in prompt
 
 
 def test_the_pull_request_state_waits_only_on_the_review_check(workflow):

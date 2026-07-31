@@ -111,7 +111,8 @@ def _narrate(action: Action) -> str | None:
     if isinstance(action, Respond):
         return f"answered: {action.answer}"
     if isinstance(action, Nudge):
-        return f"nudged the agent ({action.attempt})"
+        expired = "" if action.expired_wait is None else f" after its wait on '{action.expired_wait}' expired"
+        return f"nudged the agent ({action.attempt}){expired}"
     if isinstance(action, Notify):
         return f"notified: {action.reason}"
     if isinstance(action, Finish):

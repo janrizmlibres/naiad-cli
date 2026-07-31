@@ -131,6 +131,14 @@ def test_a_nudge_records_which_attempt_it_was(log):
     assert "2" in log.entries()[-1].detail
 
 
+def test_a_nudge_after_an_expired_wait_records_what_was_waited_on(log):
+    """'nudged' overnight only reads beside what the agent said it was
+    waiting on (ADR 0021)."""
+    log.record(Nudge(attempt=1, expired_wait="2 review agents"), seq=2)
+
+    assert "2 review agents" in log.entries()[-1].detail
+
+
 def test_a_consultation_records_the_question_put_to_the_answerer(log):
     log.record(Consult(question=QUESTION), seq=2)
 

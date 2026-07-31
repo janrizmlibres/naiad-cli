@@ -28,7 +28,7 @@ from naiad.runtime.announcements import Announcements
 from naiad.runtime.atomic import write_atomically
 from naiad.runtime.home import StorageError, refuse_inside_repository
 from naiad.runtime.log import RunLog
-from naiad.runtime.records import Notices
+from naiad.runtime.records import Notices, Waits
 from naiad.runtime.run import RunStore
 
 ENTRY_SUFFIX = ".json"
@@ -168,7 +168,10 @@ def status_of(entry: Entry, runs: RunStore) -> Status:
     root = runs.root_for(entry.run_id)
     if RunLog(root).finished():
         return DONE
-    notified, _nudges = Notices(root).of(Announcements(root).latest())
+    # Read with the same Wait key the loop wrote it under (ADR 0021), or a Run
+    # parked after its Waits ran out would show as running.
+    latest = Announcements(root).latest()
+    notified, _nudges = Notices(root).of(latest, wait_count=Waits(root).count(latest))
     return PARKED if notified else RUNNING
 
 

@@ -17,7 +17,7 @@ from naiad.runtime.announcements import Announcements
 from naiad.runtime.home import StorageError
 from naiad.runtime.log import RunLog
 from naiad.runtime.queue import DONE, PARKED, RUNNING, WAITING, Queue, status_of
-from naiad.runtime.records import Notices
+from naiad.runtime.records import Notices, Waits
 from naiad.runtime.run import RunStore
 
 
@@ -210,6 +210,18 @@ def test_an_entry_whose_run_has_been_notified_for_its_announcement_is_parked(run
     run = started(runs, repo)
     announcement = Announcements(run.root).announce("handover")
     Notices(run.root).record_notified(announcement)
+
+    assert status_of(entry(repo, run_id=run.id), runs) == PARKED
+
+
+def test_an_entry_parked_after_its_waits_ran_out_is_still_read_as_parked(runs, repo):
+    """The notification is recorded against the Announcement's latest Wait
+    (ADR 0021), and the Queue must read it with the same key or a parked Run
+    shows as running."""
+    run = started(runs, repo)
+    announcement = Announcements(run.root).announce("handover")
+    Waits(run.root).record(announcement, reason="a check", now=0.0, seconds=60.0)
+    Notices(run.root).record_notified(announcement, wait_count=1)
 
     assert status_of(entry(repo, run_id=run.id), runs) == PARKED
 

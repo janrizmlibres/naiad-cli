@@ -30,6 +30,15 @@ def test_names_the_subject_flag_and_says_when_it_is_needed():
     assert "series" in protocol
 
 
+def test_names_the_command_that_declares_a_wait():
+    """A freshly Cleared context knows only what the Protocol tells it, and an
+    agent that cannot declare its wait is read as silent (ADR 0021)."""
+    protocol = render_protocol(next_states=("spec",))
+
+    assert "naiad wait" in protocol
+    assert "--seconds" in protocol
+
+
 def test_instructs_the_agent_never_to_ask_a_human_directly():
     protocol = render_protocol(next_states=("spec",)).lower()
 
@@ -66,6 +75,7 @@ def test_the_commands_are_named_as_the_agent_must_actually_invoke_them():
 
     assert "/opt/naiad/bin/naiad state" in protocol
     assert "/opt/naiad/bin/naiad ask" in protocol
+    assert "/opt/naiad/bin/naiad wait" in protocol
 
 
 def test_a_run_with_no_next_state_is_told_so_rather_than_left_a_placeholder():
@@ -93,8 +103,33 @@ def test_the_second_nudge_is_worded_more_firmly_than_the_first():
     assert "human" in second and "human" not in first
 
 
+def test_the_first_nudge_teaches_the_wait_verb():
+    """The Nudge is the teachable moment: it arrives precisely when an
+    undeclared wait is being misread as silence (ADR 0021)."""
+    assert "naiad wait" in render_nudge(attempt=1)
+    assert "naiad wait" not in render_nudge(attempt=2)
+
+
+def test_a_nudge_after_an_expired_wait_names_what_was_waited_on():
+    """Sent to look at the thing it declared, rather than accused of
+    forgetting a Protocol it followed."""
+    nudge = render_nudge(attempt=1, expired_wait="2 review agents")
+
+    assert "2 review agents" in nudge
+    assert "naiad state" in nudge
+
+
+def test_the_second_nudge_after_an_expired_wait_still_warns_of_the_human():
+    second = render_nudge(attempt=2, expired_wait="2 review agents")
+
+    assert "2 review agents" in second
+    assert "human" in second
+
+
 def test_no_nudge_is_left_holding_a_placeholder():
-    assert "{" not in render_nudge(attempt=1) and "{" not in render_nudge(attempt=2)
+    for expired_wait in (None, "2 review agents"):
+        for attempt in (1, 2):
+            assert "{" not in render_nudge(attempt=attempt, expired_wait=expired_wait)
 
 
 def test_there_is_a_wording_for_every_nudge_naiad_is_willing_to_send():
@@ -102,3 +137,4 @@ def test_there_is_a_wording_for_every_nudge_naiad_is_willing_to_send():
     they drift apart, a nudged agent gets a traceback instead of a reminder."""
     for attempt in range(1, NUDGE_LIMIT + 1):
         assert render_nudge(attempt=attempt)
+        assert render_nudge(attempt=attempt, expired_wait="a check")

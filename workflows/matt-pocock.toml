@@ -348,11 +348,13 @@ next = ["implement", "pull-request"]
 #
 # This State waits, which no other one does. The review the next State fixes is
 # produced after the pull request opens, so announcing as soon as it is open
-# would hand /fix-review an empty pull request. The wait has to happen inside
-# the turn: an agent that stops without announcing is Nudged twice and then
-# parks the Run, and no review arriving later would wake it. The wait names no
-# particular integration — whatever automated review the host runs, if any — for
-# the same reason the open does (ADR 0016).
+# would hand /fix-review an empty pull request. The wait is declared rather
+# than blocked on inside the turn (ADR 0021, superseding ADR 0006): the agent
+# says what it is waiting on and ends its turn, silence under a declared Wait
+# is left alone, and the reminder that follows expiry is the re-check — look,
+# then announce or declare a fresh wait. The wait names no particular
+# integration — whatever automated review the host runs, if any — for the same
+# reason the open does (ADR 0016).
 #
 # Branches on whether a review ran, not on what it said (ADR 0017). A review
 # completed: announce review-fix, which fetches the raw output and forms the
@@ -371,15 +373,13 @@ next = ["implement", "pull-request"]
 # accepts an explicit base for stacked work and a direct open takes one too, so
 # each needs telling rather than teaching (ADR 0015).
 #
-# Three numbers are load-bearing and none of them is arbitrary (ADR 0006). The
-# wait is one blocking command rather than a loop of checks, because a loop
-# re-sends the accumulated context every time round and that is the whole cost.
-# Ten minutes because that is the Bash tool's ceiling, so the budget the Prompt
-# states and the cap the tool enforces are one number; a review itself takes
-# about three, and the Run's outer bound is the hang rule's thirty. And the wait
-# names the review check alone: a repository's build checks run far longer, so
-# waiting on all of them would overrun for a reason that has nothing to do with
-# the review.
+# The bounds are Naiad's rather than this Prompt's (ADR 0021): a declared Wait
+# defaults to ten minutes — a review itself takes about three — and the chain
+# of waits draws on one budget per Announcement, past which a further wait is
+# refused toward announcing. So the Prompt states no numbers; it only keeps
+# the wait honest. The wait names the review check alone: a repository's build
+# checks run far longer, so waiting on all of them would spend the budget for
+# a reason that has nothing to do with the review.
 [[states]]
 name = "pull-request"
 clear = true
@@ -393,9 +393,9 @@ Predecessor: {predecessor}
 
 Open it against the right base. When no Predecessor is named above, say nothing about a base and let it default to the repository's own. Otherwise run `git merge-base --is-ancestor <predecessor> <base branch>`, in that order, now — rather than relying on what was true when this Run started, because a Predecessor can land while a Run is working. A non-zero exit says the Predecessor still has not landed and this branch stands on it, so open it against the Predecessor as the base. A zero exit says it has landed, so say nothing about a base and let it default to the repository's own.
 
-Once the pull request is open, wait for the automated review this host runs, if any — that check alone, and not every check on the pull request, because the build checks run far longer than a review does. Wait in a single long-running command with a ten-minute timeout, rather than a loop of separate checks, and do not end your turn: nothing will wake you again if you stop.
+Once the pull request is open, wait for the automated review this host runs, if any — that check alone, and not every check on the pull request, because the build checks run far longer than a review does. Do not poll for it and do not block on it: declare a wait naming the review, as the protocol describes, and end your turn. Silence under a declared wait is left alone; when the wait expires you will be reminded.
 
-When a review has completed, announce review-fix. If no review completes within ten minutes, or this host runs none, say so in the session and announce done: there is then simply nothing to fix.
+On that reminder, check whether the review has completed. Completed: announce review-fix. Still running: declare a fresh wait and end your turn again. If no review is coming — this host runs none, or a further wait is refused because the budget is spent — say so in the session and announce done: there is then simply nothing to fix.
 """
 
 # Names the pull request by its branch rather than as the one just opened: this
