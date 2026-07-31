@@ -61,7 +61,7 @@ def start_run(
         # one that queues it again — once the stale Entry has been removed —
         # rather than `naiad run`, which would queue a second Entry for work the
         # Queue is already holding and start supervising on top of it.
-        how=ADD_COMMAND,
+        remedy=ADD_COMMAND,
     )
     first = checked.state
     successors = next_states(checked.workflow, first.name, skip_gates=skip_gates)

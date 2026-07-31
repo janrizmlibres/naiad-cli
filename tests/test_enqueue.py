@@ -6,9 +6,12 @@ right there and pays the error message only, rather than finding out at three
 in the morning.
 """
 
+import json
+
 import pytest
 
-from naiad.cli.enqueue import BranchAlreadyClaimed, enqueue
+from naiad.cli.batch import BatchError, enqueue_batch
+from naiad.cli.enqueue import BranchAlreadyClaimed, Work, enqueue
 from naiad.cli.refusals import ADD_COMMAND, MissingSubject, MissingWorkingBranch
 from naiad.domain.transitions import UnknownState
 from naiad.domain.workflow import WorkflowError
@@ -54,21 +57,27 @@ def queue(tmp_path):
     return Queue(tmp_path / "naiad" / "queue")
 
 
-def add(repo, queue, **overrides):
+def work(repo, **overrides):
     fields = dict(
         workflow_path=repo / "workflow.toml",
         task="add dark mode",
         target_repo=repo,
         working_branch="MC-AGENT-8546",
-        queue=queue,
-        entry_id="20260722-120000-feature-431",
-        created_at="2026-07-22T12:00:00Z",
-        # Which line the refusals quote back. Both entrances enqueue, so there
-        # is no default to fall back on; these tests are the queueing one's.
-        how=ADD_COMMAND,
     )
     fields.update(overrides)
-    return enqueue(**fields)
+    return Work(**fields)
+
+
+def add(repo, queue, entry_id="20260722-120000-feature-431", **overrides):
+    return enqueue(
+        work(repo, **overrides),
+        queue=queue,
+        entry_id=entry_id,
+        created_at="2026-07-22T12:00:00Z",
+        # Which vocabulary the refusals quote back. Every entrance enqueues, so
+        # there is no default to fall back on; these tests are the command's.
+        remedy=ADD_COMMAND,
+    )
 
 
 def test_an_entry_joins_the_queue_carrying_what_kickoff_would_be_told(repo, queue):
@@ -192,3 +201,171 @@ def test_an_entry_with_no_start_state_begins_where_the_workflow_does(repo, queue
     add(repo, queue)
 
     assert queue.all()[0].start_state is None
+
+
+# Queueing what a batch file declares. The refusals above are the ones that
+# matter here: every one of them applies to a batched Entry unchanged, and a
+# file with one bad Entry queues none of them, because a half-failed batch
+# leaves a partial Queue with no signal — worse than an error. Reading the file
+# itself is tested in tests/test_batch.py.
+
+
+def batch(queue, *works, source="batch.toml"):
+    return enqueue_batch(
+        works,
+        queue=queue,
+        entry_ids=[f"entry-{position}" for position in range(1, len(works) + 1)],
+        created_at="2026-07-22T12:00:00Z",
+        source=source,
+    )
+
+
+def test_a_batch_queues_every_entry_it_declares_in_file_order(repo, queue):
+    batch(
+        queue,
+        work(repo, task="first", working_branch="MC-AGENT-8546"),
+        work(repo, task="second", working_branch="MC-AGENT-8547"),
+        work(repo, task="third", working_branch="MC-AGENT-8548"),
+    )
+
+    assert [held.task for held in queue.all()] == ["first", "second", "third"]
+
+
+def test_entries_in_one_batch_may_differ_in_everything_an_entry_carries(repo, other_repo, queue):
+    """Three bugs starting at one State and two designs starting at another go
+    in one file, which is what makes a file worth having."""
+    batch(
+        queue,
+        work(repo, start_state="grill"),
+        work(
+            other_repo,
+            workflow_path=other_repo / "workflow.toml",
+            working_branch="MC-AGENT-8547",
+            start_state="implement",
+            subject="docs/ticket.md",
+            pinned_base="MC-AGENT-8000",
+            skip_gates=True,
+        ),
+    )
+
+    first, second = queue.all()
+    assert first.start_state == "grill"
+    assert first.skip_gates is False
+    assert second.target_repo == other_repo
+    assert second.start_state == "implement"
+    assert second.subject == "docs/ticket.md"
+    assert second.pinned_base == "MC-AGENT-8000"
+    assert second.skip_gates is True
+
+
+def test_a_batch_with_one_invalid_entry_queues_none_of_them(repo, queue):
+    with pytest.raises(BatchError):
+        batch(
+            queue,
+            work(repo, working_branch="MC-AGENT-8546"),
+            work(repo, working_branch="MC-AGENT-8547", start_state="grrill"),
+            work(repo, working_branch="MC-AGENT-8548"),
+        )
+
+    assert queue.all() == []
+
+
+def test_a_refused_entry_is_named_by_the_file_and_its_position(repo, queue):
+    """The way Workflow parsing names a State's, so the message says which line
+    to go and fix."""
+    with pytest.raises(BatchError) as caught:
+        batch(
+            queue,
+            work(repo, working_branch="MC-AGENT-8546"),
+            work(repo, working_branch="MC-AGENT-8547", start_state="grrill"),
+            source="nightly.toml",
+        )
+
+    assert "nightly.toml" in str(caught.value)
+    assert "entry 2" in str(caught.value)
+    assert "grrill" in str(caught.value)
+
+
+def test_two_entries_in_one_file_claiming_one_branch_are_refused(repo, queue):
+    """The duplicate-branch check has to catch a claim made inside the same
+    file, where neither Entry is on disk for the other to find."""
+    with pytest.raises(BatchError) as caught:
+        batch(
+            queue,
+            work(repo, task="first", working_branch="MC-AGENT-8546"),
+            work(repo, task="second", working_branch="MC-AGENT-8546"),
+        )
+
+    assert "entry 2" in str(caught.value)
+    assert "MC-AGENT-8546" in str(caught.value)
+    assert queue.all() == []
+
+
+def test_two_entries_in_one_file_for_different_repositories_may_share_a_branch(
+    repo, other_repo, queue
+):
+    batch(
+        queue,
+        work(repo),
+        work(other_repo, workflow_path=other_repo / "workflow.toml"),
+    )
+
+    assert [held.working_branch for held in queue.all()] == ["MC-AGENT-8546", "MC-AGENT-8546"]
+
+
+def test_a_batched_entry_claiming_a_branch_the_queue_already_holds_is_refused(repo, queue):
+    add(repo, queue, entry_id="already-queued")
+
+    with pytest.raises(BatchError) as caught:
+        batch(queue, work(repo, task="second"))
+
+    assert "already-queued" in str(caught.value)
+    assert [held.id for held in queue.all()] == ["already-queued"]
+
+
+def test_a_batched_entry_with_no_working_branch_is_refused_in_the_files_own_terms(repo, queue):
+    """Every single-Entry refusal applies, but a reader of a file told to type
+    `--branch` would be told to do something the file has no room for."""
+    with pytest.raises(BatchError) as caught:
+        batch(queue, work(repo, working_branch=None))
+
+    assert "entry 1" in str(caught.value)
+    assert "branch" in str(caught.value)
+    assert "--branch" not in str(caught.value)
+    assert queue.all() == []
+
+
+def test_a_batched_entry_whose_start_state_needs_a_subject_and_has_none_is_refused(repo, queue):
+    with pytest.raises(BatchError) as caught:
+        batch(queue, work(repo, start_state="implement"))
+
+    assert "entry 1" in str(caught.value)
+    assert "subject" in str(caught.value)
+    assert queue.all() == []
+
+
+def test_a_batched_entry_naming_a_workflow_that_cannot_be_run_is_refused(repo, queue):
+    (repo / "broken.toml").write_text('name = "broken"\n')
+
+    with pytest.raises(BatchError) as caught:
+        batch(queue, work(repo, workflow_path=repo / "broken.toml"))
+
+    assert "entry 1" in str(caught.value)
+    assert queue.all() == []
+
+
+def test_nothing_records_that_a_batch_arrived_together(repo, queue):
+    """A batch is not a domain concept: it produces N Entries, and neither an
+    Entry nor the Queue beside it says they arrived in one file. There is
+    nothing to cancel and nothing to report on, because nothing has been asked
+    of the Queue that requires knowing."""
+    batched, _also_batched = batch(
+        queue,
+        work(repo, task="one"),
+        work(repo, task="two", working_branch="MC-AGENT-8547"),
+    )
+    alone = add(repo, queue, entry_id="on-its-own", working_branch="MC-AGENT-8548")
+
+    written = {path.name: json.loads(path.read_text()) for path in queue.root.iterdir()}
+    assert sorted(written) == sorted(f"{held.id}.json" for held in queue.all())
+    assert written[f"{batched.id}.json"].keys() == written[f"{alone.id}.json"].keys()

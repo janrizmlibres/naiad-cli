@@ -17,9 +17,10 @@ import os
 import re
 import sys
 import uuid
-from collections.abc import Callable
-from datetime import datetime, timezone
+from collections.abc import Callable, Sequence
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from typing import Any
 
 from naiad.adapters.answerer import HeadlessAnswerer
 from naiad.adapters.executable import naiad_command
@@ -28,20 +29,15 @@ from naiad.adapters.notify import DesktopNotifications
 from naiad.adapters.tmux import TmuxError, TmuxSessions
 from naiad.cli.announce import AnnounceError, announce_state
 from naiad.cli.ask import AskError, ask_question
-from naiad.cli.enqueue import BranchAlreadyClaimed, enqueue
+from naiad.cli.batch import BatchError, enqueue_batch, load_batch
+from naiad.cli.enqueue import REFUSALS, Work, enqueue
 from naiad.cli.kickoff import start_run
 from naiad.cli.protocol import injection_for
-from naiad.cli.refusals import (
-    ADD_COMMAND,
-    RUN_COMMAND,
-    MissingSubject,
-    MissingWorkingBranch,
-)
+from naiad.cli.refusals import ADD_COMMAND, RUN_COMMAND, Remedy
 from naiad.cli.supervisor import supervise_queue
 from naiad.cli.watch import watch
 from naiad.domain.entry import Entry
-from naiad.domain.transitions import UnknownState
-from naiad.domain.workflow import WorkflowError, load_workflow
+from naiad.domain.workflow import load_workflow
 from naiad.hooks.install import DEFAULT_SETTINGS_PATH, install_hooks
 from naiad.runtime.announcements import Announcements
 from naiad.runtime.home import (
@@ -62,14 +58,14 @@ Handler = Callable[[argparse.Namespace], int]
 FAILURES = (
     AnnounceError,
     AskError,
-    BranchAlreadyClaimed,
-    MissingSubject,
-    MissingWorkingBranch,
+    BatchError,
     NoRunError,
     StorageError,
     TmuxError,
-    UnknownState,
-    WorkflowError,
+    # Everything describing a piece of work can be refused for, taken from the
+    # enqueue rather than listed again: a refusal added there and forgotten
+    # here would reach the operator as a traceback.
+    *REFUSALS,
 )
 
 
@@ -87,9 +83,16 @@ def main(argv: list[str] | None = None) -> int:
     queue_commands = queue.add_subparsers(dest="queue_command", required=True)
 
     queue_add = queue_commands.add_parser(
-        "add", help="add one Entry to the Queue, supervising nothing"
+        "add", help="add Entries to the Queue, supervising nothing"
     )
-    _describe_the_work(queue_add)
+    _describe_the_work(queue_add, required=False)
+    queue_add.add_argument(
+        "--file",
+        dest="batch_file",
+        type=Path,
+        default=None,
+        help="queue every Entry a batch file declares, instead of describing one here",
+    )
     queue_add.set_defaults(handler=_queue_add)
 
     queue_list = queue_commands.add_parser(
@@ -160,7 +163,7 @@ def main(argv: list[str] | None = None) -> int:
     return handler(arguments)
 
 
-def _describe_the_work(parser: argparse.ArgumentParser) -> None:
+def _describe_the_work(parser: argparse.ArgumentParser, *, required: bool = True) -> None:
     """The options that describe one piece of work, shared by every command
     that creates one — because an Entry is a Run that does not exist yet, and
     two lists that drifted apart would mean queueing could not say something
@@ -169,9 +172,17 @@ def _describe_the_work(parser: argparse.ArgumentParser) -> None:
     The flags read as an operator types them — `--branch`, `--base` — while
     what they set is named as the glossary names it. The translation happens
     here, at the boundary, and nowhere else.
+
+    `required` is false where a batch file may describe the work instead. Which
+    of the two is missing is then refused with a message rather than by
+    argparse, as the Working branch already is, so that an operator is told
+    both ways of saying it rather than only the one they left out.
     """
-    parser.add_argument("workflow", type=Path, help="path to the Workflow file")
-    parser.add_argument("task", help="what the work is")
+    # Nothing where the work must be described here, and what makes each
+    # positional optional where a file may describe it instead.
+    optional: dict[str, Any] = {} if required else {"nargs": "?", "default": None}
+    parser.add_argument("workflow", type=Path, help="path to the Workflow file", **optional)
+    parser.add_argument("task", help="what the work is", **optional)
     parser.add_argument(
         "--repo",
         type=Path,
@@ -367,7 +378,7 @@ def _run(arguments: argparse.Namespace) -> int:
     meaning 'start this now' the moment a Queue existed, and where the Entry
     lands is the honest place for that to show.
     """
-    queued = _queued(arguments, how=RUN_COMMAND)
+    queued = _queued(arguments, remedy=RUN_COMMAND)
     if queued is None:
         return 2
 
@@ -382,20 +393,100 @@ def _run(arguments: argparse.Namespace) -> int:
 
 
 def _queue_add(arguments: argparse.Namespace) -> int:
-    """Adds one Entry and returns. It supervises nothing — no lock, no session,
+    """Adds Entries and returns. It supervises nothing — no lock, no session,
     no watching — because this is the command an agent inside a session uses,
     and a tool call that became a process blocking for hours is the failure the
-    Queue exists to avoid."""
-    return 0 if _queued(arguments, how=ADD_COMMAND) is not None else 2
+    Queue exists to avoid.
+
+    One Entry described in flags, or as many as a batch file declares. The two
+    are refused together rather than one silently ignoring the other, since an
+    operator who typed both believes both were read.
+    """
+    if arguments.batch_file is not None:
+        if _describes_one_entry(arguments):
+            print(
+                "naiad: --file describes the work itself, so the options that "
+                "describe one entry belong in the file; drop them or drop --file",
+                file=sys.stderr,
+            )
+            return 2
+        return _queued_from_file(arguments)
+
+    if arguments.workflow is None or arguments.task is None:
+        # Which half is missing, because argparse no longer says: the
+        # positionals had to become optional for a file to describe them
+        # instead, and an operator who typed a Workflow and forgot the task
+        # should not be told they described nothing.
+        missing = "no task" if arguments.workflow is not None else "no workflow and no task"
+        print(
+            f"naiad: {missing} was given, and no batch file either; "
+            "try: naiad queue add <workflow> <task> --branch <branch>, "
+            "or naiad queue add --file <batch.toml>",
+            file=sys.stderr,
+        )
+        return 2
+
+    return 0 if _queued(arguments, remedy=ADD_COMMAND) is not None else 2
 
 
-def _queued(arguments: argparse.Namespace, *, how: str) -> Entry | None:
+def _describes_one_entry(arguments: argparse.Namespace) -> bool:
+    """Whether anything on the command line describes a single piece of work.
+    Every option `_describe_the_work` adds, because a batch file says all of
+    them and each has a key of its own to say it with."""
+    return any(
+        said not in (None, False)
+        for said in (
+            arguments.workflow,
+            arguments.task,
+            arguments.repo,
+            arguments.branch,
+            arguments.base,
+            arguments.start_state,
+            arguments.subject,
+            arguments.skip_gates,
+        )
+    )
+
+
+def _queued_from_file(arguments: argparse.Namespace) -> int:
+    """Every Entry a batch file declares, or none of them.
+
+    The whole file is read and validated before anything is written, because a
+    file with one bad Entry leaving a partial Queue behind gives no signal that
+    the rest is missing.
+    """
+    path = arguments.batch_file.expanduser().resolve()
+    added = datetime.now(timezone.utc)
+
+    try:
+        works = load_batch(path, repo=Path.cwd())
+        entries = enqueue_batch(
+            works,
+            queue=Queue(default_queue_root()),
+            entry_ids=_batch_ids(added, works),
+            # One moment for the whole file, because one command wrote them
+            # all. Only the ids are spaced, and spacing them is how they sort
+            # rather than a claim that the Entries were added at four times.
+            created_at=_timestamp(added),
+            source=str(path),
+        )
+    except FAILURES as error:
+        print(f"naiad: {error}", file=sys.stderr)
+        return 2
+
+    for entry in entries:
+        _report(entry)
+    return 0
+
+
+def _queued(arguments: argparse.Namespace, *, remedy: Remedy) -> Entry | None:
     """One Entry from what was typed, or nothing when it was refused.
 
     Shared by both entrances so that neither can queue something the other
     would have refused, and so that an Entry means the same thing whichever
-    command made it. `how` is the command the operator actually typed, quoted
-    back by every refusal so the line they read is one they can retype.
+    command made it. `remedy` is the vocabulary the operator described the work
+    in, quoted back by every refusal so that what they read is something they
+    can act on.
     """
     workflow_path = arguments.workflow.expanduser().resolve()
     target_repo = (arguments.repo or Path.cwd()).expanduser().resolve()
@@ -403,26 +494,34 @@ def _queued(arguments: argparse.Namespace, *, how: str) -> Entry | None:
 
     try:
         entry = enqueue(
-            workflow_path=workflow_path,
-            task=arguments.task,
-            target_repo=target_repo,
-            working_branch=arguments.branch,
-            pinned_base=arguments.base,
+            Work(
+                workflow_path=workflow_path,
+                task=arguments.task,
+                target_repo=target_repo,
+                working_branch=arguments.branch,
+                pinned_base=arguments.base,
+                start_state=arguments.start_state,
+                subject=arguments.subject,
+                skip_gates=arguments.skip_gates,
+            ),
             queue=Queue(default_queue_root()),
             entry_id=_entry_id(added, workflow_path),
             created_at=_timestamp(added),
-            start_state=arguments.start_state,
-            skip_gates=arguments.skip_gates,
-            subject=arguments.subject,
-            how=how,
+            remedy=remedy,
         )
     except FAILURES as error:
         print(f"naiad: {error}", file=sys.stderr)
         return None
 
+    _report(entry)
+    return entry
+
+
+def _report(entry: Entry) -> None:
+    """What an Entry looks like once it is queued. One place, so that a batch
+    reports each of its Entries exactly as a single one is reported."""
     print(f"queued {entry.id}")
     print(f"  branch {entry.working_branch}   in {entry.target_repo}")
-    return entry
 
 
 def _queue_list(arguments: argparse.Namespace) -> int:
@@ -578,6 +677,25 @@ def _entry_id(added: datetime, workflow_path: Path) -> str:
     work in a single turn — and two `naiad queue add` calls are two.
     """
     return f"{added.strftime('%Y%m%d-%H%M%S-%f')}-{_slug(workflow_path)}-{os.getpid()}"
+
+
+def _batch_ids(added: datetime, works: Sequence[Work]) -> list[str]:
+    """One id per Entry a file declares, in the order it writes them.
+
+    An id's whole job is to sort, and Queue order has to follow the file
+    because that is what the Predecessor rule reads. Every Entry in one file is
+    added at one moment by one process, so the clock cannot tell them apart —
+    hence a microsecond apiece, which is the smallest thing an id can say and
+    exactly what asking the clock again would have said had it advanced.
+
+    The ids are the shape a single Entry's is, carrying no position and no mark
+    of the file: the Queue does not know a batch arrived, so nothing it holds
+    may be readable as saying so.
+    """
+    return [
+        _entry_id(added + timedelta(microseconds=place), work.workflow_path)
+        for place, work in enumerate(works)
+    ]
 
 
 def _slug(workflow_path: Path) -> str:

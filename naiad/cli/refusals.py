@@ -24,12 +24,50 @@ from naiad.domain.prompt import SUBJECT_PLACEHOLDER
 from naiad.domain.transitions import start_state as resolve_start_state
 from naiad.domain.workflow import State, Workflow, load_workflow
 
-# The lines a refusal quotes back, so that whoever reads one is told something
-# they can retype rather than a rule they have to translate. They live beside
-# the checks rather than with either command, because the checks are what
-# quote them and a caller's only job is to name the line its reader typed.
-RUN_COMMAND = "naiad run <workflow> <task>"
-ADD_COMMAND = "naiad queue add <workflow> <task>"
+@dataclass(frozen=True)
+class Remedy:
+    """How to supply what was missing, spelled the way whoever described the
+    work wrote it.
+
+    A command line and a batch file describe the same work in two vocabularies
+    — `--branch B` against `branch = "B"` — so a refusal quoting flags at
+    somebody editing a file tells them to type something the file has no room
+    for. That is the same mistake as naming one command in the other's refusal,
+    which is why the remedy travels with the caller rather than being fixed
+    here.
+    """
+
+    branch: str
+    # Names {state}, because which State wanted a Subject is not known until
+    # the Workflow has been read.
+    subject: str
+
+    def for_subject(self, state: str) -> str:
+        return self.subject.format(state=state)
+
+
+def _typed(how: str) -> Remedy:
+    """The remedy for work described in shell arguments: the line the operator
+    typed, with the missing option added — something they can retype rather
+    than a rule they have to translate."""
+    return Remedy(
+        branch=f"try: {how} --branch <branch>",
+        subject=f"try: {how} --at {{state}} --subject <value>",
+    )
+
+
+# The remedies a refusal quotes back, named for where the work was described
+# rather than for what they say. They live beside the checks rather than with
+# either command, because the checks are what quote them and a caller's only
+# job is to name where its reader wrote.
+RUN_COMMAND = _typed("naiad run <workflow> <task>")
+ADD_COMMAND = _typed("naiad queue add <workflow> <task>")
+# Work described in a batch file. The refusal names the file and the Entry's
+# position, so what is left to say is which key that Entry is missing.
+BATCH_ENTRY = Remedy(
+    branch='try: giving that entry a `branch = "<branch>"`',
+    subject='try: giving that entry a `subject = "<value>"`',
+)
 
 
 @dataclass(frozen=True)
@@ -73,12 +111,13 @@ def check_start(
     start_state: str | None,
     subject: str | None,
     working_branch: str | None,
-    how: str,
+    remedy: Remedy,
 ) -> Start:
     """The Workflow and the State this work begins at, or the refusal.
 
-    `how` is the command that would have done it, so that every message ends in
-    a line the operator can retype rather than a rule they have to translate.
+    `remedy` is how whoever described this work would supply what is missing,
+    so that every message ends in something they can act on rather than a rule
+    they have to translate.
 
     The Working branch is checked first because it needs nothing else: it is a
     fact about the work rather than about the Workflow, so nothing has to be
@@ -87,8 +126,7 @@ def check_start(
     if not working_branch:
         raise MissingWorkingBranch(
             "no working branch was given to do the work on, and naiad cannot "
-            "derive one from your repository's conventions; "
-            f"try: {how} --branch <branch>"
+            f"derive one from your repository's conventions; {remedy.branch}"
         )
 
     workflow = load_workflow(workflow_path)
@@ -96,16 +134,18 @@ def check_start(
     if not subject and first.prompt and SUBJECT_PLACEHOLDER in first.prompt:
         raise MissingSubject(
             f"state '{first.name}' needs a subject saying what it is to start on; "
-            f"try: {how} --at {first.name} --subject <value>"
+            f"{remedy.for_subject(first.name)}"
         )
     return Start(workflow=workflow, state=first, working_branch=working_branch)
 
 
 __all__ = [
     "ADD_COMMAND",
+    "BATCH_ENTRY",
     "RUN_COMMAND",
     "MissingSubject",
     "MissingWorkingBranch",
+    "Remedy",
     "Start",
     "check_start",
 ]

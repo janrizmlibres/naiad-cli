@@ -379,3 +379,180 @@ def test_removing_an_entry_that_is_not_there_is_reported(home, repo, capsys):
     assert main(["queue", "rm", "no-such-entry"]) == 2
 
     assert "no-such-entry" in capsys.readouterr().err
+
+
+# `naiad queue add --file`. A night's work as one document, which is how an
+# operator reviews it before committing to it — so what is held here is that
+# the file reaches the Queue whole or not at all, and that the entrance refuses
+# anything it would otherwise have to ignore. Reading the file is tested in
+# tests/test_batch.py and queueing what it declares in tests/test_enqueue.py.
+
+
+BATCH = """
+workflow = "{workflow}"
+repo = "{repo}"
+
+[[entries]]
+task = "the login redirect loops"
+branch = "MC-AGENT-8546"
+at = "grill"
+
+[[entries]]
+task = "design the audit log"
+branch = "MC-AGENT-8547"
+at = "implement"
+subject = "docs/ticket.md"
+base = "MC-AGENT-8000"
+skip-gates = true
+"""
+
+
+def batch_file(repo, text=BATCH):
+    path = repo / "batch.toml"
+    path.write_text(text.format(workflow=repo / "workflow.toml", repo=repo))
+    return path
+
+
+def test_a_batch_file_queues_every_entry_it_declares_in_file_order(home, repo, capsys):
+    assert main(["queue", "add", "--file", str(batch_file(repo))]) == 0
+
+    first, second = queue_of(home).all()
+    assert first.task == "the login redirect loops"
+    assert second.task == "design the audit log"
+    printed = capsys.readouterr().out
+    assert first.id in printed and second.id in printed
+
+
+def test_each_entry_in_a_batch_carries_what_it_declared_for_itself(home, repo):
+    main(["queue", "add", "--file", str(batch_file(repo))])
+
+    first, second = queue_of(home).all()
+    assert first.working_branch == "MC-AGENT-8546"
+    assert first.start_state == "grill"
+    assert first.skip_gates is False
+    assert second.working_branch == "MC-AGENT-8547"
+    assert second.start_state == "implement"
+    assert second.subject == "docs/ticket.md"
+    assert second.pinned_base == "MC-AGENT-8000"
+    assert second.skip_gates is True
+
+
+def test_a_batch_naming_a_different_workflow_per_entry_still_queues_in_file_order(home, repo):
+    """Queue order is id order, and file order is what the Predecessor rule
+    reads — so an Entry's place in the file has to outrank the name of the
+    Workflow its id is built from."""
+    (repo / "zebra.toml").write_text(WORKFLOW)
+    (repo / "alpha.toml").write_text(WORKFLOW)
+    path = repo / "batch.toml"
+    path.write_text(
+        f"""
+        repo = "{repo}"
+
+        [[entries]]
+        workflow = "{repo / "zebra.toml"}"
+        task = "first"
+        branch = "MC-AGENT-8546"
+
+        [[entries]]
+        workflow = "{repo / "alpha.toml"}"
+        task = "second"
+        branch = "MC-AGENT-8547"
+        """
+    )
+
+    assert main(["queue", "add", "--file", str(path)]) == 0
+
+    assert [held.task for held in queue_of(home).all()] == ["first", "second"]
+
+
+def test_an_entry_naming_no_repository_stands_in_the_working_directory(
+    home, repo, monkeypatch
+):
+    monkeypatch.chdir(repo)
+    path = repo / "batch.toml"
+    path.write_text(
+        f"""
+        workflow = "{repo / "workflow.toml"}"
+
+        [[entries]]
+        task = "one"
+        branch = "MC-AGENT-8546"
+        """
+    )
+
+    assert main(["queue", "add", "--file", "batch.toml"]) == 0
+
+    assert queue_of(home).all()[0].target_repo == repo
+
+
+def test_a_batch_with_one_bad_entry_queues_none_of_them(home, repo, capsys):
+    path = batch_file(
+        repo,
+        BATCH.replace('at = "grill"', 'at = "grrill"'),
+    )
+
+    assert main(["queue", "add", "--file", str(path)]) == 2
+
+    reported = capsys.readouterr().err
+    assert str(path) in reported and "entry 1" in reported
+    assert queue_of(home).all() == []
+
+
+def test_a_batch_file_that_is_not_valid_toml_is_reported_naming_the_file(home, repo, capsys):
+    path = repo / "batch.toml"
+    path.write_text("[[entries]\ntask = ")
+
+    assert main(["queue", "add", "--file", str(path)]) == 2
+
+    assert str(path) in capsys.readouterr().err
+    assert queue_of(home).all() == []
+
+
+def test_a_batch_file_that_cannot_be_read_is_reported(home, repo, capsys):
+    assert main(["queue", "add", "--file", str(repo / "nowhere.toml")]) == 2
+
+    assert "nowhere.toml" in capsys.readouterr().err
+
+
+def test_a_batch_file_and_options_describing_one_entry_cannot_be_given_together(
+    home, repo, capsys
+):
+    """Refused rather than one silently ignoring the other: an operator who
+    typed both believes both were read."""
+    assert (
+        main(
+            [
+                "queue",
+                "add",
+                str(repo / "workflow.toml"),
+                "add dark mode",
+                "--branch",
+                "MC-AGENT-8546",
+                "--file",
+                str(batch_file(repo)),
+            ]
+        )
+        == 2
+    )
+
+    assert "--file" in capsys.readouterr().err
+    assert queue_of(home).all() == []
+
+
+def test_adding_with_neither_a_file_nor_a_task_is_refused(home, capsys):
+    assert main(["queue", "add"]) == 2
+
+    assert "--file" in capsys.readouterr().err
+    assert queue_of(home).all() == []
+
+
+def test_a_batched_entry_carries_no_mark_of_the_file_it_came_from(home, repo):
+    """An id sorts, and that is the whole of its job. One that carried its place
+    in a file would be the Queue knowing a batch arrived — which it does not,
+    because nothing has been asked of it that requires knowing."""
+    main(["queue", "add", "--file", str(batch_file(repo))])
+    add(repo, "--branch", "MC-AGENT-8548")
+
+    batched, also_batched, alone = queue_of(home).all()
+    assert len(batched.id.split("-")) == len(alone.id.split("-"))
+    assert batched.id < also_batched.id < alone.id
