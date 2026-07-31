@@ -13,7 +13,7 @@ with no human told is exactly what the budget exists to stop.
 from __future__ import annotations
 
 from naiad.runtime.announcements import Announcements
-from naiad.runtime.records import Waits
+from naiad.runtime.records import Holds, Waits
 from naiad.runtime.run import Run
 
 
@@ -49,9 +49,16 @@ def declare_wait(
             "this announcement's wait budget is spent, so no further wait can be "
             "declared. If the phase is finished, announce with `naiad state <name>`; "
             "if you are stuck on a decision you cannot make alone, ask with "
-            '`naiad ask "<question>" --option "<one>" --option "<another>"`'
+            '`naiad ask "<question>" --option "<one>" --option "<another>"`; '
+            "if the human told you to pause, relay that with "
+            '`naiad hold "<their instruction>"` — a hold does not expire and '
+            "spends no wait budget"
         )
     granted = waits.record(announcement, reason=reason, now=now, seconds=seconds)
+    # A fresh Wait supersedes any Hold outstanding (ADR 0025): the agent
+    # signalling again is what ends one, and both records standing would leave
+    # the Run held by a declaration the agent has already moved past.
+    Holds(run.root).release(announcement)
     return granted, waits.remaining(announcement, now=now)
 
 

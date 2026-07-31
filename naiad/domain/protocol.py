@@ -18,6 +18,7 @@ from naiad.domain.prompt import render_candidates
 ANNOUNCE_SUBCOMMAND = "state"
 ASK_SUBCOMMAND = "ask"
 WAIT_SUBCOMMAND = "wait"
+HOLD_SUBCOMMAND = "hold"
 
 # What the agent is told to type when nobody says which naiad to name. A
 # session's PATH is whatever tmux inherited, so the caller passes the absolute
@@ -28,7 +29,7 @@ _PREAMBLE = """\
 # Naiad protocol
 
 You are being driven through a workflow by Naiad. It cannot see your work and
-never decides that a phase is finished — you do, and you say so. Three rules:
+never decides that a phase is finished — you do, and you say so. Four rules:
 
 1. **Announce, do not assume.** When you have finished the phase you are in and
    are satisfied with the result, run `{announce} <name>` to announce the
@@ -49,6 +50,12 @@ never decides that a phase is finished — you do, and you say so. Three rules:
    read as a forgotten announcement and you will be reminded. When the wait
    expires you will be reminded then instead: check on the thing, and either
    announce or declare a fresh wait.
+
+4. **Relay a pause.** If the human tells you to pause or stop for now, run
+   `{hold} "<their instruction, in their words>"`, then end your turn. The
+   run is parked — no reminders, no time limit — until they type into this
+   session and send you back to work. Do not spend waits on a pause: a wait
+   expires and a pause does not.
 
 Announcing the same State twice is legitimate — that is how a loop phase works,
 once per iteration. Announcing is not a report of progress: announce when the
@@ -81,14 +88,18 @@ _NO_NEXT_STATE = (
 # verb — it arrives precisely when an undeclared wait is being misread as
 # silence, which is the moment the lesson lands (ADR 0021) — and the second
 # does not, because a wait declared only to buy off a final warning is the
-# evasion the bound exists to stop.
+# evasion the bound exists to stop. The hold verb is taught beside it, for
+# the same reason at the same moment: a human's pause answered with silence
+# is misread exactly like an undeclared wait (ADR 0025).
 _NUDGES = (
     "You have stopped without announcing a State, so the run is waiting on you"
     " and nothing further will happen. If the phase you were given is finished,"
     " announce the State you are entering with `{announce} <name>`. If you are"
     " waiting on something — background agents, an external check — declare it"
     ' with `{wait} "<what for>" --seconds <n>` and you will be left alone until'
-    " it expires. Otherwise, carry on with the phase.",
+    " it expires. If the user told you to pause, declare it with"
+    ' `{hold} "<their instruction>"` and the run will be held, unreminded,'
+    " until they return. Otherwise, carry on with the phase.",
     "You have still announced nothing and the run is still waiting. Announce"
     " now with `{announce} <name>`, or if you cannot proceed, say plainly in"
     " this session what is blocking you — a human is about to be called.",
@@ -130,6 +141,7 @@ def render_nudge(
     return wordings[attempt - 1].format(
         announce=f"{naiad} {ANNOUNCE_SUBCOMMAND}",
         wait=f"{naiad} {WAIT_SUBCOMMAND}",
+        hold=f"{naiad} {HOLD_SUBCOMMAND}",
         reason=expired_wait,
     )
 
@@ -170,6 +182,7 @@ def render_protocol(*, next_states: Sequence[str], naiad: str = DEFAULT_NAIAD) -
         announce=f"{naiad} {ANNOUNCE_SUBCOMMAND}",
         ask=f"{naiad} {ASK_SUBCOMMAND}",
         wait=f"{naiad} {WAIT_SUBCOMMAND}",
+        hold=f"{naiad} {HOLD_SUBCOMMAND}",
     )
     # Three sentences rather than one plural sentence covering all three
     # cases: 'announce whichever applies' offers a choice, and offering one
@@ -184,4 +197,11 @@ def render_protocol(*, next_states: Sequence[str], naiad: str = DEFAULT_NAIAD) -
     return f"{preamble}\n\n{expectation}\n"
 
 
-__all__ = ["DEFAULT_NAIAD", "WAIT_SUBCOMMAND", "render_answer", "render_nudge", "render_protocol"]
+__all__ = [
+    "DEFAULT_NAIAD",
+    "HOLD_SUBCOMMAND",
+    "WAIT_SUBCOMMAND",
+    "render_answer",
+    "render_nudge",
+    "render_protocol",
+]

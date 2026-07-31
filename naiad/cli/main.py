@@ -34,6 +34,7 @@ from naiad.cli.ask import AskError, ask_question
 from naiad.cli.batch import BatchError, enqueue_batch, load_batch
 from naiad.cli.branch import BranchError, declare_branch
 from naiad.cli.enqueue import REFUSALS, Work, enqueue
+from naiad.cli.hold import HoldError, declare_hold
 from naiad.cli.library import LibraryError, resolve_workflow
 from naiad.cli.kickoff import start_run
 from naiad.cli.protocol import injection_for
@@ -66,6 +67,7 @@ FAILURES = (
     AskError,
     BatchError,
     BranchError,
+    HoldError,
     WaitError,
     LibraryError,
     NoRunError,
@@ -151,6 +153,12 @@ def main(argv: list[str] | None = None) -> int:
         help="how long the wait may run before you are reminded (default: ten minutes)",
     )
     wait_parser.set_defaults(handler=_wait)
+
+    hold_parser = subcommands.add_parser(
+        "hold", help="relay the human's pause: park the run until they return"
+    )
+    hold_parser.add_argument("reason", help="why the human asked for the hold, in their words")
+    hold_parser.set_defaults(handler=_hold)
 
     branch_parser = subcommands.add_parser(
         "branch", help="declare the working branch you created for this run"
@@ -313,6 +321,23 @@ def _wait(arguments: argparse.Namespace) -> int:
     print(
         f'waiting on "{arguments.reason}" for {int(granted)}s '
         f"({int(remaining)}s of wait budget left); end your turn"
+    )
+    return 0
+
+
+def _hold(arguments: argparse.Namespace) -> int:
+    try:
+        run = _current_run()
+        declare_hold(arguments.reason, run=run)
+    except FAILURES as error:
+        print(f"naiad: {error}", file=sys.stderr)
+        return 2
+
+    # No granted number to say back: a Hold has no clock. What the agent must
+    # know is that nothing further will arrive until the human acts.
+    print(
+        f'held: "{arguments.reason}"; the run is parked and nothing will be '
+        "sent until the human returns — end your turn"
     )
     return 0
 

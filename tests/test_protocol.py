@@ -39,6 +39,16 @@ def test_names_the_command_that_declares_a_wait():
     assert "--seconds" in protocol
 
 
+def test_names_the_command_that_declares_a_hold():
+    """The human's pause reaches Naiad only through the agent (ADR 0002), and
+    an agent that cannot relay it improvises with bounded waits instead
+    (ADR 0025)."""
+    protocol = render_protocol(next_states=("spec",))
+
+    assert "naiad hold" in protocol
+    assert "pause" in protocol.lower()
+
+
 def test_instructs_the_agent_never_to_ask_a_human_directly():
     protocol = render_protocol(next_states=("spec",)).lower()
 
@@ -76,6 +86,7 @@ def test_the_commands_are_named_as_the_agent_must_actually_invoke_them():
     assert "/opt/naiad/bin/naiad state" in protocol
     assert "/opt/naiad/bin/naiad ask" in protocol
     assert "/opt/naiad/bin/naiad wait" in protocol
+    assert "/opt/naiad/bin/naiad hold" in protocol
 
 
 def test_a_run_with_no_next_state_is_told_so_rather_than_left_a_placeholder():
@@ -108,6 +119,13 @@ def test_the_first_nudge_teaches_the_wait_verb():
     undeclared wait is being misread as silence (ADR 0021)."""
     assert "naiad wait" in render_nudge(attempt=1)
     assert "naiad wait" not in render_nudge(attempt=2)
+
+
+def test_the_first_nudge_teaches_the_hold_verb():
+    """The other lesson the same moment carries: a human's pause answered with
+    silence is misread exactly like an undeclared wait (ADR 0025)."""
+    assert "naiad hold" in render_nudge(attempt=1)
+    assert "naiad hold" not in render_nudge(attempt=2)
 
 
 def test_a_nudge_after_an_expired_wait_names_what_was_waited_on():

@@ -30,6 +30,7 @@ CONSULTATIONS_FILENAME = "consultations.json"
 CLEARS_FILENAME = "clears.json"
 CLEAR_ATTEMPTS_FILENAME = "clearattempts.json"
 WAITS_FILENAME = "waits.json"
+HOLDS_FILENAME = "holds.json"
 
 # Every file whose writing means something happened. The Run's own metadata is
 # among them so that a Run which has produced no signal at all is idle since it
@@ -43,6 +44,7 @@ SIGNAL_FILENAMES = (
     CLEARS_FILENAME,
     CLEAR_ATTEMPTS_FILENAME,
     WAITS_FILENAME,
+    HOLDS_FILENAME,
     METADATA_FILENAME,
 )
 
@@ -251,32 +253,65 @@ class Notices:
     def __init__(self, run_root: Path) -> None:
         self.path = Path(run_root) / NOTICES_FILENAME
 
-    def of(self, announcement: Announcement | None, *, wait_count: int = 0) -> tuple[bool, int]:
+    def of(
+        self, announcement: Announcement | None, *, wait_count: int = 0, hold_count: int = 0
+    ) -> tuple[bool, int]:
         """wait_count is how many Waits the Announcement has declared, and a
         mismatch re-arms the record exactly as a new Announcement does: a
         re-declared Wait after a wake answers a new silence, so it earns a
         fresh allowance rather than inheriting the count an earlier one ran up
-        (ADR 0021). Every reader must pass the count the writer keyed with —
-        Waits.count — or a parked Run reads as running."""
+        (ADR 0021). hold_count re-arms it the same way, because the likeliest
+        Hold arrives after a notification — silence, Nudges, the operator told,
+        and only then the human's 'pause' relayed — and a Hold whose own
+        notification the earlier alarm swallowed would park the Run silently,
+        the exact failure its notification is load-bearing against (ADR 0025).
+        Every reader must pass the counts the writer keyed with — Waits.count
+        and Holds.count — or a parked Run reads as running."""
         document = _current(self.path, announcement)
         if int(document.get("wait", 0) or 0) != wait_count:
             return False, 0
+        if int(document.get("hold", 0) or 0) != hold_count:
+            return False, 0
         return bool(document.get("notified", False)), int(document.get("nudges", 0) or 0)
 
-    def record_notified(self, announcement: Announcement | None, *, wait_count: int = 0) -> None:
-        notified, nudges = self.of(announcement, wait_count=wait_count)
-        self._write(announcement, notified=True, nudges=nudges, wait_count=wait_count)
+    def record_notified(
+        self, announcement: Announcement | None, *, wait_count: int = 0, hold_count: int = 0
+    ) -> None:
+        notified, nudges = self.of(announcement, wait_count=wait_count, hold_count=hold_count)
+        self._write(
+            announcement, notified=True, nudges=nudges, wait_count=wait_count, hold_count=hold_count
+        )
 
-    def record_nudge(self, announcement: Announcement | None, *, wait_count: int = 0) -> None:
-        notified, nudges = self.of(announcement, wait_count=wait_count)
-        self._write(announcement, notified=notified, nudges=nudges + 1, wait_count=wait_count)
+    def record_nudge(
+        self, announcement: Announcement | None, *, wait_count: int = 0, hold_count: int = 0
+    ) -> None:
+        notified, nudges = self.of(announcement, wait_count=wait_count, hold_count=hold_count)
+        self._write(
+            announcement,
+            notified=notified,
+            nudges=nudges + 1,
+            wait_count=wait_count,
+            hold_count=hold_count,
+        )
 
     def _write(
-        self, announcement: Announcement | None, *, notified: bool, nudges: int, wait_count: int
+        self,
+        announcement: Announcement | None,
+        *,
+        notified: bool,
+        nudges: int,
+        wait_count: int,
+        hold_count: int,
     ) -> None:
         _write(
             self.path,
-            {"seq": _seq(announcement), "notified": notified, "nudges": nudges, "wait": wait_count},
+            {
+                "seq": _seq(announcement),
+                "notified": notified,
+                "nudges": nudges,
+                "wait": wait_count,
+                "hold": hold_count,
+            },
         )
 
 
@@ -359,6 +394,61 @@ class Waits:
         return settled + min(granted, max(0.0, now - at))
 
 
+class Holds:
+    """The agent's declared Hold — the human's instruction to park the Run,
+    and what the agent said when relaying it (ADR 0025).
+
+    Written by the hold command in the agent's process and read by the loop,
+    like Waits, and single-writer for the same reason. Kept against the
+    Announcement it belongs to and read as nothing for any other, so the
+    agent announcing again is what lifts it — no release is needed on that
+    path. The one explicit release is the wait command's: a fresh Wait
+    supersedes a Hold, and both records standing would leave the Run held by
+    a declaration the agent has already moved past.
+
+    No deadline and no budget, deliberately: a Hold waits on a person, and
+    nothing about a person comes back on a timer. What bounds it is
+    visibility — declaring one notifies the operator — rather than a clock.
+    """
+
+    def __init__(self, run_root: Path) -> None:
+        self.path = Path(run_root) / HOLDS_FILENAME
+
+    def holding(self, announcement: Announcement | None) -> bool:
+        return bool(_current(self.path, announcement).get("held", False))
+
+    def reason(self, announcement: Announcement | None) -> str | None:
+        reason = _current(self.path, announcement).get("reason")
+        return reason if isinstance(reason, str) else None
+
+    def count(self, announcement: Announcement | None) -> int:
+        """How many Holds this Announcement has declared. It keys the Notices
+        record the way Waits.count does: a declared Hold is a fresh signal, so
+        its notification is owed even where an earlier alarm already fired
+        (ADR 0025)."""
+        return int(_current(self.path, announcement).get("count", 0) or 0)
+
+    def record(self, announcement: Announcement | None, *, reason: str) -> None:
+        _write(
+            self.path,
+            {
+                "seq": _seq(announcement),
+                "count": self.count(announcement) + 1,
+                "held": True,
+                "reason": reason,
+            },
+        )
+
+    def release(self, announcement: Announcement | None) -> None:
+        """Lift the Hold: only the held flag drops. The count survives because
+        it keys the Notices record — zeroing it would hand the next silence a
+        re-armed notification it never earned."""
+        document = _current(self.path, announcement)
+        if not document:
+            return
+        _write(self.path, {**document, "held": False})
+
+
 class Consultations:
     """What the Answerer has said about the Question currently announced.
 
@@ -403,6 +493,7 @@ __all__ = [
     "Clears",
     "Consultations",
     "Handled",
+    "Holds",
     "Notices",
     "Turns",
     "Waits",

@@ -8,6 +8,7 @@ from naiad.runtime.records import (
     ClearAttempts,
     Clears,
     Handled,
+    Holds,
     Notices,
     Turns,
     Waits,
@@ -215,6 +216,83 @@ def test_a_declared_wait_counts_as_a_signal_of_life(tmp_path, waits):
     waits.record(GRILL, reason="a check", now=0.0, seconds=60.0)
 
     assert idle_seconds(tmp_path, now=_mtime(waits.path)) == pytest.approx(0, abs=0.01)
+
+
+@pytest.fixture
+def holds(tmp_path):
+    return Holds(tmp_path)
+
+
+def test_no_hold_is_in_force_before_one_is_declared(holds):
+    assert holds.holding(GRILL) is False
+    assert holds.reason(GRILL) is None
+
+
+def test_a_declared_hold_stands_and_names_its_reason(holds):
+    """No deadline to read against: a Hold has no clock (ADR 0025)."""
+    holds.record(GRILL, reason="user typed 'pause'")
+
+    assert holds.holding(GRILL) is True
+    assert holds.reason(GRILL) == "user typed 'pause'"
+
+
+def test_a_hold_is_kept_against_its_announcement(holds):
+    """The agent signalling again is what ends a Hold: the next Announcement
+    re-arms it, like every per-Announcement fact (ADR 0025)."""
+    holds.record(GRILL, reason="user typed 'pause'")
+
+    assert holds.holding(IMPLEMENT) is False
+    assert holds.reason(IMPLEMENT) is None
+
+
+def test_releasing_a_hold_lifts_it(holds):
+    """A fresh Wait supersedes a Hold (ADR 0025), which the wait command does
+    by releasing it — only the held flag drops, so nothing reads as held."""
+    holds.record(GRILL, reason="user typed 'pause'")
+    holds.release(GRILL)
+
+    assert holds.holding(GRILL) is False
+
+
+def test_releasing_a_hold_that_was_never_declared_is_harmless(holds):
+    holds.release(GRILL)
+
+    assert holds.holding(GRILL) is False
+
+
+def test_a_hold_re_arms_the_notified_flag(notices, holds):
+    """The likeliest Hold arrives after a notification: silence, two Nudges,
+    the operator told, and only then the human's 'pause' relayed. Gated on the
+    shared flag, that Hold would notify nobody and the Run would park silently
+    — the exact failure ADR 0025 calls the notification load-bearing to
+    prevent. A declared Hold is a fresh signal, so it re-arms the record the
+    way a fresh Wait does (ADR 0021)."""
+    notices.record_notified(GRILL)
+
+    assert notices.of(GRILL, hold_count=1) == (False, 0)
+
+
+def test_a_declared_hold_is_counted(holds):
+    holds.record(GRILL, reason="user typed 'pause'")
+
+    assert holds.count(GRILL) == 1
+    assert holds.count(IMPLEMENT) == 0
+
+
+def test_releasing_a_hold_keeps_its_count(holds):
+    """The count keys the Notices record; a release that zeroed it would hand
+    the next silence a re-armed notification it never earned."""
+    holds.record(GRILL, reason="user typed 'pause'")
+    holds.release(GRILL)
+
+    assert holds.count(GRILL) == 1
+
+
+def test_a_declared_hold_counts_as_a_signal_of_life(tmp_path, holds):
+    (tmp_path / "run.json").write_text("{}")
+    holds.record(GRILL, reason="user typed 'pause'")
+
+    assert idle_seconds(tmp_path, now=_mtime(holds.path)) == pytest.approx(0, abs=0.01)
 
 
 def test_a_run_that_has_only_just_started_is_not_already_idle(tmp_path):

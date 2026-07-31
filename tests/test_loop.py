@@ -27,7 +27,7 @@ from naiad.runtime.announcements import Announcements
 from naiad.runtime.answers import AnswerLog
 from naiad.runtime.log import RunLog
 from naiad.runtime.loop import UndrivableRun, tick
-from naiad.runtime.records import Clears, Turns, Waits
+from naiad.runtime.records import Clears, Holds, Turns, Waits
 from naiad.runtime.run import RunStore
 
 WORKFLOW = """
@@ -555,6 +555,87 @@ def test_a_fresh_wait_re_arms_the_nudge_allowance(run, workflow, session):
     action = drive(run, workflow, session, now=_later(run, SILENCE_SECONDS))
 
     assert action == Nudge(attempt=1, expired_wait="second agent")
+
+
+def declare_hold(run, reason):
+    """Stand in for the agent's `naiad hold` command: the Hold recorded
+    against the Run's current Announcement."""
+    Holds(run.root).record(Announcements(run.root).latest(), reason=reason)
+
+
+def test_a_declared_hold_parks_the_run_calmly_and_indefinitely(run, workflow, session):
+    """The pause case (ADR 0025): the human typed 'pause', the agent relayed
+    it, and the Run must idle unnudged for as long as they stay away — told
+    apart from a stall by the one calm notification."""
+    notifier = RecordingNotifier()
+    announce(run, "grill")
+    drive(run, workflow, session)
+    Turns(run.root).record_end(latest_seq=1)
+    declare_hold(run, "user typed 'pause' — holding until they resume")
+    session.sent.clear()
+
+    action = drive(run, workflow, session, notifier=notifier, now=_later(run, SILENCE_SECONDS * 50))
+
+    assert isinstance(action, Notify)
+    assert "held at your request" in notifier.notified[0][1]
+    assert "user typed 'pause'" in notifier.notified[0][1]
+    assert session.sent == []
+
+    after = drive(
+        run, workflow, session, notifier=notifier, now=_later(run, SILENCE_SECONDS * 100)
+    )
+
+    assert after is NOTHING
+    assert session.sent == []
+    assert len(notifier.notified) == 1
+
+
+def test_a_hold_declared_after_a_silence_notification_still_notifies(run, workflow, session):
+    """The likeliest real sequence: agent silent, Nudged twice, operator told,
+    operator returns and types 'pause', agent holds. The Hold's notification is
+    load-bearing (ADR 0025), so the earlier alarm must not swallow it."""
+    notifier = RecordingNotifier()
+    announce(run, "grill")
+    drive(run, workflow, session)
+    Turns(run.root).record_end(latest_seq=1)
+    for _ in range(3):
+        drive(run, workflow, session, notifier=notifier, now=_later(run, SILENCE_SECONDS))
+    assert len(notifier.notified) == 1
+
+    declare_hold(run, "user typed 'pause'")
+    drive(run, workflow, session, notifier=notifier, now=_later(run, 1))
+
+    assert len(notifier.notified) == 2
+    assert "held at your request" in notifier.notified[1][1]
+
+
+def test_asking_a_question_lifts_the_hold(run, workflow, session):
+    """A Question is the agent signalling again (ADR 0025): the Hold is keyed
+    to the Announcement it was declared against, and asking makes a new one."""
+    announce(run, "grill")
+    drive(run, workflow, session)
+    Turns(run.root).record_end(latest_seq=1)
+    declare_hold(run, "user typed 'pause'")
+
+    Announcements(run.root).ask(
+        Question(text="Which theme is wanted?", options=("dark", "dim")), state="grill"
+    )
+    action = drive(run, workflow, session)
+
+    assert isinstance(action, Consult)
+
+
+def test_announcing_again_lifts_the_hold_and_the_run_moves_on(run, workflow, session):
+    """The agent signalling again is what ends a Hold (ADR 0025)."""
+    announce(run, "grill")
+    drive(run, workflow, session)
+    Turns(run.root).record_end(latest_seq=1)
+    declare_hold(run, "user typed 'pause'")
+
+    announce(run, "implement", subject="04-x.md")
+    action = drive(run, workflow, session)
+
+    assert isinstance(action, Clear)
 
 
 def test_a_session_that_never_ends_a_turn_notifies_on_the_timeout(run, workflow, session):

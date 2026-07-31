@@ -94,6 +94,8 @@ def signals(
     clear_attempts=0,
     waiting=False,
     wait_reason=None,
+    holding=False,
+    hold_reason=None,
 ):
     return Signals(
         announcement=(
@@ -113,6 +115,8 @@ def signals(
         clear_attempts=clear_attempts,
         waiting=waiting,
         wait_reason=wait_reason,
+        holding=holding,
+        hold_reason=hold_reason,
     )
 
 
@@ -412,6 +416,80 @@ def test_an_announcement_is_delivered_regardless_of_an_outstanding_wait(workflow
     action = decide(workflow, announced)
 
     assert isinstance(action, Deliver)
+
+
+def test_a_hold_parks_the_run_at_the_humans_request(workflow):
+    """A Hold is a park the human asked for: deliberate, immediate, and worded
+    calmly rather than as a failure (ADR 0025)."""
+    held = signals(
+        "grill",
+        seq=1,
+        handled_seq=1,
+        stopped_since_action=True,
+        holding=True,
+        hold_reason="user typed 'pause'",
+    )
+
+    assert decide(workflow, held) == Notify(reason="held at your request: user typed 'pause'")
+
+
+def test_a_hold_has_no_clock(workflow):
+    """No expiry, no budget, no Nudges: the silence bound and the nudge count
+    say nothing while a Hold stands (ADR 0025)."""
+    held = signals(
+        "grill",
+        seq=1,
+        handled_seq=1,
+        stopped_since_action=True,
+        notified=True,
+        nudges=NUDGE_LIMIT,
+        idle_for=SILENCE_SECONDS * 100,
+        holding=True,
+        hold_reason="user typed 'pause'",
+    )
+
+    assert decide(workflow, held) is NOTHING
+
+
+def test_a_hold_notifies_once_not_every_tick(workflow):
+    held = signals(
+        "grill",
+        seq=1,
+        handled_seq=1,
+        stopped_since_action=True,
+        notified=True,
+        holding=True,
+        hold_reason="user typed 'pause'",
+    )
+
+    assert decide(workflow, held) is NOTHING
+
+
+def test_a_hold_wins_over_an_outstanding_wait(workflow):
+    """A Hold declared while a Wait stands is the newer signal — the wait
+    command releases any Hold, so both standing means the Hold came second."""
+    held = signals(
+        "grill",
+        seq=1,
+        handled_seq=1,
+        stopped_since_action=True,
+        waiting=True,
+        wait_reason="a check",
+        holding=True,
+        hold_reason="user typed 'pause'",
+    )
+
+    assert decide(workflow, held) == Notify(reason="held at your request: user typed 'pause'")
+
+
+def test_an_announcement_is_delivered_regardless_of_an_outstanding_hold(workflow):
+    """The agent signalling again is what ends a Hold (ADR 0025), so an
+    Announcement is acted on however the hold signals read."""
+    announced = signals(
+        "grill", seq=2, handled_seq=1, stopped=True, holding=True, hold_reason="user typed 'pause'"
+    )
+
+    assert isinstance(decide(workflow, announced), Deliver)
 
 
 def test_nudges_are_counted_per_announcement(workflow):

@@ -41,6 +41,7 @@ from naiad.runtime.records import (
     Clears,
     Consultations,
     Handled,
+    Holds,
     Notices,
     Turns,
     Waits,
@@ -89,11 +90,15 @@ def tick(
     clearing = ClearAttempts(run.root)
     answers = AnswerLog(run.root)
     waits = Waits(run.root)
+    holds = Holds(run.root)
     moment = now if now is not None else time.time()
-    # The Wait count keys the Notices record: a fresh Wait re-arms the nudge
-    # allowance the way a fresh Announcement does (ADR 0021).
+    # The Wait and Hold counts key the Notices record: a fresh Wait re-arms
+    # the nudge allowance the way a fresh Announcement does (ADR 0021), and a
+    # fresh Hold re-arms the notification an earlier alarm would otherwise
+    # swallow (ADR 0025).
     wait_count = waits.count(announcement)
-    notified, nudges = notices.of(announcement, wait_count=wait_count)
+    hold_count = holds.count(announcement)
+    notified, nudges = notices.of(announcement, wait_count=wait_count, hold_count=hold_count)
 
     # Written before the decision rather than after it, because where the agent
     # stood before this Announcement is read back out of the log — and because
@@ -119,6 +124,8 @@ def tick(
             clear_attempts=clearing.attempts(announcement),
             waiting=waits.waiting(announcement, now=moment),
             wait_reason=waits.reason(announcement),
+            holding=holds.holding(announcement),
+            hold_reason=holds.reason(announcement),
         ),
         skip_gates=run.skip_gates,
     )
@@ -158,7 +165,7 @@ def tick(
             _pane(run),
             render_nudge(attempt=action.attempt, naiad=naiad, expired_wait=action.expired_wait),
         )
-        notices.record_nudge(announcement, wait_count=wait_count)
+        notices.record_nudge(announcement, wait_count=wait_count, hold_count=hold_count)
     elif isinstance(action, Finish):
         # The session is deliberately not touched: nothing is sent into it and
         # it is not killed, because it holds the evidence of what the Run did.
@@ -167,7 +174,7 @@ def tick(
         notifier.notify(title=f"naiad: {run.id}", message=f"finished at {action.state}")
     elif isinstance(action, Notify):
         notifier.notify(title=f"naiad: {run.id}", message=action.reason)
-        notices.record_notified(announcement, wait_count=wait_count)
+        notices.record_notified(announcement, wait_count=wait_count, hold_count=hold_count)
         if action.question is not None:
             # An Escalated Question. Recorded here rather than at the
             # consultation so that the log holds what became of it, not merely

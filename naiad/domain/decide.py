@@ -99,6 +99,13 @@ class Signals:
     expiry name what was waited on (ADR 0021). Both are facts about the
     current Announcement, re-armed by the next one like nudges.
 
+    holding says a Hold is in force — the agent has declared, on the human's
+    instruction, that the Run is in the human's hands — and hold_reason is what
+    it said when it did. A Hold has no clock, so unlike waiting there is no
+    expired counterpart to read: it stands until the agent signals again, and
+    the next Announcement re-arms it like everything else kept per
+    Announcement (ADR 0025).
+
     cleared and clear_attempts are the Clear handshake as signals (ADR 0019).
     cleared says this Announcement's /clear has been confirmed by the
     SessionStart hook; clear_attempts is how many times it has been typed. They
@@ -120,6 +127,8 @@ class Signals:
     clear_attempts: int = 0
     waiting: bool = False
     wait_reason: str | None = None
+    holding: bool = False
+    hold_reason: str | None = None
 
 
 @dataclass(frozen=True)
@@ -335,6 +344,13 @@ def decide(workflow: Workflow, signals: Signals, *, skip_gates: bool = False) ->
         # the Nudge naming what was waited on (ADR 0021). Undeclared, the
         # session has most likely forgotten to announce, which a reminder
         # fixes.
+        # A Hold is a park the human asked for: the Run parks deliberately,
+        # notified once and calmly, and nothing here runs again until the
+        # agent signals — no expiry, no budget, no Nudges (ADR 0025). Checked
+        # before waiting because the wait command releases any Hold, so both
+        # standing means the Hold is the newer declaration.
+        if signals.holding:
+            return _notify(signals, f"held at your request: {signals.hold_reason}")
         if signals.waiting:
             return NOTHING
         if signals.idle_for < SILENCE_SECONDS:
