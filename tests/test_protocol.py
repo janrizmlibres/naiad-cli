@@ -5,7 +5,8 @@ the instruction not to ask a human, and which State to announce next — rather
 than on exact wording, which is prose and will be tuned.
 """
 
-from naiad.domain.protocol import render_protocol
+from naiad.domain.decide import NUDGE_LIMIT
+from naiad.domain.protocol import render_nudge, render_protocol
 
 
 def test_names_the_command_that_announces_a_state():
@@ -42,3 +43,32 @@ def test_a_run_with_no_next_state_is_told_so_rather_than_left_a_placeholder():
 
     assert "{" not in protocol
     assert "None" not in protocol
+
+
+def test_a_nudge_tells_the_agent_what_to_run_to_get_the_run_moving():
+    assert "naiad state" in render_nudge(attempt=1)
+
+
+def test_a_nudge_names_the_command_as_the_agent_must_invoke_it():
+    assert "/opt/naiad/bin/naiad state" in render_nudge(attempt=1, naiad="/opt/naiad/bin/naiad")
+
+
+def test_the_second_nudge_is_worded_more_firmly_than_the_first():
+    """A second reminder identical to the first is a reminder the agent has
+    already ignored once; it says instead that a human is about to be called."""
+    first = render_nudge(attempt=1)
+    second = render_nudge(attempt=2)
+
+    assert first != second
+    assert "human" in second and "human" not in first
+
+
+def test_no_nudge_is_left_holding_a_placeholder():
+    assert "{" not in render_nudge(attempt=1) and "{" not in render_nudge(attempt=2)
+
+
+def test_there_is_a_wording_for_every_nudge_naiad_is_willing_to_send():
+    """The bound lives in the decision function and the words live here; if
+    they drift apart, a nudged agent gets a traceback instead of a reminder."""
+    for attempt in range(1, NUDGE_LIMIT + 1):
+        assert render_nudge(attempt=attempt)

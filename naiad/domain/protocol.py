@@ -48,6 +48,35 @@ _NO_NEXT_STATE = (
 )
 
 
+# What a silent agent is told, one wording per attempt. The second is firmer
+# because the first has already been ignored; a third is not offered, because
+# the bound is decided in naiad.domain.decide and an agent that is genuinely
+# stuck will not recover from being asked again.
+_NUDGES = (
+    "You have stopped without announcing a State, so the run is waiting on you"
+    " and nothing further will happen. If the phase you were given is finished,"
+    " announce the State you are entering with `{announce} <name>`. If it is"
+    " not finished, carry on with it.",
+    "You have still announced nothing and the run is still waiting. Announce"
+    " now with `{announce} <name>`, or if you cannot proceed, say plainly in"
+    " this session what is blocking you — a human is about to be called.",
+)
+
+
+def render_nudge(*, attempt: int, naiad: str = DEFAULT_NAIAD) -> str:
+    """The reminder a silent agent is sent, worded for the attempt it is.
+
+    naiad is the command the agent must type, for the same reason as in the
+    Protocol: a session's PATH need not hold it, and a command the agent cannot
+    run leaves it just as stuck as the silence did.
+
+    There is one wording per attempt Naiad is willing to make and no clamping,
+    so an attempt beyond the bound raises here rather than quietly repeating a
+    reminder the agent has already ignored.
+    """
+    return _NUDGES[attempt - 1].format(announce=f"{naiad} {ANNOUNCE_SUBCOMMAND}")
+
+
 def render_protocol(*, next_state: str | None, naiad: str = DEFAULT_NAIAD) -> str:
     """The Protocol as the agent meets it, naming the State it is expected to
     announce next. The Workflow file owns that ordering, so it is interpolated
@@ -65,4 +94,4 @@ def render_protocol(*, next_state: str | None, naiad: str = DEFAULT_NAIAD) -> st
     return f"{preamble}\n\n{expectation}\n"
 
 
-__all__ = ["DEFAULT_NAIAD", "render_protocol"]
+__all__ = ["DEFAULT_NAIAD", "render_nudge", "render_protocol"]

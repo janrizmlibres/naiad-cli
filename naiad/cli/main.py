@@ -18,11 +18,13 @@ from collections.abc import Callable
 from datetime import datetime, timezone
 from pathlib import Path
 
+from naiad.adapters.executable import naiad_command
+from naiad.adapters.notify import DesktopNotifications
 from naiad.adapters.tmux import TmuxError, TmuxSessions
 from naiad.cli.announce import AnnounceError, announce_state
 from naiad.cli.kickoff import start_run
 from naiad.cli.protocol import injection_for
-from naiad.domain.decide import Deliver
+from naiad.domain.decide import Deliver, Nudge
 from naiad.domain.transitions import UnknownState
 from naiad.domain.workflow import WorkflowError, load_workflow
 from naiad.hooks.install import DEFAULT_SETTINGS_PATH, install_hooks
@@ -160,12 +162,25 @@ def _watch(arguments: argparse.Namespace) -> int:
         return 2
 
     session = TmuxSessions()
+    notifier = DesktopNotifications()
+    # The naiad driving this Run, so a nudged agent is told to type the command
+    # that exists rather than whatever the session's PATH happens to hold.
+    naiad = naiad_command()
+
     print(f"watching {run.id} ({run.tmux_session})")
     try:
         while True:
-            action = tick(run=run, workflow=workflow, session=session)
+            action = tick(
+                run=run,
+                workflow=workflow,
+                session=session,
+                notifier=notifier,
+                naiad=naiad,
+            )
             if isinstance(action, Deliver):
                 print(f"delivered {action.state}")
+            elif isinstance(action, Nudge):
+                print(f"nudged the agent ({action.attempt})")
             time.sleep(TICK_SECONDS)
     except KeyboardInterrupt:
         return 0
