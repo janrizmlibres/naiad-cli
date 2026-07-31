@@ -54,23 +54,48 @@ def watch(
         return None
 
     while True:
-        action = tick(
+        action = tick_once(
             run=run,
             workflow=workflow,
             session=session,
             notifier=notifier,
             answerer=answerer,
             naiad=naiad,
+            report=report,
         )
-        narration = _narrate(action)
-        if narration is not None:
-            report(narration)
         if isinstance(action, Finish):
             # The Run is over. Anything left ticking here would be ticking
             # forever: no further Announcement is coming, and the session is
             # deliberately left alive rather than killed.
             return action
         sleep(TICK_SECONDS)
+
+
+def tick_once(
+    *,
+    run: Run,
+    workflow: Workflow,
+    session: Session,
+    notifier: Notifier,
+    answerer: Answerer,
+    naiad: str = DEFAULT_NAIAD,
+    report: Callable[[str], None] = print,
+) -> Action:
+    """One tick of a Run, narrated. The watch is this in a loop; the
+    Supervisor calls it once per pass per lane instead (ADR 0020), so the two
+    drive a Run through the same tick with the same narration."""
+    action = tick(
+        run=run,
+        workflow=workflow,
+        session=session,
+        notifier=notifier,
+        answerer=answerer,
+        naiad=naiad,
+    )
+    narration = _narrate(action)
+    if narration is not None:
+        report(narration)
+    return action
 
 
 def _narrate(action: Action) -> str | None:
@@ -94,4 +119,4 @@ def _narrate(action: Action) -> str | None:
     return None
 
 
-__all__ = ["TICK_SECONDS", "watch"]
+__all__ = ["TICK_SECONDS", "tick_once", "watch"]

@@ -1,7 +1,8 @@
-"""The Queue's rules, as data in and Action out. No tmux, no subprocess, no clock.
+"""The Queue's rules, as data in and Actions out. No tmux, no subprocess, no clock.
 
-One scan produces three behaviours — sequential ordering, a parked Run blocking
-the Queue, and crash recovery — with no special case for any of them. Each is
+One scan produces the behaviours — sequential ordering within a repository,
+repositories running concurrently (ADR 0020), a parked Run blocking its own
+lane, and crash recovery — with no special case for any of them. Each is
 asserted separately here because each would be a different bug.
 """
 
@@ -49,14 +50,14 @@ def test_an_empty_queue_idles_when_following():
     assert supervise(following()) == IDLE
 
 
-# The scan: the first Entry that is not done, started if it has no Run and
-# resumed if it has.
+# The scan: per lane, the first Entry that is not done — started if it has no
+# Run and resumed if it has.
 
 
 def test_the_first_entry_with_no_run_is_started():
     first, second = entry("one"), entry("two")
 
-    assert supervise(draining(first, second)) == Start(entry=first, predecessor=None)
+    assert supervise(draining(first, second)) == [Start(entry=first, predecessor=None)]
 
 
 def test_a_started_entry_carries_its_pinned_base_as_its_predecessor():
@@ -64,22 +65,22 @@ def test_a_started_entry_carries_its_pinned_base_as_its_predecessor():
     rule that decides what it stands on are one decision rather than two."""
     pinned = entry("one", pinned_base="MC-AGENT-8000")
 
-    assert supervise(draining(pinned)) == Start(entry=pinned, predecessor="MC-AGENT-8000")
+    assert supervise(draining(pinned)) == [Start(entry=pinned, predecessor="MC-AGENT-8000")]
 
 
 def test_an_entry_whose_run_has_not_finished_is_resumed():
     running = entry("one", run_id="a-run")
 
-    assert supervise(draining(running)) == Resume(entry=running)
+    assert supervise(draining(running)) == [Resume(entry=running)]
 
 
 def test_an_entry_whose_run_has_not_finished_stops_the_next_from_starting():
-    """Sequential ordering and a parked Run blocking the Queue are the same
-    case: the scan stops at the first Entry that is not done, and a parked Run
-    is not finished (ADR 0012)."""
+    """Sequential ordering within a repository and a parked Run blocking its
+    lane are the same case: the lane's scan stops at the first Entry that is
+    not done, and a parked Run is not finished (ADR 0012, ADR 0020)."""
     running, waiting = entry("one", run_id="a-run"), entry("two")
 
-    assert supervise(draining(running, waiting)) == Resume(entry=running)
+    assert supervise(draining(running, waiting)) == [Resume(entry=running)]
 
 
 def test_a_supervisor_restarted_mid_run_resumes_the_same_entry():
@@ -88,7 +89,7 @@ def test_a_supervisor_restarted_mid_run_resumes_the_same_entry():
     interrupted, waiting = entry("one", run_id="a-run"), entry("two")
     signals = draining(interrupted, waiting)
 
-    assert supervise(signals) == supervise(signals) == Resume(entry=interrupted)
+    assert supervise(signals) == supervise(signals) == [Resume(entry=interrupted)]
 
 
 def test_a_finished_entry_is_scanned_past_to_the_next():
@@ -99,14 +100,92 @@ def test_a_finished_entry_is_scanned_past_to_the_next():
     # is what made this test break when the rule for it changed.
     scanned_past = supervise(draining(done, waiting, finished={"a-run"}))
 
-    assert isinstance(scanned_past, Start)
-    assert scanned_past.entry is waiting
+    assert isinstance(scanned_past, list) and len(scanned_past) == 1
+    assert isinstance(scanned_past[0], Start)
+    assert scanned_past[0].entry is waiting
 
 
 def test_a_finished_entry_is_scanned_past_to_the_next_unfinished_run():
     done, running = entry("one", run_id="a-run"), entry("two", run_id="another-run")
 
-    assert supervise(draining(done, running, finished={"a-run"})) == Resume(entry=running)
+    assert supervise(draining(done, running, finished={"a-run"})) == [Resume(entry=running)]
+
+
+# Repositories are lanes: sequential within one, concurrent across them
+# (ADR 0020). The exclusion unit is the working tree, named by the target path.
+
+
+def test_entries_for_two_repositories_are_both_started():
+    """The collision one-at-a-time exists to prevent cannot happen between two
+    working trees, so neither waits for the other."""
+    ours, theirs = entry("one"), entry("two", target_repo=ANOTHER_REPO)
+
+    assert supervise(draining(ours, theirs)) == [
+        Start(entry=ours, predecessor=None),
+        Start(entry=theirs, predecessor=None),
+    ]
+
+
+def test_a_run_in_one_repository_does_not_stop_another_repository_starting():
+    """The screenshot that motivated ADR 0020: hcgps running, guestpulse-admin
+    waiting behind it for no reason the working tree can name."""
+    running = entry("one", run_id="a-run")
+    waiting = entry("two", target_repo=ANOTHER_REPO)
+
+    assert supervise(draining(running, waiting)) == [
+        Resume(entry=running),
+        Start(entry=waiting, predecessor=None),
+    ]
+
+
+def test_a_lane_that_yielded_its_action_yields_nothing_more():
+    """One Run per working tree: behind a lane's live Run, that lane's later
+    Entries wait exactly as the whole Queue used to."""
+    running = entry("one", run_id="a-run")
+    behind = entry("two")
+    elsewhere = entry("three", target_repo=ANOTHER_REPO)
+
+    assert supervise(draining(running, behind, elsewhere)) == [
+        Resume(entry=running),
+        Start(entry=elsewhere, predecessor=None),
+    ]
+
+
+def test_lanes_come_out_in_the_order_their_first_unfinished_entries_were_queued():
+    theirs = entry("one", target_repo=ANOTHER_REPO)
+    ours = entry("two")
+
+    started = supervise(draining(theirs, ours))
+
+    assert [action.entry for action in started] == [theirs, ours]
+
+
+def test_two_worktrees_of_one_repository_are_two_lanes():
+    """Not a loophole but the rule meaning what it says (ADR 0020): the
+    exclusion unit is the working tree, named by the target path, and two
+    worktrees of one repository are two working trees."""
+    main_tree = entry("one", target_repo=Path("/repos/hcgps"))
+    worktree = entry("two", target_repo=Path("/repos/hcgps-orion"))
+
+    assert supervise(draining(main_tree, worktree)) == [
+        Start(entry=main_tree, predecessor=None),
+        Start(entry=worktree, predecessor=None),
+    ]
+
+
+def test_a_queue_parked_in_one_lane_still_works_in_the_others():
+    """A parked Run blocks only its own lane (ADR 0012 narrowed by ADR 0020):
+    a night parked at review in one repository is still a night of work in the
+    other two."""
+    parked = entry("one", run_id="a-run")
+    other_repo = entry("two", target_repo=ANOTHER_REPO)
+    third_repo = entry("three", target_repo=Path("/repos/guestpulse-admin"))
+
+    assert supervise(draining(parked, other_repo, third_repo)) == [
+        Resume(entry=parked),
+        Start(entry=other_repo, predecessor=None),
+        Start(entry=third_repo, predecessor=None),
+    ]
 
 
 # Every Entry done is the empty Queue again, and answers the same way.
@@ -129,7 +208,7 @@ def test_the_entries_are_taken_in_the_order_they_are_given():
     rule reads the sequence it was handed and sorts nothing itself."""
     first, second, third = entry("one"), entry("two"), entry("three")
 
-    assert supervise(draining(first, second, third)).entry is first
+    assert supervise(draining(first, second, third))[0].entry is first
 
 
 # Resolving the Predecessor: the pinned base, else the nearest preceding Entry
@@ -144,9 +223,9 @@ def test_an_entry_with_no_pinned_base_stands_on_the_entry_before_it():
     first = entry("one", run_id="a-run")
     second = entry("two")
 
-    assert supervise(draining(first, second, finished={"a-run"})) == Start(
-        entry=second, predecessor="MC-AGENT-one"
-    )
+    assert supervise(draining(first, second, finished={"a-run"})) == [
+        Start(entry=second, predecessor="MC-AGENT-one")
+    ]
 
 
 def test_a_pinned_base_wins_over_the_entry_before_it():
@@ -155,9 +234,9 @@ def test_a_pinned_base_wins_over_the_entry_before_it():
     first = entry("one", run_id="a-run")
     second = entry("two", pinned_base="develop")
 
-    assert supervise(draining(first, second, finished={"a-run"})) == Start(
-        entry=second, predecessor="develop"
-    )
+    assert supervise(draining(first, second, finished={"a-run"})) == [
+        Start(entry=second, predecessor="develop")
+    ]
 
 
 def test_an_entry_for_another_repository_is_walked_over():
@@ -170,7 +249,7 @@ def test_an_entry_for_another_repository_is_walked_over():
 
     assert supervise(
         draining(first, interloper, third, finished={"a-run", "another-run"})
-    ) == Start(entry=third, predecessor="MC-AGENT-one")
+    ) == [Start(entry=third, predecessor="MC-AGENT-one")]
 
 
 def test_the_first_entry_for_a_repository_stands_on_nothing():
@@ -180,9 +259,9 @@ def test_the_first_entry_for_a_repository_stands_on_nothing():
     interloper = entry("one", target_repo=ANOTHER_REPO, run_id="a-run")
     second = entry("two")
 
-    assert supervise(draining(interloper, second, finished={"a-run"})) == Start(
-        entry=second, predecessor=None
-    )
+    assert supervise(draining(interloper, second, finished={"a-run"})) == [
+        Start(entry=second, predecessor=None)
+    ]
 
 
 def test_an_entry_whose_immediate_predecessor_was_removed_takes_the_one_before_it():
@@ -193,9 +272,9 @@ def test_an_entry_whose_immediate_predecessor_was_removed_takes_the_one_before_i
     # "two" was queued between them and removed; it is simply not here.
     third = entry("three")
 
-    assert supervise(draining(first, third, finished={"a-run"})) == Start(
-        entry=third, predecessor="MC-AGENT-one"
-    )
+    assert supervise(draining(first, third, finished={"a-run"})) == [
+        Start(entry=third, predecessor="MC-AGENT-one")
+    ]
 
 
 def test_a_preceding_entry_for_the_same_repository_is_never_skipped():
@@ -208,4 +287,4 @@ def test_a_preceding_entry_for_the_same_repository_is_never_skipped():
 
     assert supervise(
         draining(landed, stacked, third, finished={"a-run", "another-run"})
-    ) == Start(entry=third, predecessor="MC-AGENT-two")
+    ) == [Start(entry=third, predecessor="MC-AGENT-two")]

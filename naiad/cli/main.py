@@ -36,7 +36,7 @@ from naiad.cli.kickoff import start_run
 from naiad.cli.protocol import injection_for
 from naiad.cli.refusals import ADD_COMMAND, RUN_COMMAND, Remedy
 from naiad.cli.supervisor import supervise_queue
-from naiad.cli.watch import watch
+from naiad.cli.watch import tick_once, watch
 from naiad.domain.entry import Entry
 from naiad.domain.workflow import load_workflow
 from naiad.hooks.install import DEFAULT_SETTINGS_PATH, install_hooks
@@ -322,8 +322,8 @@ def _install_hooks(arguments: argparse.Namespace) -> int:
 def _watch(arguments: argparse.Namespace) -> int:
     """Drive one named Run — and not while a Supervisor is driving the Queue.
 
-    The Queue is sequential, so a held lock means the Supervisor is driving the
-    only live Run, and a second ticker on one Run delivers everything twice.
+    A held lock means the Supervisor may be ticking this very Run in one of
+    its lanes, and a second ticker on one Run delivers everything twice.
     """
     if SupervisorLock(default_lock_path()).held():
         print(
@@ -348,10 +348,9 @@ def _watch(arguments: argparse.Namespace) -> int:
 
 def _drive(run: Run) -> None:
     """Drive one Run until it ends, with the real session, notifier and
-    Answerer.
-
-    One place, so that the Run an operator named and the Run the Supervisor
-    took off the Queue are driven by the same loop with the same dependencies.
+    Answerer — the loop `naiad watch` blocks in. The Supervisor ticks its
+    Lanes through `_ticker` instead, and both go through the same tick with
+    the same dependencies.
     """
     # The line the operator needs to look in on the work, printed where the Run
     # is driven rather than where it was queued: an Entry queued tonight is
@@ -367,6 +366,38 @@ def _drive(run: Run) -> None:
         # command that exists rather than whatever the session's PATH holds.
         naiad=naiad_command(),
     )
+
+
+def _ticker() -> Callable[[Run], None]:
+    """One tick of one lane's Run, for the Supervisor's pass (ADR 0020).
+
+    Runs in different lanes report into one terminal, so every narration line
+    is prefixed with the Run it belongs to — interleaved lines are noise
+    rather than ambiguity only while each names its Run. The attach line is
+    printed the first time a Run is ticked, which is where `naiad watch`
+    prints it too: where the Run is driven rather than where it was queued.
+    """
+    session = TmuxSessions()
+    notifier = DesktopNotifications()
+    answerer = HeadlessAnswerer()
+    naiad = naiad_command()
+    watching: set[str] = set()
+
+    def tick_run(run: Run) -> None:
+        if run.id not in watching:
+            watching.add(run.id)
+            print(f"watching {run.id}   (tmux attach -t {run.tmux_session})")
+        tick_once(
+            run=run,
+            workflow=load_workflow(run.workflow_path),
+            session=session,
+            notifier=notifier,
+            answerer=answerer,
+            naiad=naiad,
+            report=lambda message: print(f"{run.id}  {message}"),
+        )
+
+    return tick_run
 
 
 def _named_run(run_id: str) -> Run:
@@ -603,8 +634,9 @@ def _queue_watch(arguments: argparse.Namespace) -> int:
     empty so that Entries added later are picked up.
 
     A second Supervisor is refused rather than queued behind the first, because
-    two of them each take the first waiting Entry and put two agents in one
-    working tree — which is the single thing one-at-a-time exists to prevent.
+    two of them each take a lane's first waiting Entry and put two agents in
+    one working tree — which is the single thing one Run per working tree
+    exists to prevent (ADR 0020).
     """
     with SupervisorLock(default_lock_path()).taken() as mine:
         if not mine:
@@ -624,16 +656,17 @@ def _supervise(*, following: bool) -> int:
     do: `naiad run` drains and gives the operator their prompt back, while
     `naiad queue watch` follows so that Entries added later are picked up.
 
-    It holds no rules of its own. Which Entry is next, whether it is started or
-    resumed, and what its work stands on are naiad.domain.supervise's to say;
-    this builds the real dependencies and hands them over.
+    It holds no rules of its own. Which Entry is next in each lane, whether it
+    is started or resumed, and what its work stands on are
+    naiad.domain.supervise's to say; this builds the real dependencies and
+    hands them over.
     """
     try:
         supervise_queue(
             queue=Queue(default_queue_root()),
             runs=RunStore(default_runs_root()),
             start=_start_entry,
-            drive=_drive,
+            tick=_ticker(),
             following=following,
         )
     except FAILURES as error:
