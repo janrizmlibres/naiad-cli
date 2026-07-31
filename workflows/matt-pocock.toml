@@ -1,4 +1,4 @@
-# The Matt Pocock feature chain, and the only Workflow that ships.
+# The Matt Pocock feature chain and the bug branch: the only Workflow that ships.
 #
 # Every Prompt opens with the slash command of the skill it runs: Claude Code
 # reads a slash command only at the start of a message, so prose in front of it
@@ -11,8 +11,67 @@
 
 name = "matt-pocock"
 
-# Kickoff. The only State told the task in words; everything after it reads the
-# Artifacts this conversation and its successors leave behind.
+# The bug branch, declared before the feature chain so the file reads in the
+# order a Run moves through it, with the short branch first. One branch has to
+# declare its rejoin explicitly, and this is the one where that declaration sits
+# a line from its own head rather than reaching across the whole file.
+
+# One State for the whole diagnosis discipline — feedback loop, reproduce,
+# minimise, hypothesise, instrument, fix with a regression test, clean up,
+# post-mortem — and no diagnosis Artifact (ADR 0008). The only honest cut is
+# between instrumentation and fix, and the fix phase already writes its failing
+# test before the fix and then re-runs the original loop, while the post-mortem
+# is explicitly better-informed after the fix than before it. Splitting there
+# would sever the discipline mid-stride and then reconstruct by hand, in an
+# Artifact, what not Clearing supplies for free.
+#
+# Clears, and so restates the task. Nothing upstream is wanted here: a
+# classifier's "this looks like a bug because…" is a conclusion this State has
+# no use for and an active hazard for work whose job is to form a hypothesis
+# from evidence rather than inherit a guess.
+#
+# The branch is the skill's own: it says to stop and report when no feedback
+# loop can be built, and not to hypothesise without one. So the criterion for
+# choosing between the two candidates is in the Prompt, because Naiad decides
+# nothing about which branch is right and the criterion exists nowhere else.
+#
+# This is the one Prompt that writes its successors out rather than
+# interpolating {next_state}, for the same reason the implement loop writes its
+# own name: the placeholder renders every candidate as one joined phrase, which
+# is right where a Prompt says "announce what comes next" and useless where it
+# has to attach a different condition to each exit. The names are still the
+# Workflow's — the test asserts each declared candidate is announced by name, so
+# a candidate renamed here without the Prompt following fails.
+[[states]]
+name = "diagnose"
+clear = true
+next = ["no-repro", "pull-request"]
+prompt = """
+/diagnosing-bugs {task}
+
+Run the discipline end to end — through the fix, its regression test, the instrumentation cleanup and the post-mortem — rather than stopping at the diagnosis.
+
+If you cannot build a feedback loop at all, do not hypothesise without one: say so in the session, list what you tried and what you need, and announce no-repro. Otherwise, when the fix is in place with its regression test and the working tree is clean, announce pull-request.
+"""
+
+# The first Gate State that is a branch candidate rather than a step in the
+# declared order — which is what forced the rule in ADR 0007: it is never
+# skipped, because it is a destination the agent chose rather than a routine
+# checkpoint on the path.
+#
+# No Prompt, so Naiad delivers nothing and the operator types the missing
+# environment, steps or captured artifact into the session directly. No Artifact
+# either, for the reason ADR 0008 gives. The agent then carries on through the
+# remaining phases in the same context, which is why the rejoin is the pull
+# request rather than a return to a State that would Clear what the operator
+# just supplied.
+[[states]]
+name = "no-repro"
+next = ["pull-request"]
+
+# Kickoff for the feature branch. Told the task in words, as the other branch
+# head is; everything after it reads the Artifacts this conversation and its
+# successors leave behind.
 [[states]]
 name = "grill"
 prompt = """
