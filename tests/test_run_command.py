@@ -212,6 +212,44 @@ def test_running_without_a_working_branch_queues_branchless_work(home, repo, mon
     assert queued.working_branch is None
 
 
+def test_running_with_only_a_subject_takes_it_as_the_task(home, repo, monkeypatch):
+    """ADR 0024: `naiad run <workflow> --at implement --subject <ticket>` needs
+    no task beside the Subject — the Subject stands in as the task."""
+    supervision(monkeypatch)
+
+    assert (
+        main(
+            [
+                "run",
+                str(repo / "workflow.toml"),
+                "--repo",
+                str(repo),
+                "--at",
+                "implement",
+                "--subject",
+                "docs/ticket.md",
+            ]
+        )
+        == 0
+    )
+
+    (queued,) = queue_of(home).all()
+    assert queued.task == "docs/ticket.md"
+    assert queued.subject == "docs/ticket.md"
+
+
+def test_running_with_neither_a_task_nor_a_subject_is_refused(home, repo, monkeypatch, capsys):
+    refuse_supervising(monkeypatch)
+
+    assert main(["run", str(repo / "workflow.toml"), "--repo", str(repo)]) == 2
+
+    err = capsys.readouterr().err
+    assert "--subject" in err
+    # The remedy speaks this command's vocabulary, not queue add's.
+    assert "naiad run" in err
+    assert queue_of(home).all() == []
+
+
 def test_running_at_a_state_the_workflow_does_not_declare_is_refused(
     home, repo, monkeypatch, capsys
 ):

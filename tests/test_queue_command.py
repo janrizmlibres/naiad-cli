@@ -577,6 +577,40 @@ def test_adding_with_neither_a_file_nor_a_task_is_refused(home, capsys):
     assert queue_of(home).all() == []
 
 
+def test_adding_with_only_a_subject_takes_it_as_the_task(home, repo):
+    """ADR 0024: work described mid-workflow — `--at implement --subject
+    <ticket>` — needs no task typed twice; the Subject stands in."""
+    assert (
+        main(
+            [
+                "queue",
+                "add",
+                str(repo / "workflow.toml"),
+                "--repo",
+                str(repo),
+                "--at",
+                "implement",
+                "--subject",
+                "docs/ticket.md",
+            ]
+        )
+        == 0
+    )
+
+    (queued,) = queue_of(home).all()
+    assert queued.task == "docs/ticket.md"
+
+
+def test_adding_a_workflow_with_neither_a_task_nor_a_subject_is_refused(home, repo, capsys):
+    assert main(["queue", "add", str(repo / "workflow.toml"), "--repo", str(repo)]) == 2
+
+    err = capsys.readouterr().err
+    assert "--subject" in err
+    # The remedy speaks this command's vocabulary, not naiad run's.
+    assert "naiad queue add" in err
+    assert queue_of(home).all() == []
+
+
 def test_a_batched_entry_carries_no_mark_of_the_file_it_came_from(home, repo):
     """An id sorts, and that is the whole of its job. One that carried its place
     in a file would be the Queue knowing a batch arrived — which it does not,

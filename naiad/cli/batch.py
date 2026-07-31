@@ -172,7 +172,10 @@ def _work(
     named_repo = _text(fields, REPO, bad)
     return Work(
         workflow_path=_workflow(_required(fields, WORKFLOW, bad), library=library, bad=bad),
-        task=_required(fields, TASK, bad),
+        # Optional, because a Subject may stand in for it (ADR 0024). The
+        # stand-in and the neither-given refusal live where Entries are made,
+        # so the file parses to work that honestly says no task was written.
+        task=_text(fields, TASK, bad),
         target_repo=_path(named_repo) if named_repo else repo,
         # Optional, as `--branch` is: an Entry that names none starts a Run
         # with no Working branch, and the agent at its head derives and

@@ -10,9 +10,12 @@ night's backlog cannot fail at three in the morning on a typo.
 One copy of these checks rather than one per caller, so that neither can quietly
 stop making one of them. Not every refusal is here: the Queue's own —
 a Working branch another Entry has claimed — needs the Queue's contents and
-lives with the enqueue, and the announce command's missing-Subject check is a
-different guard on a different actor, refusing what the agent said rather than
-what an operator typed.
+lives with the enqueue, as does the missing-task refusal (ADR 0024), which only
+the entrances can fail — an Entry's task is total by the time kickoff sees it.
+The announce command's missing-Subject check is a different guard on a
+different actor, refusing what the agent said rather than what an operator
+typed. This module still holds their exceptions and remedies, so that every
+refusal about describing work speaks with one voice.
 """
 
 from __future__ import annotations
@@ -40,27 +43,39 @@ class Remedy:
     # Names {state}, because which State wanted a Subject is not known until
     # the Workflow has been read.
     subject: str
+    # How to say what the work is when neither a task nor a Subject did
+    # (ADR 0024). No {state}: the refusal is about describing work at all.
+    task: str
 
     def for_subject(self, state: str) -> str:
         return self.subject.format(state=state)
 
 
-def _typed(how: str) -> Remedy:
+def _typed(command: str) -> Remedy:
     """The remedy for work described in shell arguments: the line the operator
     typed, with the missing option added — something they can retype rather
-    than a rule they have to translate."""
-    return Remedy(subject=f"try: {how} --at {{state}} --subject <value>")
+    than a rule they have to translate. Takes the command alone and spells the
+    positionals itself, because the task remedy needs the line both with
+    `<task>` and without it (ADR 0024)."""
+    described = f"{command} <workflow>"
+    return Remedy(
+        subject=f"try: {described} <task> --at {{state}} --subject <value>",
+        task=f"try: {described} <task>, or {described} --subject <value>",
+    )
 
 
 # The remedies a refusal quotes back, named for where the work was described
 # rather than for what they say. They live beside the checks rather than with
 # either command, because the checks are what quote them and a caller's only
 # job is to name where its reader wrote.
-RUN_COMMAND = _typed("naiad run <workflow> <task>")
-ADD_COMMAND = _typed("naiad queue add <workflow> <task>")
+RUN_COMMAND = _typed("naiad run")
+ADD_COMMAND = _typed("naiad queue add")
 # Work described in a batch file. The refusal names the file and the Entry's
 # position, so what is left to say is which key that Entry is missing.
-BATCH_ENTRY = Remedy(subject='try: giving that entry a `subject = "<value>"`')
+BATCH_ENTRY = Remedy(
+    subject='try: giving that entry a `subject = "<value>"`',
+    task='try: giving that entry a `task = "<value>"` or a `subject = "<value>"`',
+)
 
 
 @dataclass(frozen=True)
@@ -72,6 +87,12 @@ class Start:
     workflow: Workflow
     state: State
     working_branch: str | None
+
+
+class MissingTask(Exception):
+    """Work described with neither a task nor a Subject to stand in for one
+    (ADR 0024). With both absent nothing says what the work is — not to the
+    Queue listing, not to the Answerer, not to a Prompt naming {task}."""
 
 
 class MissingSubject(Exception):
@@ -116,6 +137,7 @@ __all__ = [
     "BATCH_ENTRY",
     "RUN_COMMAND",
     "MissingSubject",
+    "MissingTask",
     "Remedy",
     "Start",
     "check_start",

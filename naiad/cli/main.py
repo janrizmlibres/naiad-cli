@@ -200,20 +200,30 @@ def _describe_the_work(parser: argparse.ArgumentParser, *, required: bool = True
     what they set is named as the glossary names it. The translation happens
     here, at the boundary, and nowhere else.
 
-    `required` is false where a batch file may describe the work instead. Which
-    of the two is missing is then refused with a message rather than by
-    argparse, as the Working branch already is, so that an operator is told
-    both ways of saying it rather than only the one they left out.
+    `required` is false where a batch file may describe the work instead, and
+    it governs the workflow positional alone: the task is optional everywhere,
+    because a given --subject stands in for it (ADR 0024). Both absences are
+    refused with a message rather than by argparse, as the Working branch
+    already is, so that an operator is told every way of saying it rather than
+    only the one they left out.
     """
-    # Nothing where the work must be described here, and what makes each
-    # positional optional where a file may describe it instead.
+    # Nothing where the work must be described here, and what makes the
+    # workflow positional optional where a file may describe it instead.
     optional: dict[str, Any] = {} if required else {"nargs": "?", "default": None}
     parser.add_argument(
         "workflow",
         help="path to the Workflow file, or the bare name of one in the library",
         **optional,
     )
-    parser.add_argument("task", help="what the work is", **optional)
+    # Optional everywhere, not only where a file may describe the work: a
+    # given --subject stands in for an absent task (ADR 0024), so which of the
+    # two must be present is refused with a message rather than by argparse.
+    parser.add_argument(
+        "task",
+        help="what the work is (a given --subject stands in when omitted)",
+        nargs="?",
+        default=None,
+    )
     parser.add_argument(
         "--repo",
         type=Path,
@@ -539,14 +549,14 @@ def _queue_add(arguments: argparse.Namespace) -> int:
             return 2
         return _queued_from_file(arguments)
 
-    if arguments.workflow is None or arguments.task is None:
-        # Which half is missing, because argparse no longer says: the
-        # positionals had to become optional for a file to describe them
-        # instead, and an operator who typed a Workflow and forgot the task
-        # should not be told they described nothing.
-        missing = "no task" if arguments.workflow is not None else "no workflow and no task"
+    if arguments.workflow is None:
+        # Refused with a message, because argparse no longer says: the
+        # positional had to become optional for a file to describe the work
+        # instead. A missing task is not refused here — a given Subject stands
+        # in for it, and which of the two must be present is the enqueue's one
+        # check to make (ADR 0024).
         print(
-            f"naiad: {missing} was given, and no batch file either; "
+            "naiad: no workflow was given, and no batch file either; "
             "try: naiad queue add <workflow> <task>, "
             "or naiad queue add --file <batch.toml>",
             file=sys.stderr,

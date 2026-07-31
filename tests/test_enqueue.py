@@ -12,7 +12,7 @@ import pytest
 
 from naiad.cli.batch import BatchError, enqueue_batch
 from naiad.cli.enqueue import BranchAlreadyClaimed, Work, enqueue
-from naiad.cli.refusals import ADD_COMMAND, MissingSubject
+from naiad.cli.refusals import ADD_COMMAND, MissingSubject, MissingTask
 from naiad.domain.transitions import UnknownState
 from naiad.domain.workflow import WorkflowError
 from naiad.runtime.queue import Queue
@@ -253,6 +253,37 @@ def test_a_start_state_whose_prompt_names_no_subject_needs_none(repo, queue):
     assert queue.all()[0].start_state == "grill"
 
 
+def test_a_subject_stands_in_for_an_absent_task(repo, queue):
+    """ADR 0024: an operator who gave only a Subject has said the Subject
+    describes the work, so the Entry's task is total without being typed
+    twice — `--at implement --subject <ticket>` needs no task beside it."""
+    add(repo, queue, task=None, start_state="implement", subject="docs/ticket.md")
+
+    (queued,) = queue.all()
+    assert queued.task == "docs/ticket.md"
+    assert queued.subject == "docs/ticket.md"
+
+
+def test_the_stand_in_is_unconditional_about_the_start_state(repo, queue):
+    """ADR 0024: even a start State whose Prompt renders {task} takes the
+    Subject — an operator who gave only a Subject has said the Subject
+    describes the work, and refusing would be second-guessing that."""
+    add(repo, queue, task=None, start_state="grill", subject="docs/ticket.md")
+
+    (queued,) = queue.all()
+    assert queued.task == "docs/ticket.md"
+
+
+def test_work_naming_no_task_and_no_subject_is_refused(repo, queue):
+    """The one refusal the stand-in keeps (ADR 0024): with neither, nothing
+    says what the work is — not to the Queue listing, not to the Answerer."""
+    with pytest.raises(MissingTask) as caught:
+        add(repo, queue, task=None, start_state="grill")
+
+    assert "--subject" in str(caught.value)
+    assert queue.all() == []
+
+
 def test_an_entry_with_no_start_state_begins_where_the_workflow_does(repo, queue):
     """Unclassified work is the default rather than a special case, so nothing
     is invented for an Entry that names no State."""
@@ -400,6 +431,22 @@ def test_a_batched_entry_whose_start_state_needs_a_subject_and_has_none_is_refus
 
     assert "entry 1" in str(caught.value)
     assert "subject" in str(caught.value)
+    assert queue.all() == []
+
+
+def test_a_batched_entry_naming_only_a_subject_takes_it_as_its_task(repo, queue):
+    batch(queue, work(repo, task=None, start_state="implement", subject="docs/ticket.md"))
+
+    (queued,) = queue.all()
+    assert queued.task == "docs/ticket.md"
+
+
+def test_a_batched_entry_naming_no_task_and_no_subject_is_refused(repo, queue):
+    with pytest.raises(BatchError) as caught:
+        batch(queue, work(repo, task=None, start_state="grill"))
+
+    assert "entry 1" in str(caught.value)
+    assert "task" in str(caught.value) and "subject" in str(caught.value)
     assert queue.all() == []
 
 

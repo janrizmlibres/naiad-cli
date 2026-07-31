@@ -18,7 +18,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
-from naiad.cli.refusals import MissingSubject, Remedy, check_start
+from naiad.cli.refusals import MissingSubject, MissingTask, Remedy, check_start
 from naiad.domain.entry import Entry
 from naiad.domain.transitions import UnknownState
 from naiad.domain.workflow import WorkflowError
@@ -42,7 +42,10 @@ class Work:
     """
 
     workflow_path: Path
-    task: str
+    # Optional because a Subject can stand in for it (ADR 0024): work described
+    # with only a Subject takes that Subject as its task, so the Entry's own
+    # task stays total. Absent along with the Subject, the work is refused.
+    task: str | None
     target_repo: Path
     working_branch: str | None
     pinned_base: str | None = None
@@ -74,6 +77,7 @@ class BranchAlreadyClaimed(Exception):
 REFUSALS = (
     BranchAlreadyClaimed,
     MissingSubject,
+    MissingTask,
     UnknownState,
     WorkflowError,
 )
@@ -130,6 +134,16 @@ def prepare(
     that cannot exist has to be discovered while the ones before it are still
     only in hand.
     """
+    # The Subject stands in for an absent task (ADR 0024), so the Entry's own
+    # task is total however the work was described. Resolved before anything
+    # opens the Workflow file: with neither given, nothing says what the work
+    # is, and no other check could make that better.
+    task = work.task if work.task is not None else work.subject
+    if task is None:
+        raise MissingTask(
+            f"no task says what this work is, and no subject stands in for one; "
+            f"{remedy.task}"
+        )
     checked = check_start(
         workflow_path=work.workflow_path,
         start_state=work.start_state,
@@ -148,7 +162,7 @@ def prepare(
     return Entry(
         id=entry_id,
         workflow_path=work.workflow_path,
-        task=work.task,
+        task=task,
         target_repo=target_repo,
         working_branch=checked.working_branch,
         created_at=created_at,
