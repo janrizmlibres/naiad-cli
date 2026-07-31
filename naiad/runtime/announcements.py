@@ -1,0 +1,55 @@
+"""The State file — the agent's Announcements.
+
+The agent is its only writer and Naiad only ever reads it (ADR 0001), so
+progress is always a record of the agent's own judgment rather than a
+blackboard the two parties race over.
+
+Only the latest Announcement is kept. What makes a repeat distinct is its
+sequence number, not a history: the agent implementing its fifth ticket
+announces the same State a fifth time, gets a fifth seq, and Naiad acts a fifth
+time. Naiad's own record of what it has acted on lives elsewhere, so that this
+file stays single-writer.
+
+An agent that announces twice before Naiad next looks therefore has only its
+second Announcement acted on. That is deliberate: the first is stale intent the
+agent has already moved on from, and delivering its Prompt would send the
+session backwards. Keeping a queue instead would trade a skipped Announcement
+for a wrong one.
+"""
+
+from __future__ import annotations
+
+import json
+from pathlib import Path
+
+from naiad.domain.announcement import Announcement
+from naiad.runtime.atomic import write_atomically
+
+STATE_FILENAME = "state.json"
+
+
+class Announcements:
+    """A Run's State file. Constructed with the Run's directory rather than
+    reading a module-level path, so a second Run is a second object (ADR 0004)."""
+
+    def __init__(self, run_root: Path) -> None:
+        self.path = Path(run_root) / STATE_FILENAME
+
+    def latest(self) -> Announcement | None:
+        try:
+            document = json.loads(self.path.read_text())
+        except FileNotFoundError:
+            return None
+        return Announcement(seq=document["seq"], state=document["state"])
+
+    def announce(self, state: str) -> Announcement:
+        previous = self.latest()
+        announcement = Announcement(seq=(previous.seq + 1) if previous else 1, state=state)
+        write_atomically(
+            self.path,
+            json.dumps({"seq": announcement.seq, "state": announcement.state}, indent=2) + "\n",
+        )
+        return announcement
+
+
+__all__ = ["Announcements", "STATE_FILENAME"]

@@ -13,10 +13,11 @@ from __future__ import annotations
 
 import json
 import os
-import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
+
+from naiad.runtime.atomic import write_atomically
 
 METADATA_FILENAME = "run.json"
 
@@ -63,7 +64,7 @@ class Run:
         self.save()
 
     def save(self) -> None:
-        _write_atomically(self.metadata_path, json.dumps(self._as_document(), indent=2) + "\n")
+        write_atomically(self.metadata_path, json.dumps(self._as_document(), indent=2) + "\n")
 
     def _as_document(self) -> dict[str, Any]:
         return {
@@ -149,17 +150,6 @@ def _real(path: Path) -> Path:
     """Absolute, symlinks resolved as far as they exist. The containment check
     must compare real locations, and the run directory does not exist yet."""
     return Path(os.path.realpath(path))
-
-
-def _write_atomically(path: Path, text: str) -> None:
-    handle, temporary = tempfile.mkstemp(dir=str(path.parent), prefix=f".{path.name}.")
-    try:
-        with os.fdopen(handle, "w") as file:
-            file.write(text)
-        os.replace(temporary, path)
-    except BaseException:
-        Path(temporary).unlink(missing_ok=True)
-        raise
 
 
 __all__ = ["Run", "RunStore", "StorageError", "default_runs_root"]

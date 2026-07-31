@@ -16,6 +16,11 @@ from naiad.runtime.run import Run, RunStore
 RUN_ID_VARIABLE = "NAIAD_RUN_ID"
 
 
+class NoRunError(Exception):
+    """No Run is attached to this session. Ordinary for a hook, which is
+    installed independently of any Run; fatal for a command that needs one."""
+
+
 class RunResolver:
     def __init__(self, store: RunStore, environ: Mapping[str, str]) -> None:
         self._store = store
