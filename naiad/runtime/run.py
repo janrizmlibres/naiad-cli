@@ -12,25 +12,14 @@ can be committed into a pull request, and the record outlives the working copy
 from __future__ import annotations
 
 import json
-import os
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
 from naiad.runtime.atomic import write_atomically
+from naiad.runtime.home import StorageError, real_path, refuse_inside_repository
 
 METADATA_FILENAME = "run.json"
-
-
-class StorageError(Exception):
-    """A Run's directory cannot be created where it was asked for."""
-
-
-def default_runs_root() -> Path:
-    """Where Runs live unless the operator says otherwise."""
-    override = os.environ.get("NAIAD_HOME")
-    home = Path(override) if override else Path.home() / ".naiad"
-    return home / "runs"
 
 
 @dataclass
@@ -130,13 +119,8 @@ class RunStore:
         skip_gates: bool = False,
         start_state: str | None = None,
     ) -> Run:
-        target_repo = _real(target_repo)
-        root = _real(self.root)
-        if root == target_repo or target_repo in root.parents:
-            raise StorageError(
-                f"run directory {self.root} lies inside the target repository "
-                f"{target_repo}; naiad never writes into the target repository"
-            )
+        target_repo = real_path(target_repo)
+        refuse_inside_repository(self.root, target_repo, what="run directory")
 
         run_root = self.root / run_id
         if run_root.exists():
@@ -157,6 +141,15 @@ class RunStore:
         )
         run.save()
         return run
+
+    def root_for(self, run_id: str) -> Path:
+        """Where a Run's files are, whether or not it has any yet.
+
+        Asked for by name because several of a Run's records are read straight
+        off its directory — its log, its notices — and the layout is this
+        store's to know rather than each reader's to rebuild.
+        """
+        return self.root / run_id
 
     def load(self, run_id: str) -> Run | None:
         metadata = self.root / run_id / METADATA_FILENAME
@@ -194,10 +187,4 @@ class RunStore:
         )
 
 
-def _real(path: Path) -> Path:
-    """Absolute, symlinks resolved as far as they exist. The containment check
-    must compare real locations, and the run directory does not exist yet."""
-    return Path(os.path.realpath(path))
-
-
-__all__ = ["Run", "RunStore", "StorageError", "default_runs_root"]
+__all__ = ["Run", "RunStore"]

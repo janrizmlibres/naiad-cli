@@ -2,7 +2,8 @@ import json
 
 import pytest
 
-from naiad.runtime.run import RunStore, StorageError
+from naiad.runtime.home import StorageError
+from naiad.runtime.run import RunStore
 
 
 @pytest.fixture

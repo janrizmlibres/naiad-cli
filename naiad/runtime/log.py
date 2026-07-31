@@ -37,8 +37,12 @@ ANNOUNCEMENT_KINDS = ("announced", "asked")
 
 
 @dataclass(frozen=True)
-class Entry:
-    """One thing that happened.
+class LogLine:
+    """One thing that happened: one line of a Run's narrative.
+
+    Named for the line rather than for the entry it once was, because Entry is
+    the glossary's word for a Run that does not exist yet — a collision the
+    glossary is the place to prevent, as it does for Branch and Working branch.
 
     kind names it — 'announced' and 'asked' for what the agent said, and the
     Action's own past tense for what Naiad did about it.
@@ -77,7 +81,7 @@ class RunLog:
     def __init__(self, run_root: Path) -> None:
         self.path = Path(run_root) / LOG_FILENAME
 
-    def entries(self) -> list[Entry]:
+    def entries(self) -> list[LogLine]:
         try:
             document = json.loads(self.path.read_text())
         except FileNotFoundError:
@@ -85,7 +89,7 @@ class RunLog:
             # information but the information itself.
             return []
         return [
-            Entry(
+            LogLine(
                 kind=entry["kind"],
                 seq=entry.get("seq"),
                 state=entry.get("state"),
@@ -95,7 +99,7 @@ class RunLog:
             for entry in document
         ]
 
-    def deviations(self) -> list[Entry]:
+    def deviations(self) -> list[LogLine]:
         """Every Announcement that left the expected path. Read on its own
         because it is the question asked of a Run that went wrong, and reading
         it should not mean scanning the whole narrative for one field."""
@@ -151,7 +155,7 @@ class RunLog:
         none of them (naiad.domain.transitions.deviation), and empty when it was
         expected. It is recorded here rather than against the Action so that an
         Announcement Naiad delivers nothing for still shows the Run leaving its
-        path — joined into one string, for the reason Entry.expected gives.
+        path — joined into one string, for the reason LogLine.expected gives.
 
         A Subject is recorded for the same reason, and matters most in the same
         case: a Gate State has no Prompt to substitute it into, so the log is
@@ -162,7 +166,7 @@ class RunLog:
             return
         question = announcement.question
         self._append(
-            Entry(
+            LogLine(
                 kind="asked" if question is not None else "announced",
                 seq=announcement.seq,
                 # A Question carries the State the agent is standing in rather
@@ -186,7 +190,7 @@ class RunLog:
             entry.seq == seq and entry.kind in ANNOUNCEMENT_KINDS for entry in self.entries()
         )
 
-    def _append(self, entry: Entry) -> None:
+    def _append(self, entry: LogLine) -> None:
         entries = [*self.entries(), entry]
         write_atomically(
             self.path, json.dumps([_document(e) for e in entries], indent=2) + "\n"
@@ -205,30 +209,30 @@ def _detail(announcement: Announcement) -> str | None:
     return None
 
 
-def _entry_for(action: Action) -> Entry | None:
+def _entry_for(action: Action) -> LogLine | None:
     """One Action as one line of the narrative. Delivering a State's Prompt and
     sending an answer to a Question are separate kinds because they are what a
     reader must be able to tell apart: both type into the same session, and
     conflating them shows an answered Question as a phase begun twice."""
     if isinstance(action, Deliver):
-        # Joined for the same reason Entry.expected is: the log is prose for a
+        # Joined for the same reason LogLine.expected is: the log is prose for a
         # human, not a shape anything queries.
         successors = render_candidates(action.next_states)
-        return Entry(
+        return LogLine(
             kind="delivered",
             state=action.state,
             detail=f"next: {successors}" if successors else None,
         )
     if isinstance(action, Respond):
-        return Entry(kind="answered", detail=f"{_question(action.question)} -> {action.answer}")
+        return LogLine(kind="answered", detail=f"{_question(action.question)} -> {action.answer}")
     if isinstance(action, Consult):
-        return Entry(kind="consulted", detail=_question(action.question))
+        return LogLine(kind="consulted", detail=_question(action.question))
     if isinstance(action, Nudge):
-        return Entry(kind="nudged", detail=f"attempt {action.attempt}")
+        return LogLine(kind="nudged", detail=f"attempt {action.attempt}")
     if isinstance(action, Notify):
-        return Entry(kind="notified", detail=action.reason)
+        return LogLine(kind="notified", detail=action.reason)
     if isinstance(action, Finish):
-        return Entry(kind="finished", state=action.state)
+        return LogLine(kind="finished", state=action.state)
     return None
 
 
@@ -241,7 +245,7 @@ def _question(question: Question) -> str:
     return f"{question.text} ({', '.join(question.options)})"
 
 
-def _document(entry: Entry) -> dict[str, object]:
+def _document(entry: LogLine) -> dict[str, object]:
     return {
         "kind": entry.kind,
         "seq": entry.seq,
@@ -251,4 +255,4 @@ def _document(entry: Entry) -> dict[str, object]:
     }
 
 
-__all__ = ["ANNOUNCEMENT_KINDS", "LOG_FILENAME", "Entry", "RunLog"]
+__all__ = ["ANNOUNCEMENT_KINDS", "LOG_FILENAME", "LogLine", "RunLog"]

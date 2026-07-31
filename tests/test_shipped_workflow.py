@@ -12,7 +12,8 @@ from pathlib import Path
 
 import pytest
 
-from naiad.cli.kickoff import MissingSubject, start_run
+from naiad.cli.kickoff import start_run
+from naiad.cli.refusals import MissingSubject
 from naiad.domain.prompt import render_prompt
 from naiad.domain.transitions import deviation, next_states
 from naiad.domain.workflow import load_workflow

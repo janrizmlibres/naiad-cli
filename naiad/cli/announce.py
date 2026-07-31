@@ -11,6 +11,7 @@ stalling.
 from __future__ import annotations
 
 from naiad.domain.announcement import Announcement
+from naiad.domain.prompt import SUBJECT_PLACEHOLDER
 from naiad.domain.workflow import load_workflow
 from naiad.runtime.announcements import Announcements
 from naiad.runtime.run import Run
@@ -18,9 +19,6 @@ from naiad.runtime.run import Run
 
 class AnnounceError(Exception):
     """An Announcement the agent must see and correct."""
-
-
-SUBJECT_PLACEHOLDER = "{subject}"
 
 
 def announce_state(state: str, *, run: Run, subject: str | None = None) -> Announcement:

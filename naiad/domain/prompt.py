@@ -9,6 +9,12 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 
+# The one placeholder anything asks a Prompt about rather than merely
+# substituting: three guards refuse work whose Prompt names a Subject with none
+# given, and they must all be asking about the same string as the substitution
+# below (ADR 0009).
+SUBJECT_PLACEHOLDER = "{subject}"
+
 
 def render_candidates(candidates: Sequence[str]) -> str:
     """A State's candidate successors as the agent reads them.
@@ -83,10 +89,10 @@ def render_prompt(
     return (
         prompt.replace("{task}", task)
         .replace("{next_state}", render_candidates(next_states))
-        .replace("{subject}", subject or "")
+        .replace(SUBJECT_PLACEHOLDER, subject or "")
         .replace("{branch}", branch or "")
         .replace("{predecessor}", predecessor or "")
     )
 
 
-__all__ = ["render_candidates", "render_prompt"]
+__all__ = ["SUBJECT_PLACEHOLDER", "render_candidates", "render_prompt"]

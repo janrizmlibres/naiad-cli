@@ -23,16 +23,20 @@ from naiad.adapters.notify import DesktopNotifications
 from naiad.adapters.tmux import TmuxError, TmuxSessions
 from naiad.cli.announce import AnnounceError, announce_state
 from naiad.cli.ask import AskError, ask_question
-from naiad.cli.kickoff import MissingSubject, MissingWorkingBranch, start_run
+from naiad.cli.enqueue import BranchAlreadyClaimed, enqueue
+from naiad.cli.kickoff import start_run
 from naiad.cli.protocol import injection_for
+from naiad.cli.refusals import MissingSubject, MissingWorkingBranch
 from naiad.cli.watch import watch
 from naiad.domain.transitions import UnknownState
 from naiad.domain.workflow import WorkflowError, load_workflow
 from naiad.hooks.install import DEFAULT_SETTINGS_PATH, install_hooks
 from naiad.runtime.announcements import Announcements
+from naiad.runtime.home import StorageError, default_queue_root, default_runs_root
+from naiad.runtime.queue import Entry, Queue, status_of
 from naiad.runtime.records import Turns
 from naiad.runtime.resolve import NoRunError, RunResolver
-from naiad.runtime.run import Run, RunStore, StorageError, default_runs_root
+from naiad.runtime.run import Run, RunStore
 
 Handler = Callable[[argparse.Namespace], int]
 
@@ -41,6 +45,7 @@ Handler = Callable[[argparse.Namespace], int]
 FAILURES = (
     AnnounceError,
     AskError,
+    BranchAlreadyClaimed,
     MissingSubject,
     MissingWorkingBranch,
     NoRunError,
@@ -56,49 +61,28 @@ def main(argv: list[str] | None = None) -> int:
     subcommands = parser.add_subparsers(dest="command", required=True)
 
     run = subcommands.add_parser("run", help="start a Run of a Workflow against a task")
-    run.add_argument("workflow", type=Path, help="path to the Workflow file")
-    run.add_argument("task", help="what the Run is to do")
-    run.add_argument(
-        "--repo",
-        type=Path,
-        default=None,
-        help="the target repository (default: the working directory)",
-    )
-    # Required, but not by argparse: the refusal lives in start_run, so that
-    # every entrance to starting a Run is guarded by the same check and the
-    # message can say why Naiad invents no Working branch (ADR 0015).
-    #
-    # The flags read as an operator types them — `--branch`, `--base` — while
-    # what they set is named as the glossary names it. The translation happens
-    # here, at the boundary, and nowhere else.
-    run.add_argument(
-        "--branch",
-        default=None,
-        help="the working branch this Run's commits belong on (required)",
-    )
-    run.add_argument(
-        "--base",
-        dest="predecessor",
-        default=None,
-        help="the branch this Run's work stands on (default: nothing)",
-    )
-    run.add_argument(
-        "--at",
-        dest="start_state",
-        default=None,
-        help="start at this State rather than the first (default: the first)",
-    )
-    run.add_argument(
-        "--subject",
-        default=None,
-        help="what the starting State is to work on, when its Prompt names a subject",
-    )
-    run.add_argument(
-        "--skip-gates",
-        action="store_true",
-        help="resolve past Gate States, for an unattended run of a supervised Workflow",
-    )
+    _describe_the_work(run)
     run.set_defaults(handler=_start)
+
+    queue = subcommands.add_parser("queue", help="the backlog of Entries waiting to run")
+    queue_commands = queue.add_subparsers(dest="queue_command", required=True)
+
+    queue_add = queue_commands.add_parser(
+        "add", help="add one Entry to the Queue, supervising nothing"
+    )
+    _describe_the_work(queue_add)
+    queue_add.set_defaults(handler=_queue_add)
+
+    queue_list = queue_commands.add_parser(
+        "list", help="the Entries in order, each with what became of it"
+    )
+    queue_list.set_defaults(handler=_queue_list)
+
+    queue_rm = queue_commands.add_parser(
+        "rm", help="remove an Entry, leaving any Run it started alone"
+    )
+    queue_rm.add_argument("entry_id", help="which Entry, as `naiad queue list` names it")
+    queue_rm.set_defaults(handler=_queue_rm)
 
     state = subcommands.add_parser("state", help="announce the State you are in")
     state.add_argument("name", help="the State's name, as declared by the Workflow")
@@ -150,6 +134,60 @@ def main(argv: list[str] | None = None) -> int:
     arguments = parser.parse_args(argv)
     handler: Handler = arguments.handler
     return handler(arguments)
+
+
+def _describe_the_work(parser: argparse.ArgumentParser) -> None:
+    """The options that describe one piece of work, shared by every command
+    that creates one — because an Entry is a Run that does not exist yet, and
+    two lists that drifted apart would mean queueing could not say something
+    starting a Run could.
+
+    The flags read as an operator types them — `--branch`, `--base` — while
+    what they set is named as the glossary names it. The translation happens
+    here, at the boundary, and nowhere else.
+    """
+    parser.add_argument("workflow", type=Path, help="path to the Workflow file")
+    parser.add_argument("task", help="what the work is")
+    parser.add_argument(
+        "--repo",
+        type=Path,
+        default=None,
+        help="the target repository (default: the working directory)",
+    )
+    # Required, but not by argparse: the refusal lives with the other checks
+    # (naiad.cli.refusals), so that both entrances are guarded by the same one
+    # and the message can say why Naiad invents no Working branch (ADR 0015).
+    parser.add_argument(
+        "--branch",
+        default=None,
+        help="the working branch this work's commits belong on (required)",
+    )
+    # Left under the flag's own name rather than the glossary's, because the two
+    # commands make different things of it: a Run records it as its Predecessor,
+    # already resolved, while an Entry records it as the pinned base a
+    # Predecessor is later resolved *from*. Naming it for either here would put
+    # the wrong word in the other command's mouth.
+    parser.add_argument(
+        "--base",
+        default=None,
+        help="the branch this work stands on (default: nothing)",
+    )
+    parser.add_argument(
+        "--at",
+        dest="start_state",
+        default=None,
+        help="start at this State rather than the first (default: the first)",
+    )
+    parser.add_argument(
+        "--subject",
+        default=None,
+        help="what the starting State is to work on, when its Prompt names a subject",
+    )
+    parser.add_argument(
+        "--skip-gates",
+        action="store_true",
+        help="resolve past Gate States, for an unattended run of a supervised Workflow",
+    )
 
 
 def _announce(arguments: argparse.Namespace) -> int:
@@ -285,12 +323,12 @@ def _start(arguments: argparse.Namespace) -> int:
             task=arguments.task,
             target_repo=target_repo,
             working_branch=arguments.branch,
-            predecessor=arguments.predecessor,
+            predecessor=arguments.base,
             store=RunStore(default_runs_root()),
             sessions=TmuxSessions(),
             run_id=_run_id(started, workflow_path),
             claude_session_id=str(uuid.uuid4()),
-            created_at=started.isoformat().replace("+00:00", "Z"),
+            created_at=_timestamp(started),
             start_state=arguments.start_state,
             skip_gates=arguments.skip_gates,
             subject=arguments.subject,
@@ -305,9 +343,123 @@ def _start(arguments: argparse.Namespace) -> int:
     return 0
 
 
+def _queue_add(arguments: argparse.Namespace) -> int:
+    """Adds one Entry and returns. It supervises nothing — no lock, no session,
+    no watching — because this is the command an agent inside a session uses,
+    and a tool call that became a process blocking for hours is the failure the
+    Queue exists to avoid."""
+    workflow_path = arguments.workflow.expanduser().resolve()
+    target_repo = (arguments.repo or Path.cwd()).expanduser().resolve()
+    added = datetime.now(timezone.utc)
+
+    try:
+        entry = enqueue(
+            workflow_path=workflow_path,
+            task=arguments.task,
+            target_repo=target_repo,
+            working_branch=arguments.branch,
+            pinned_base=arguments.base,
+            queue=Queue(default_queue_root()),
+            entry_id=_entry_id(added, workflow_path),
+            created_at=_timestamp(added),
+            start_state=arguments.start_state,
+            skip_gates=arguments.skip_gates,
+            subject=arguments.subject,
+        )
+    except FAILURES as error:
+        print(f"naiad: {error}", file=sys.stderr)
+        return 2
+
+    print(f"queued {entry.id}")
+    print(f"  branch {entry.working_branch}   in {entry.target_repo}")
+    return 0
+
+
+def _queue_list(arguments: argparse.Namespace) -> int:
+    """The Entries in id order, which is Queue order, each with what became of
+    it — asked of its Run rather than read from a status the Queue keeps
+    (ADR 0013)."""
+    try:
+        entries = Queue(default_queue_root()).all()
+    except FAILURES as error:
+        # An Entry file the operator has damaged. They can see these files, so
+        # they can break one, and a traceback is not something they can act on.
+        print(f"naiad: {error}", file=sys.stderr)
+        return 2
+
+    if not entries:
+        print(f"the queue is empty ({default_queue_root()})")
+        return 0
+
+    runs = RunStore(default_runs_root())
+    for entry in entries:
+        print(_queue_line(entry, runs))
+    return 0
+
+
+def _queue_line(entry: Entry, runs: RunStore) -> str:
+    """One Entry as one line: which, what became of it, where, on what branch,
+    and what the work is.
+
+    The repository in full rather than by its directory's name, because one
+    Queue spans every repository and two checkouts of the same project — a
+    worktree, a second clone — share that name and would otherwise read as one.
+    """
+    became = status_of(entry, runs)
+    line = (
+        f"{entry.id}  {became:<7}  {_shortened(entry.target_repo)}  "
+        f"{entry.working_branch}  {entry.task}"
+    )
+    return line if entry.run_id is None else f"{line}  ({entry.run_id})"
+
+
+def _shortened(path: Path) -> str:
+    """A path with the operator's home written the way they would write it, so
+    that a line naming the repository in full still fits on one."""
+    try:
+        return f"~/{path.relative_to(Path.home())}"
+    except ValueError:
+        return str(path)
+
+
+def _queue_rm(arguments: argparse.Namespace) -> int:
+    """Removes an Entry and nothing else. Any Run it produced, and the session
+    that Run is in, are left exactly as they were: removal is a Queue operation
+    rather than a destructive one."""
+    if not Queue(default_queue_root()).remove(arguments.entry_id):
+        print(
+            f"naiad: no entry '{arguments.entry_id}' in the queue at {default_queue_root()}",
+            file=sys.stderr,
+        )
+        return 2
+
+    print(f"removed {arguments.entry_id}")
+    return 0
+
+
 def _run_id(started: datetime, workflow_path: Path) -> str:
-    slug = re.sub(r"[^a-z0-9]+", "-", workflow_path.stem.lower()).strip("-") or "run"
-    return f"{started.strftime('%Y%m%d-%H%M%S')}-{slug}-{os.getpid()}"
+    return f"{started.strftime('%Y%m%d-%H%M%S')}-{_slug(workflow_path)}-{os.getpid()}"
+
+
+def _entry_id(added: datetime, workflow_path: Path) -> str:
+    """Sortable, so that sorting by id *is* Queue order and no Entry holds a
+    position of its own.
+
+    Told apart by the microsecond as well as by the process id a Run's id
+    carries, because two collisions are possible rather than one: two Entries
+    in the same second are routinely one process — an agent queueing a night's
+    work in a single turn — and two `naiad queue add` calls are two.
+    """
+    return f"{added.strftime('%Y%m%d-%H%M%S-%f')}-{_slug(workflow_path)}-{os.getpid()}"
+
+
+def _slug(workflow_path: Path) -> str:
+    return re.sub(r"[^a-z0-9]+", "-", workflow_path.stem.lower()).strip("-") or "run"
+
+
+def _timestamp(when: datetime) -> str:
+    """The moment a Run or an Entry was made, as its record spells it."""
+    return when.isoformat().replace("+00:00", "Z")
 
 
 if __name__ == "__main__":

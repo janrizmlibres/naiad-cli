@@ -1,6 +1,7 @@
 import pytest
 
-from naiad.cli.kickoff import MissingSubject, MissingWorkingBranch, start_run
+from naiad.cli.kickoff import start_run
+from naiad.cli.refusals import MissingSubject, MissingWorkingBranch
 from naiad.domain.transitions import UnknownState
 from naiad.domain.workflow import WorkflowError
 from naiad.runtime.resolve import RUN_ID_VARIABLE, RunResolver
