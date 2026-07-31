@@ -97,7 +97,11 @@ def keystrokes_for(pane: str, text: str) -> list[list[str]]:
         if position:
             keys.append([TMUX, "send-keys", "-t", pane, NEWLINE])
         if line:
-            keys.append([TMUX, "send-keys", "-t", pane, "-l", line])
+            # `--` unconditionally, not only for lines that open with a dash:
+            # it ends tmux's option parsing, and a line is never anything but
+            # text. Without it a bulleted Answer types `-l - step` and tmux
+            # rejects the bullet as a flag.
+            keys.append([TMUX, "send-keys", "-t", pane, "-l", "--", line])
     return keys + [[TMUX, "send-keys", "-t", pane, "Enter"]]
 
 

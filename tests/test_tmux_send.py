@@ -11,26 +11,26 @@ from naiad.adapters.tmux import keystrokes_for
 
 def test_a_single_line_is_typed_literally():
     assert keystrokes_for("%1", "/clear") == [
-        ["tmux", "send-keys", "-t", "%1", "-l", "/clear"],
+        ["tmux", "send-keys", "-t", "%1", "-l", "--", "/clear"],
         ["tmux", "send-keys", "-t", "%1", "Enter"],
     ]
 
 
 def test_a_newline_is_typed_as_alt_enter_so_the_prompt_is_not_submitted_early():
     assert keystrokes_for("%1", "first\nsecond") == [
-        ["tmux", "send-keys", "-t", "%1", "-l", "first"],
+        ["tmux", "send-keys", "-t", "%1", "-l", "--", "first"],
         ["tmux", "send-keys", "-t", "%1", "M-Enter"],
-        ["tmux", "send-keys", "-t", "%1", "-l", "second"],
+        ["tmux", "send-keys", "-t", "%1", "-l", "--", "second"],
         ["tmux", "send-keys", "-t", "%1", "Enter"],
     ]
 
 
 def test_a_blank_line_between_paragraphs_is_two_newlines_and_nothing_typed_between():
     assert keystrokes_for("%1", "one\n\ntwo") == [
-        ["tmux", "send-keys", "-t", "%1", "-l", "one"],
+        ["tmux", "send-keys", "-t", "%1", "-l", "--", "one"],
         ["tmux", "send-keys", "-t", "%1", "M-Enter"],
         ["tmux", "send-keys", "-t", "%1", "M-Enter"],
-        ["tmux", "send-keys", "-t", "%1", "-l", "two"],
+        ["tmux", "send-keys", "-t", "%1", "-l", "--", "two"],
         ["tmux", "send-keys", "-t", "%1", "Enter"],
     ]
 
@@ -42,7 +42,7 @@ def test_a_long_prompt_is_still_typed_rather_than_pasted():
 
     typed = [argv for argv in keystrokes_for("%1", prompt) if "-l" in argv]
 
-    assert typed == [["tmux", "send-keys", "-t", "%1", "-l", prompt]]
+    assert typed == [["tmux", "send-keys", "-t", "%1", "-l", "--", prompt]]
     assert not any("paste-buffer" in argv for argv in keystrokes_for("%1", prompt))
 
 
@@ -51,14 +51,24 @@ def test_a_prompt_opening_with_a_newline_still_types_it():
     what has been typed so far rather than the position would swallow it."""
     assert keystrokes_for("%1", "\n/implement") == [
         ["tmux", "send-keys", "-t", "%1", "M-Enter"],
-        ["tmux", "send-keys", "-t", "%1", "-l", "/implement"],
+        ["tmux", "send-keys", "-t", "%1", "-l", "--", "/implement"],
+        ["tmux", "send-keys", "-t", "%1", "Enter"],
+    ]
+
+
+def test_a_line_opening_with_a_dash_is_typed_rather_than_read_as_a_flag():
+    """An Answer that lists its steps as bullets reaches tmux as `-l - step`,
+    and tmux reads the bullet as a flag: `invalid flag -`. The `--` is what
+    ends tmux's own option parsing, so the line is only ever text."""
+    assert keystrokes_for("%1", "- ready-for-agent") == [
+        ["tmux", "send-keys", "-t", "%1", "-l", "--", "- ready-for-agent"],
         ["tmux", "send-keys", "-t", "%1", "Enter"],
     ]
 
 
 def test_a_prompt_ending_in_a_newline_does_not_type_a_trailing_empty_segment():
     assert keystrokes_for("%1", "done\n") == [
-        ["tmux", "send-keys", "-t", "%1", "-l", "done"],
+        ["tmux", "send-keys", "-t", "%1", "-l", "--", "done"],
         ["tmux", "send-keys", "-t", "%1", "M-Enter"],
         ["tmux", "send-keys", "-t", "%1", "Enter"],
     ]
