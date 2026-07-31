@@ -12,7 +12,7 @@ from pathlib import Path
 
 import pytest
 
-from naiad.cli.kickoff import start_run
+from naiad.cli.kickoff import MissingSubject, start_run
 from naiad.domain.prompt import render_prompt
 from naiad.domain.transitions import deviation, next_states
 from naiad.domain.workflow import load_workflow
@@ -32,6 +32,7 @@ STATES = [
     "spec",
     "tickets",
     "implement",
+    "handover",
     "pull-request",
     "review-fix",
     "done",
@@ -57,21 +58,39 @@ CANDIDATES = {
     "classify": ("grill", "diagnose"),
     "diagnose": ("no-repro", "pull-request"),
     "no-repro": ("pull-request",),
+    "tickets": ("implement", "handover"),
+    "implement": ("implement", "handover", "pull-request"),
+    "handover": ("implement", "pull-request"),
 }
 
 # The feature chain as it stands today, asserted rather than assumed: adding a
 # branch must not move a single one of these edges. `done` ends the Run and so
 # has nothing after it.
+#
+# `implement` is the one edge that has moved since, and deliberately: the loop
+# gained a third exit for a ticket it must decline (ADR 0010). Everything on
+# either side of it is untouched, which is what this table is for.
 FEATURE_CHAIN = {
     "grill": ("review",),
     "review": ("spec",),
     "spec": ("tickets",),
-    "tickets": ("implement",),
-    "implement": ("pull-request",),
+    "tickets": ("implement", "handover"),
+    "implement": ("implement", "handover", "pull-request"),
+    "handover": ("implement", "pull-request"),
     "pull-request": ("review-fix",),
     "review-fix": ("done",),
     "done": (),
 }
+
+# The triage label a ticket must carry for the loop to implement it unattended,
+# and the one meaning a person must. Named from docs/agents/triage-labels.md,
+# which is where this repository maps the canonical roles to its own strings.
+IMPLEMENTABLE = "ready-for-agent"
+NEEDS_A_HUMAN = "ready-for-human"
+
+# A Subject as the implement loop's Prompt actually receives one: a path to a
+# ticket file under the local markdown tracker (docs/agents/issue-tracker.md).
+SUBJECT = ".scratch/dark-mode/issues/04-toggle.md"
 
 # The two States a Run may be started at directly, each the head of a branch —
 # the escape hatch for an operator who already knows which kind of work they
@@ -95,13 +114,18 @@ def workflow():
     return load_workflow(WORKFLOW_PATH)
 
 
-def delivered(workflow, state_name):
+def delivered(workflow, state_name, subject=SUBJECT):
     """A State's Prompt as the agent actually reads it, with the successor the
-    Workflow resolves interpolated — which is what Naiad sends (naiad.runtime.loop)."""
+    Workflow resolves interpolated — which is what Naiad sends (naiad.runtime.loop).
+
+    A Subject is supplied to every State, not only the one that names it: a
+    Prompt with no slot for one is unaffected, and passing it everywhere means
+    no assertion here silently depends on which States use it."""
     return render_prompt(
         workflow.state(state_name).prompt,
         task=TASK,
         next_states=next_states(workflow, state_name),
+        subject=subject,
     )
 
 
@@ -109,15 +133,20 @@ def test_declares_every_state_in_order(workflow):
     assert [state.name for state in workflow.states] == STATES
 
 
-def test_the_workflow_has_exactly_two_gate_states(workflow):
-    """One per branch, and they are different kinds of stop: `review` is a
-    routine checkpoint in the declared order, `no-repro` is a destination the
-    agent chose. Which is which is asserted below, under gate-skipping."""
+def test_the_workflow_has_exactly_three_gate_states(workflow):
+    """Two kinds of stop, not three: `review` is a routine checkpoint in the
+    declared order, while `no-repro` and `handover` are destinations the agent
+    chose — work it has correctly declined. Which is which is asserted below,
+    under gate-skipping.
+
+    `handover` is the second of the chosen kind (ADR 0010), which is why the
+    rule ADR 0007 wrote for the first one now carries a case it did not
+    anticipate rather than an exception."""
     gate_states = [
         state.name for state in workflow.states if state.is_gate_state and not state.terminal
     ]
 
-    assert gate_states == ["no-repro", "review"]
+    assert gate_states == ["no-repro", "review", "handover"]
 
 
 def test_the_no_reproduction_state_delivers_nothing(workflow):
@@ -317,6 +346,122 @@ def test_the_implement_loop_tells_the_agent_to_re_announce_itself(workflow):
     assert "announce implement" in delivered(workflow, "implement")
 
 
+def test_the_implement_loop_declares_itself_among_its_candidates(workflow):
+    """It does not have to — re-announcing the State the agent is standing in
+    is exempt from Deviation, and that exemption is what makes the loop a loop.
+    It is declared so the Protocol injected into every Cleared context renders
+    it: a Protocol naming only the two exits omits the announcement this State
+    makes more often than both of them together (ADR 0010)."""
+    assert "implement" in workflow.state("implement").next_candidates
+
+
+def test_the_implement_loop_is_given_its_ticket_rather_than_finding_one(workflow):
+    """The Clear discards the context that chose the ticket, so the Prompt
+    names it. Choosing happens in the context that has just seen the whole
+    tracker rather than in the wiped one that has seen none of it (ADR 0009)."""
+    prompt = delivered(workflow, "implement")
+
+    assert SUBJECT in prompt
+    assert "{subject}" not in prompt
+
+
+def test_the_implement_loop_implements_only_agent_ready_tickets(workflow):
+    """The failure this loop was rebuilt for: 'ready to start' was defined
+    nowhere, so eight tickets marked for a human were met with no rule and the
+    agent asked one directly, which the Protocol forbids (ADR 0010)."""
+    assert IMPLEMENTABLE in delivered(workflow, "implement")
+
+
+def test_the_implement_loop_sends_every_other_status_to_the_gate(workflow):
+    """Not only `ready-for-human`. An unrecognised or missing status is routed
+    the same way, because an unnecessary pause costs one operator interaction
+    while implementing a `needs-info` ticket — one whose specification is known
+    to be incomplete — costs a review cycle and a revert."""
+    prompt = delivered(workflow, "implement")
+
+    for status in (NEEDS_A_HUMAN, "needs-info", "needs-triage", "wontfix"):
+        assert status in prompt
+    assert "announce handover" in prompt
+
+
+def test_the_implement_loop_reports_which_status_stopped_it(workflow):
+    """Routing an unknown label and routing `ready-for-human` are the same
+    action needing opposite responses — fix the label, or do the work. A gate
+    that cannot tell the operator which it hit wastes their time every time."""
+    prompt = delivered(workflow, "implement")
+
+    sentences = [line for line in prompt.split("\n") if "handover" in line]
+
+    assert any("status" in line for line in sentences)
+
+
+def test_the_implement_loop_names_the_pull_request_rather_than_interpolating_it(workflow):
+    """`{next_state}` renders every candidate as one joined phrase, which is
+    wrong here twice over: the exhaustion line must name the pull request
+    alone, and each exit carries a different condition. `diagnose` writes its
+    successors out for the same reason."""
+    prompt = delivered(workflow, "implement")
+
+    exhausted = [line for line in prompt.split("\n") if "remain" in line or "no tickets" in line]
+
+    assert any("pull-request" in line and "handover" not in line for line in exhausted)
+
+
+def test_the_handover_gate_delivers_nothing(workflow):
+    """No Prompt, so Naiad sends nothing and the operator types into the
+    still-live session, exactly as at `no-repro` (ADR 0008, ADR 0010)."""
+    assert workflow.state("handover").prompt is None
+
+
+def test_the_handover_gate_returns_to_the_loop_or_ends_it(workflow):
+    """After the human does the ticket, either tickets remain or they do not.
+    Both are declared, because the implicit successor would be the pull request
+    alone and a Run handing over its first ticket would never implement any."""
+    assert workflow.state("handover").next_candidates == ("implement", "pull-request")
+
+
+def test_an_unattended_run_still_parks_at_the_handover_gate(workflow):
+    """A Gate State named as a branch candidate is never skipped: it is a
+    destination the agent chose rather than a routine checkpoint on the path
+    (ADR 0007). `ready-for-human` means the agent cannot proceed, not that a
+    review is optional — so `--skip-gates` must not delete this exit."""
+    assert "handover" in next_states(workflow, "implement", skip_gates=True)
+
+
+def test_the_tickets_state_pins_the_triage_label_it_publishes(workflow):
+    """/to-tickets applies `ready-for-agent` only on its real-issue-tracker
+    branch; for local markdown it says nothing, so the label was improvised —
+    three runs produced three vocabularies. The skill is external and not ours
+    to edit, and it leaves the hook open itself: 'unless instructed otherwise'
+    (ADR 0010). The loop's rules are worth nothing if the labels are noise."""
+    prompt = delivered(workflow, "tickets")
+
+    assert IMPLEMENTABLE in prompt
+    assert NEEDS_A_HUMAN in prompt
+
+
+def test_the_tickets_state_may_hand_over_without_the_loop_running_at_all(workflow):
+    """A feature whose every ticket is genuinely a person's to implement is a
+    real outcome, not a malformed one. Declared rather than left to Deviation,
+    which is recorded as a symptom of a confused agent and would be logged as
+    one on every legitimate use."""
+    assert workflow.state("tickets").next_candidates == ("implement", "handover")
+
+
+def test_the_tickets_state_names_the_first_ticket_when_it_starts_the_loop(workflow):
+    """The loop's first iteration has no previous one to choose its ticket, so
+    this State does — it has just published them all and is the only context
+    that knows. Announcing `implement` bare is rejected (ADR 0009), and while
+    the agent can recover from that, being told here costs nothing and a
+    rejection mid-Run costs a turn."""
+    prompt = delivered(workflow, "tickets")
+
+    announcing = [line for line in prompt.split("\n") if "announce implement" in line]
+
+    assert announcing
+    assert all("subject" in line for line in announcing)
+
+
 def test_the_pull_request_state_waits_for_the_review_before_announcing(workflow):
     """The review-fix State has nothing to work from until Claude Code Review
     has posted its findings, so the wait belongs before the Announcement rather
@@ -404,6 +549,25 @@ def test_a_run_can_be_started_at_either_branch_head(workflow, tmp_path, sessions
     assert prompt.startswith(f"{SKILLS[head]} {TASK}")
     for successor in next_states(workflow, head):
         assert f"announce {successor}" in prompt
+
+
+def test_a_run_cannot_be_started_at_the_loop_without_naming_a_ticket(tmp_path, sessions):
+    """ADR 0010 describes starting here against a hand-written tracker, so this
+    is a path an operator will take. Refused rather than rendered empty: the
+    Prompt goes on to say the ticket has been triaged as ready, so a blank one
+    tells the agent to trust a decision about a ticket that was never named."""
+    with pytest.raises(MissingSubject):
+        kickoff(tmp_path, sessions, start_state="implement")
+
+    assert sessions.spawned == []
+
+
+def test_a_run_started_at_the_loop_with_a_ticket_is_delivered_that_ticket(tmp_path, sessions):
+    """The escape hatch works once the ticket is named — which is what makes
+    refusing the bare form a correction rather than a removal."""
+    prompt = kickoff(tmp_path, sessions, start_state="implement", subject=SUBJECT)
+
+    assert prompt.startswith(f"/implement the ticket at {SUBJECT}")
 
 
 def test_a_run_started_with_no_state_named_begins_by_classifying_the_task(

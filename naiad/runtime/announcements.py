@@ -50,16 +50,21 @@ class Announcements:
                 if question
                 else None
             ),
+            subject=document.get("subject"),
         )
 
-    def announce(self, state: str) -> Announcement:
+    def announce(self, state: str, *, subject: str | None = None) -> Announcement:
         """A State, carrying no Question.
 
         Announcing a State is also how a Question stops being current: the
         agent has been answered and moved on, and a Question left clinging to
         the next Announcement would be consulted again after the fact.
+
+        A Subject is scoped to its own Announcement for the same reason, and
+        gets it for free: only the latest Announcement is kept, so the next one
+        replaces the document rather than amending it.
         """
-        return self._write(state=state, question=None)
+        return self._write(state=state, question=None, subject=subject)
 
     def ask(self, question: Question, *, state: str) -> Announcement:
         """A Question, taking its number from the same sequence as States so
@@ -70,16 +75,21 @@ class Announcements:
         """
         return self._write(state=state, question=question)
 
-    def _write(self, *, state: str, question: Question | None) -> Announcement:
+    def _write(
+        self, *, state: str, question: Question | None, subject: str | None = None
+    ) -> Announcement:
         previous = self.latest()
         announcement = Announcement(
             seq=(previous.seq + 1) if previous else 1,
             state=state,
             question=question,
+            subject=subject,
         )
         document: dict[str, object] = {"seq": announcement.seq, "state": announcement.state}
         if question is not None:
             document["question"] = {"text": question.text, "options": list(question.options)}
+        if subject is not None:
+            document["subject"] = subject
         write_atomically(self.path, json.dumps(document, indent=2) + "\n")
         return announcement
 

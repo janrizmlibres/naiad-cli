@@ -17,6 +17,19 @@ def test_names_the_command_that_asks_a_question():
     assert "naiad ask" in render_protocol(next_states=("spec",))
 
 
+def test_names_the_subject_flag_and_says_when_it_is_needed():
+    """A Cleared context has only the Protocol to go on, so a flag it is never
+    told about is one it will be rejected for omitting (ADR 0009).
+
+    Described by what it is for rather than by the placeholder that requires
+    it: the agent never reads the Workflow file, so naming `{subject}` would
+    point it at something it cannot inspect."""
+    protocol = render_protocol(next_states=("spec",))
+
+    assert "--subject" in protocol
+    assert "series" in protocol
+
+
 def test_instructs_the_agent_never_to_ask_a_human_directly():
     protocol = render_protocol(next_states=("spec",)).lower()
 

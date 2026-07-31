@@ -18,6 +18,23 @@ from naiad.runtime.resolve import RUN_ID_VARIABLE
 from naiad.runtime.run import Run, RunStore
 
 
+SUBJECT_PLACEHOLDER = "{subject}"
+
+
+class MissingSubject(Exception):
+    """A Run started at a State whose Prompt names a Subject, with none given.
+
+    Kickoff is the second entrance to delivery and the announce command's guard
+    does not reach it, because nothing is announced here. Without this the Run's
+    first Prompt arrives with the placeholder rendered empty, into a session
+    with no memory of what it was meant to say (ADR 0009).
+
+    Refused before the Run directory or the session exists, as a malformed
+    Workflow and an unknown start State already are: the operator is standing
+    right there and pays the error message only.
+    """
+
+
 class Sessions(Protocol):
     def spawn(self, spec: SessionSpec) -> str: ...
 
@@ -34,12 +51,19 @@ def start_run(
     created_at: str,
     start_state: str | None = None,
     skip_gates: bool = False,
+    subject: str | None = None,
 ) -> Run:
     # Both the Workflow and the State to begin at are resolved before anything
     # exists, so a bad file or a mistyped State costs the operator nothing but
-    # the error message.
+    # the error message. The Subject is checked in the same breath and for the
+    # same reason.
     workflow = load_workflow(workflow_path)
     first = resolve_start_state(workflow, start_state)
+    if not subject and first.prompt and SUBJECT_PLACEHOLDER in first.prompt:
+        raise MissingSubject(
+            f"state '{first.name}' needs a subject saying what the Run is to start on; "
+            f"start it as: naiad run <workflow> <task> --at {first.name} --subject <value>"
+        )
     successors = next_states(workflow, first.name, skip_gates=skip_gates)
 
     run = store.create(
@@ -64,6 +88,7 @@ def start_run(
             first.prompt or "",
             task=task,
             next_states=successors,
+            subject=subject,
         )
     )
 

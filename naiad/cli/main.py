@@ -23,7 +23,7 @@ from naiad.adapters.notify import DesktopNotifications
 from naiad.adapters.tmux import TmuxError, TmuxSessions
 from naiad.cli.announce import AnnounceError, announce_state
 from naiad.cli.ask import AskError, ask_question
-from naiad.cli.kickoff import start_run
+from naiad.cli.kickoff import MissingSubject, start_run
 from naiad.cli.protocol import injection_for
 from naiad.cli.watch import watch
 from naiad.domain.transitions import UnknownState
@@ -41,6 +41,7 @@ Handler = Callable[[argparse.Namespace], int]
 FAILURES = (
     AnnounceError,
     AskError,
+    MissingSubject,
     NoRunError,
     StorageError,
     TmuxError,
@@ -69,6 +70,11 @@ def main(argv: list[str] | None = None) -> int:
         help="start at this State rather than the first (default: the first)",
     )
     run.add_argument(
+        "--subject",
+        default=None,
+        help="what the starting State is to work on, when its Prompt names a subject",
+    )
+    run.add_argument(
         "--skip-gates",
         action="store_true",
         help="resolve past Gate States, for an unattended run of a supervised Workflow",
@@ -77,6 +83,11 @@ def main(argv: list[str] | None = None) -> int:
 
     state = subcommands.add_parser("state", help="announce the State you are in")
     state.add_argument("name", help="the State's name, as declared by the Workflow")
+    state.add_argument(
+        "--subject",
+        default=None,
+        help="what this announcement is about, for a State whose Prompt names one",
+    )
     state.set_defaults(handler=_announce)
 
     ask = subcommands.add_parser("ask", help="ask a Question you cannot decide alone")
@@ -125,7 +136,7 @@ def main(argv: list[str] | None = None) -> int:
 def _announce(arguments: argparse.Namespace) -> int:
     try:
         run = _current_run()
-        announcement = announce_state(arguments.name, run=run)
+        announcement = announce_state(arguments.name, run=run, subject=arguments.subject)
     except FAILURES as error:
         print(f"naiad: {error}", file=sys.stderr)
         return 2
@@ -261,6 +272,7 @@ def _start(arguments: argparse.Namespace) -> int:
             created_at=started.isoformat().replace("+00:00", "Z"),
             start_state=arguments.start_state,
             skip_gates=arguments.skip_gates,
+            subject=arguments.subject,
         )
     except FAILURES as error:
         print(f"naiad: {error}", file=sys.stderr)

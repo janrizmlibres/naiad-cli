@@ -39,7 +39,7 @@ name = "review"
 
 [[states]]
 name = "implement"
-prompt = "/implement the next ticket"
+prompt = "/implement the ticket at {subject}"
 clear = true
 
 [[states]]
@@ -106,8 +106,8 @@ def drive(run, workflow, session, *, notifier=None, answerer=None, now=None):
     )
 
 
-def announce(run, state, *, then_stop=True):
-    announcement = Announcements(run.root).announce(state)
+def announce(run, state, *, then_stop=True, subject=None):
+    announcement = Announcements(run.root).announce(state, subject=subject)
     if then_stop:
         Turns(run.root).record_end(latest_seq=announcement.seq)
     return announcement
@@ -124,6 +124,29 @@ def test_an_announcement_with_a_turn_ended_delivers_the_prompt_into_the_pane(
     assert session.sent == [
         ("send", "%42", "/grill-with-docs add dark mode, then announce review")
     ]
+
+
+def test_the_subject_reaches_the_pane_in_the_delivered_prompt(run, workflow, session):
+    """The wiring hop the Subject exists for: the Clear discards the context
+    that chose the ticket, and the Prompt arriving after it names the ticket
+    anyway (ADR 0009)."""
+    announce(run, "implement", subject=".scratch/f/issues/04-x.md")
+
+    drive(run, workflow, session)
+
+    assert ("send", "%42", "/implement the ticket at .scratch/f/issues/04-x.md") in session.sent
+
+
+def test_successive_iterations_are_delivered_their_own_subjects(run, workflow, session):
+    """One State announced once per item, each delivery naming its own. This is
+    what the Subject buys over re-deriving the choice in a Cleared context."""
+    announce(run, "implement", subject="01-a.md")
+    drive(run, workflow, session)
+    announce(run, "implement", subject="02-b.md")
+    drive(run, workflow, session)
+
+    delivered = [message for kind, _, message in session.sent if kind == "send"]
+    assert delivered == ["/implement the ticket at 01-a.md", "/implement the ticket at 02-b.md"]
 
 
 def test_an_announcement_with_no_turn_ended_leaves_the_session_alone(run, workflow, session):
@@ -144,22 +167,22 @@ def test_an_announcement_is_delivered_once_however_often_the_loop_ticks(run, wor
 
 
 def test_the_same_state_announced_again_is_delivered_again(run, workflow, session):
-    announce(run, "implement")
+    announce(run, "implement", subject="04-x.md")
     drive(run, workflow, session)
-    announce(run, "implement")
+    announce(run, "implement", subject="04-x.md")
     drive(run, workflow, session)
 
     assert [entry[0] for entry in session.sent] == ["clear", "send", "clear", "send"]
 
 
 def test_a_state_declaring_clear_is_cleared_before_its_prompt_arrives(run, workflow, session):
-    announce(run, "implement")
+    announce(run, "implement", subject="04-x.md")
 
     drive(run, workflow, session)
 
     assert session.sent == [
         ("clear", "%42", None),
-        ("send", "%42", "/implement the next ticket"),
+        ("send", "%42", "/implement the ticket at 04-x.md"),
     ]
 
 
@@ -170,7 +193,7 @@ def test_a_run_with_no_pane_recorded_is_refused_rather_than_sent_anywhere(
     coercing a missing pane would deliver a Prompt — and a destructive Clear —
     into whatever session happens to be attached."""
     run.tmux_pane = None
-    announce(run, "implement")
+    announce(run, "implement", subject="04-x.md")
 
     with pytest.raises(UndrivableRun):
         drive(run, workflow, session)
@@ -258,18 +281,18 @@ def test_the_loop_keeps_running_after_a_notification_and_delivers_the_next_annou
     announce(run, "review")
     drive(run, workflow, session, notifier=notifier)
 
-    announce(run, "implement")
+    announce(run, "implement", subject="04-x.md")
     action = drive(run, workflow, session, notifier=notifier)
 
     assert isinstance(action, Deliver)
-    assert ("send", "%42", "/implement the next ticket") in session.sent
+    assert ("send", "%42", "/implement the ticket at 04-x.md") in session.sent
 
 
 def test_a_later_gate_notifies_again(run, workflow, session):
     notifier = RecordingNotifier()
     announce(run, "review")
     drive(run, workflow, session, notifier=notifier)
-    announce(run, "implement")
+    announce(run, "implement", subject="04-x.md")
     drive(run, workflow, session, notifier=notifier)
     announce(run, "review")
 
@@ -581,7 +604,7 @@ def test_an_announcement_is_logged_once_however_many_ticks_read_it(run, workflow
 def test_an_announcement_off_the_expected_path_is_logged_as_a_deviation(run, workflow, session):
     """The Run began at 'grill', so 'review' was owed and 'implement' is a
     departure — permitted, delivered, and written down."""
-    announce(run, "implement")
+    announce(run, "implement", subject="04-x.md")
 
     drive(run, workflow, session)
 
@@ -598,7 +621,7 @@ def test_an_announcement_on_the_expected_path_is_not_logged_as_a_deviation(
     announce(run, "review")
     drive(run, workflow, session)
 
-    announce(run, "implement")
+    announce(run, "implement", subject="04-x.md")
     drive(run, workflow, session)
 
     assert RunLog(run.root).deviations() == []
@@ -668,7 +691,7 @@ def test_a_finished_run_is_not_driven_by_anything_the_agent_says_afterwards(
     announce(run, "done")
     drive(run, workflow, session)
 
-    announce(run, "implement")
+    announce(run, "implement", subject="04-x.md")
 
     assert drive(run, workflow, session) is NOTHING
     assert session.sent == []

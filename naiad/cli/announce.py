@@ -20,12 +20,37 @@ class AnnounceError(Exception):
     """An Announcement the agent must see and correct."""
 
 
-def announce_state(state: str, *, run: Run) -> Announcement:
+SUBJECT_PLACEHOLDER = "{subject}"
+
+
+def announce_state(state: str, *, run: Run, subject: str | None = None) -> Announcement:
+    """Rejects an Announcement the Prompt cannot be rendered from, for the same
+    reason it rejects an undeclared State: both are clerical slips the agent can
+    correct inside its own turn, and both would otherwise be silently inert.
+
+    Which States require a Subject is not Naiad's to know — the Workflow says so
+    by using the placeholder, which keeps the requirement in the file where the
+    rest of that Workflow's meaning lives (ADR 0009).
+
+    The reverse is deliberately not an error. A Subject a Prompt has no slot for
+    is still part of what the agent said, and the Run log reads it: a Gate
+    State's Subject is substituted nowhere and is what tells the human which
+    item they have been handed.
+    """
     workflow = load_workflow(run.workflow_path)
-    if workflow.state(state) is None:
+    declared = workflow.state(state)
+    if declared is None:
         valid = ", ".join(known.name for known in workflow.states)
         raise AnnounceError(f"unknown state '{state}'; this workflow declares: {valid}")
-    return Announcements(run.root).announce(state)
+    # Falsy rather than None: a blank Subject renders exactly as an absent one
+    # and reaches the session just as unrecoverably, so the guard is on what the
+    # Prompt would say rather than on whether the flag was typed.
+    if not subject and declared.prompt and SUBJECT_PLACEHOLDER in declared.prompt:
+        raise AnnounceError(
+            f"state '{state}' needs a subject saying what this announcement is about; "
+            f"announce it as: naiad state {state} --subject <value>"
+        )
+    return Announcements(run.root).announce(state, subject=subject)
 
 
 __all__ = ["AnnounceError", "announce_state"]

@@ -39,6 +39,37 @@ def test_the_same_state_announced_twice_is_two_distinct_announcements(announceme
     assert announcements.latest() == Announcement(seq=second.seq, state="implement")
 
 
+def test_announcing_records_the_subject(announcements):
+    """What the Announcement is about, so the Prompt delivered after the Clear
+    can name it (ADR 0009)."""
+    announcements.announce("implement", subject=".scratch/f/issues/04-x.md")
+
+    assert announcements.latest().subject == ".scratch/f/issues/04-x.md"
+
+
+def test_a_state_announced_without_a_subject_has_none(announcements):
+    """Most States carry no Subject, and the field is optional throughout so
+    that every existing Workflow is unaffected."""
+    announcements.announce("grill")
+
+    assert announcements.latest().subject is None
+
+
+def test_a_subject_does_not_outlive_the_announcement_that_carried_it(announcements):
+    """The same reason a Question does not: the agent has moved on, and a
+    Subject clinging to the next Announcement would name the previous item."""
+    announcements.announce("implement", subject="04-x.md")
+    announcements.announce("pull-request")
+
+    assert announcements.latest().subject is None
+
+
+def test_a_subject_survives_a_fresh_reader(announcements, tmp_path):
+    announcements.announce("implement", subject="04-x.md")
+
+    assert Announcements(tmp_path).latest().subject == "04-x.md"
+
+
 def test_announcements_survive_a_fresh_reader(announcements, tmp_path):
     announcements.announce("grill")
     announcements.announce("spec")

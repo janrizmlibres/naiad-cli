@@ -93,12 +93,17 @@ class Deliver:
     next_states carries every State the agent may announce from here — one
     usually, both exits at a Branching State. Plural rather than singular so
     that no caller can render a fork as a single name and quietly decide the
-    branch on the agent's behalf."""
+    branch on the agent's behalf.
+
+    subject is what the announcing agent said this Announcement was about,
+    carried through unread so the Prompt can name it after the Clear has
+    discarded the context that chose it (ADR 0009)."""
 
     state: str
     prompt: str
     clear: bool
     next_states: tuple[str, ...]
+    subject: str | None = None
 
 
 @dataclass(frozen=True)
@@ -245,6 +250,7 @@ def decide(workflow: Workflow, signals: Signals, *, skip_gates: bool = False) ->
             prompt=state.prompt,
             clear=state.clear,
             next_states=resolve_next_states(workflow, state.name, skip_gates=skip_gates),
+            subject=announcement.subject,
         )
 
     # Nothing to deliver. Either the agent is working — the common case, and

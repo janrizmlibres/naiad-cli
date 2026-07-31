@@ -145,27 +145,95 @@ prompt = """
 When the spec is published to the tracker, announce {next_state}.
 """
 
+# The triage label is pinned here because nothing else pins it. /to-tickets
+# applies `ready-for-agent` only on its real-issue-tracker branch; for a local
+# markdown tracker it says nothing about a status at all, so the label was
+# improvised each run — `ready-for-agent` in one tracker, the undefined `ready`
+# in another, `ready-for-human` across all eight tickets of the run that failed.
+# The loop below is a filter on that label, and a filter reading noise is worse
+# than none: every Run would park at its first ticket.
+#
+# The skill is external and not ours to edit, and it leaves the hook open
+# itself — "unless instructed otherwise". So this instructs, which is an input
+# to the skill rather than a copy of its logic: how it publishes stays its own.
+#
+# The exception's criterion is the Answerer's, deliberately. What the Answerer
+# must escalate and what an agent cannot implement are the same boundary, and
+# one criterion stated once is worth more than the brevity of leaving the
+# second implicit (ADR 0010).
+#
+# Declares the gate as a candidate beside the loop, because a feature whose
+# every ticket is genuinely a person's to implement is a real outcome rather
+# than a malformed one. Left undeclared it would still work — a Deviation is
+# permitted — but it would be recorded as one on every legitimate use, and a
+# Deviation is read as a symptom of a confused agent.
 [[states]]
 name = "tickets"
+next = ["implement", "handover"]
 prompt = """
 /to-tickets
 
-When every ticket is published with its blocking edges declared, announce {next_state}.
+Publish each ticket with a Status: line reading ready-for-agent, which is what marks it implementable unattended. Mark a ticket ready-for-human only where the work genuinely cannot be done by an agent — credentials, external spend, or a business judgment the repository cannot settle — and say in that ticket why.
+
+When every ticket is published with its blocking edges declared, announce {next_state}, passing the file of the lowest-numbered ticket that is ready-for-agent and blocked by nothing as the subject. If no ticket qualifies, announce handover with the lowest-numbered one as the subject instead, and say which status you found.
 """
 
 # The loop: one State, Cleared and announced once per ticket. Naiad models no
 # iteration and no exhaustion condition — which tickets remain is recorded in
-# the ticket files, and the agent decides when it has run out. The loop's own
-# name is written out because the interpolated successor is the State after the
-# loop, which is the wrong thing to announce while tickets remain.
+# the ticket files, and the agent decides when it has run out.
+#
+# The ticket arrives as the Announcement's Subject rather than being looked for
+# here (ADR 0009). The agent that names it is the one finishing the previous
+# ticket, with the whole tracker in front of it; the Clear then wipes that
+# context, and the Prompt names the ticket anyway. Choosing in the Cleared
+# context instead is what produced the failure this loop was rebuilt for.
+#
+# So the selecting is the last thing this Prompt asks for, not the first. It
+# reads the labels because the frontier is what is unblocked *and*
+# implementable, and splitting those across two contexts holds the same
+# knowledge twice (ADR 0010).
+#
+# Every status other than ready-for-agent goes to the gate, and the agent says
+# which it found: routing an unknown label and routing ready-for-human are the
+# same action needing opposite responses — fix the label, or do the work.
+#
+# The successors are written out rather than interpolated, as the diagnosing
+# State's are and for both of that pattern's reasons: {next_state} renders every
+# candidate as one joined phrase, which attaches no condition to each exit and
+# would name the gate in the line about having run out of tickets.
 [[states]]
 name = "implement"
 clear = true
+next = ["implement", "handover", "pull-request"]
 prompt = """
-/implement the next ticket in the project's issue tracker that is ready to start, and only that one.
+/implement the ticket at {subject}, and only that one. It has been triaged as ready for you; take that as given rather than re-checking it.
 
-If tickets remain after it, announce implement again to take the next. If that was the last one, announce {next_state}.
+When it is done, choose what comes next. Scan the project's issue tracker for the lowest-numbered ticket whose blocking edges are all satisfied, and read its Status line:
+
+- ready-for-agent — announce implement, passing that ticket's file as the subject.
+- any other status, including ready-for-human, needs-info, needs-triage, wontfix, one this repository does not define, or no Status line at all — announce handover, passing that ticket's file as the subject, and say in the session which status you found and why you are stopping.
+- no tickets left to do — announce pull-request.
 """
+
+# Where the loop puts a ticket it will not do. A Gate State: no Prompt, so Naiad
+# delivers nothing and the human implements the ticket by typing into the still
+# live session, then says to carry on. The Subject rides along even though no
+# Prompt substitutes it — the Run log records it, and it is what tells whoever
+# arrives which ticket they have been handed (ADR 0009).
+#
+# The second Gate State that is a branch candidate rather than a step in the
+# declared order, so ADR 0007 already covers it: never skipped, because it is a
+# destination the agent chose. An unattended Run parks here, which is the point
+# — ready-for-human means the agent cannot proceed, not that a review is
+# optional.
+#
+# Both exits are declared because both happen: the ticket just handed over may
+# or may not have been the last one. The implicit successor would be the pull
+# request alone, and a Run that handed over its first ticket would then open one
+# having implemented nothing.
+[[states]]
+name = "handover"
+next = ["implement", "pull-request"]
 
 # Clears, though the PR skill prefers the session's context. What the loop
 # leaves behind is one ticket's context rather than the branch's, so carrying it

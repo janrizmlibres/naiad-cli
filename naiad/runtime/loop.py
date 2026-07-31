@@ -108,7 +108,12 @@ def tick(
             session.clear(pane)
         session.send(
             pane,
-            render_prompt(action.prompt, task=run.task, next_states=action.next_states),
+            render_prompt(
+                action.prompt,
+                task=run.task,
+                next_states=action.next_states,
+                subject=action.subject,
+            ),
         )
         handled.record(announcement.seq, turns=turns.count())
     elif isinstance(action, Consult):

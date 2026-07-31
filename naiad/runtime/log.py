@@ -152,6 +152,11 @@ class RunLog:
         expected. It is recorded here rather than against the Action so that an
         Announcement Naiad delivers nothing for still shows the Run leaving its
         path — joined into one string, for the reason Entry.expected gives.
+
+        A Subject is recorded for the same reason, and matters most in the same
+        case: a Gate State has no Prompt to substitute it into, so the log is
+        the only place it is written down, and it is what tells the operator
+        which item they have been handed (ADR 0009).
         """
         if announcement is None or self._holds(announcement.seq):
             return
@@ -164,7 +169,7 @@ class RunLog:
                 # than one it has moved to, which is why the two kinds are told
                 # apart: a log reading them alike shows a State that never was.
                 state=announcement.state,
-                detail=_question(question) if question is not None else None,
+                detail=_detail(announcement),
                 expected=render_candidates(deviated_from) or None,
             )
         )
@@ -186,6 +191,18 @@ class RunLog:
         write_atomically(
             self.path, json.dumps([_document(e) for e in entries], indent=2) + "\n"
         )
+
+
+def _detail(announcement: Announcement) -> str | None:
+    """What an Announcement says beyond naming a State. A Question and a
+    Subject never appear together — a Question is asked from the State the
+    agent is standing in, which it announced already — so one field carries
+    whichever is present."""
+    if announcement.question is not None:
+        return _question(announcement.question)
+    if announcement.subject is not None:
+        return f"about: {announcement.subject}"
+    return None
 
 
 def _entry_for(action: Action) -> Entry | None:

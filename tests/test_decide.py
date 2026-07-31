@@ -86,9 +86,14 @@ def signals(
     question=None,
     consultation=None,
     finished=False,
+    subject=None,
 ):
     return Signals(
-        announcement=Announcement(seq=seq, state=state, question=question) if state else None,
+        announcement=(
+            Announcement(seq=seq, state=state, question=question, subject=subject)
+            if state
+            else None
+        ),
         handled_seq=handled_seq,
         stopped=stopped,
         stopped_since_action=stopped_since_action,
@@ -109,6 +114,21 @@ def test_an_unhandled_announcement_with_a_turn_ended_delivers_that_states_prompt
         clear=False,
         next_states=("review",),
     )
+
+
+def test_delivery_carries_the_announcements_subject(workflow):
+    """The Subject rides from the Announcement to the delivered Prompt, which
+    is what lets the selection be made before the Clear rather than after it
+    (ADR 0009)."""
+    action = decide(workflow, signals("implement", subject="04-x.md"))
+
+    assert action.subject == "04-x.md"
+
+
+def test_delivery_of_a_state_announced_without_a_subject_carries_none(workflow):
+    action = decide(workflow, signals("grill"))
+
+    assert action.subject is None
 
 
 def test_an_unhandled_announcement_with_no_turn_ended_takes_no_action(workflow):

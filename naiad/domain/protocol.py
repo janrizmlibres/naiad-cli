@@ -43,7 +43,14 @@ never decides that a phase is finished — you do, and you say so. Two rules:
 
 Announcing the same State twice is legitimate — that is how a loop phase works,
 once per iteration. Announcing is not a report of progress: announce when the
-phase is genuinely done."""
+phase is genuinely done.
+
+If the phase you are announcing works on one item of a series, say which with
+`--subject <value>`: `{announce} <name> --subject <value>`. You are the one
+choosing it, and you are choosing it now, while you can still see the whole
+series — the context that receives the next phase will have been cleared. A
+State that needs one is rejected without it, and the error names the invocation
+to use instead, so you can correct it there and then."""
 
 _NEXT_STATE = "When this phase is done, announce: {next_state}"
 

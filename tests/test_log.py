@@ -20,8 +20,8 @@ def log(tmp_path):
     return RunLog(tmp_path)
 
 
-def announcement(seq=1, state="implement", question=None):
-    return Announcement(seq=seq, state=state, question=question)
+def announcement(seq=1, state="implement", question=None, subject=None):
+    return Announcement(seq=seq, state=state, question=question, subject=subject)
 
 
 def kinds(log):
@@ -60,6 +60,21 @@ def test_an_announcement_records_the_state_it_named(log):
     entry = log.entries()[-1]
     assert entry.state == "implement"
     assert entry.seq == 3
+
+
+def test_an_announcement_records_the_subject_it_carried(log):
+    """The Run log is the Subject's other reader. A Gate State substitutes it
+    nowhere, so without this the log says a Gate was reached and leaves the
+    operator to read the session to find out which item (ADR 0009)."""
+    log.record_announcement(announcement(seq=3, state="handover", subject="05-y.md"))
+
+    assert "05-y.md" in log.entries()[-1].detail
+
+
+def test_an_announcement_with_no_subject_records_no_detail(log):
+    log.record_announcement(announcement(seq=3, state="grill"))
+
+    assert log.entries()[-1].detail is None
 
 
 def test_a_question_is_recorded_apart_from_a_state_announcement(log):

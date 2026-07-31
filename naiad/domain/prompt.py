@@ -29,7 +29,9 @@ def render_candidates(candidates: Sequence[str]) -> str:
     return f"{', '.join(candidates[:-1])} or {candidates[-1]}"
 
 
-def render_prompt(prompt: str, *, task: str, next_states: Sequence[str]) -> str:
+def render_prompt(
+    prompt: str, *, task: str, next_states: Sequence[str], subject: str | None = None
+) -> str:
     """next_states is plural even though most States have exactly one: at a
     Branching State the Prompt reads as naming both exits, and the Prompt's own
     text supplies the criterion for choosing between them.
@@ -38,8 +40,21 @@ def render_prompt(prompt: str, *, task: str, next_states: Sequence[str]) -> str:
     It is the slot for whatever comes next rather than a promise of one name,
     and renaming it would invalidate every Workflow file in existence to
     describe a fork most States do not have.
+
+    subject is whatever the agent said its Announcement was about, substituted
+    without being read: that it names a ticket is known to the Workflow and to
+    the agent, and to nothing here (ADR 0009).
+
+    A missing Subject renders as nothing rather than raising. The Prompt that
+    needed one is unrenderable either way, and the useful place to say so is
+    the announce command, where the agent is still in its own turn and can
+    correct itself — raising here would only reach a human.
     """
-    return prompt.replace("{task}", task).replace("{next_state}", render_candidates(next_states))
+    return (
+        prompt.replace("{task}", task)
+        .replace("{next_state}", render_candidates(next_states))
+        .replace("{subject}", subject or "")
+    )
 
 
 __all__ = ["render_candidates", "render_prompt"]

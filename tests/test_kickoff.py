@@ -1,6 +1,6 @@
 import pytest
 
-from naiad.cli.kickoff import start_run
+from naiad.cli.kickoff import MissingSubject, start_run
 from naiad.domain.transitions import UnknownState
 from naiad.domain.workflow import WorkflowError
 from naiad.runtime.resolve import RUN_ID_VARIABLE, RunResolver
@@ -15,6 +15,11 @@ prompt = "/grill-with-docs {task}\\n\\nThen announce {next_state}."
 
 [[states]]
 name = "review"
+
+[[states]]
+name = "implement"
+prompt = "/implement the ticket at {subject}"
+clear = true
 
 [[states]]
 name = "done"
@@ -146,6 +151,47 @@ def test_a_run_started_at_a_state_the_workflow_does_not_declare_is_rejected(
     assert store.all() == []
 
 
+def test_a_run_started_at_a_state_whose_prompt_needs_a_subject_is_rejected(
+    repo, store, sessions
+):
+    """Kickoff is the other entrance to delivery, and the announce command's
+    guard does not cover it: nothing is announced here. Without this the first
+    Prompt of the Run reads '/implement the ticket at ' and then tells the
+    agent to take that ticket's triage as given (ADR 0009)."""
+    with pytest.raises(MissingSubject) as caught:
+        start(repo, store, sessions, start_state="implement")
+
+    assert "implement" in str(caught.value)
+    assert "--subject" in str(caught.value)
+
+
+def test_a_rejected_kickoff_creates_no_run_and_spawns_no_session(repo, store, sessions):
+    """Refused before anything exists, as a bad Workflow and an unknown start
+    State already are: an operator who mistyped pays the error message only."""
+    with pytest.raises(MissingSubject):
+        start(repo, store, sessions, start_state="implement")
+
+    assert sessions.spawned == []
+    assert not (store.root / "20260719-120000-feature").exists()
+
+
+def test_a_run_started_at_such_a_state_with_a_subject_delivers_it(repo, store, sessions):
+    """The escape hatch the Workflow file's own comment relies on — starting a
+    Run partway in — has to keep working for a State that names a Subject."""
+    start(repo, store, sessions, start_state="implement", subject="04-x.md")
+
+    (spawn,) = sessions.spawned
+    assert spawn.initial_prompt == "/implement the ticket at 04-x.md"
+
+
+def test_a_subject_is_not_required_by_a_state_that_does_not_name_one(repo, store, sessions):
+    """The requirement is the Workflow's to declare, by using the placeholder.
+    Every State that does not is unaffected."""
+    start(repo, store, sessions, start_state="grill")
+
+    assert sessions.spawned
+
+
 def test_the_run_remembers_the_options_it_was_started_with(repo, store, sessions):
     """The tick loop resolves the next State on every delivery, in a process
     that outlives kickoff, so the options must survive on the Run."""
@@ -162,7 +208,7 @@ def test_a_run_started_with_gates_skipped_names_the_next_state_that_has_a_prompt
     start(repo, store, sessions, skip_gates=True)
 
     (spawn,) = sessions.spawned
-    assert spawn.initial_prompt.endswith("Then announce done.")
+    assert spawn.initial_prompt.endswith("Then announce implement.")
 
 
 def test_a_malformed_workflow_creates_no_run_directory_and_no_session(repo, store, sessions):
