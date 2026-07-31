@@ -13,7 +13,7 @@ import sys
 
 from naiad.adapters.executable import naiad_command
 from naiad.domain.protocol import render_protocol
-from naiad.domain.transitions import UnknownState, expected_next_state
+from naiad.domain.transitions import UnknownState, expected_next_states
 from naiad.domain.workflow import WorkflowError, load_workflow
 from naiad.runtime.announcements import Announcements
 from naiad.runtime.run import Run
@@ -31,7 +31,7 @@ def protocol_for(run: Run) -> str:
     announcement = Announcements(run.root).latest()
     try:
         workflow = load_workflow(run.workflow_path)
-        expected = expected_next_state(
+        expected = expected_next_states(
             workflow,
             announced=announcement.state if announcement else None,
             started_at=run.start_state,
@@ -42,10 +42,10 @@ def protocol_for(run: Run) -> str:
         # the agent's context, so this reaches the operator's hook output
         # without the agent reading a complaint it cannot act on.
         print(f"naiad: {error}", file=sys.stderr)
-        expected = None
+        expected = ()
 
     return render_protocol(
-        next_state=expected.name if expected else None,
+        next_states=expected,
         # The naiad running this hook, so the agent is told to type the one
         # actually driving it rather than whichever the session's PATH holds.
         naiad=naiad_command(),

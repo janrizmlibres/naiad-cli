@@ -10,8 +10,8 @@ import pytest
 from naiad.domain.transitions import (
     UnknownState,
     deviation,
-    expected_next_state,
-    next_state,
+    expected_next_states,
+    next_states,
     start_state,
 )
 from naiad.domain.workflow import parse_workflow
@@ -58,32 +58,63 @@ prompt = "/finish"
 terminal = true
 """
 
+BRANCHING = """
+name = "branching"
+
+[[states]]
+name = "classify"
+prompt = "/classify"
+next = ["diagnose", "grill"]
+
+[[states]]
+name = "diagnose"
+prompt = "/diagnose"
+next = ["no-repro", "done"]
+
+[[states]]
+name = "no-repro"
+
+[[states]]
+name = "grill"
+prompt = "/grill"
+
+[[states]]
+name = "done"
+prompt = "/finish"
+terminal = true
+"""
+
 
 @pytest.fixture
 def workflow():
     return parse_workflow(WORKFLOW)
 
 
+@pytest.fixture
+def branching():
+    return parse_workflow(BRANCHING)
+
+
 def test_the_next_state_is_the_one_declared_after_it(workflow):
-    assert next_state(workflow, "grill").name == "review"
+    assert next_states(workflow, "grill") == ("review",)
 
 
 def test_the_last_state_has_no_next_state(workflow):
-    assert next_state(workflow, "done") is None
+    assert next_states(workflow, "done") == ()
 
 
 def test_a_state_the_workflow_does_not_declare_has_no_next_state(workflow):
-    assert next_state(workflow, "grrill") is None
+    assert next_states(workflow, "grrill") == ()
 
 
 def test_gates_are_kept_unless_they_are_being_skipped(workflow):
-    assert next_state(workflow, "grill", skip_gates=True).name == "spec"
+    assert next_states(workflow, "grill", skip_gates=True) == ("spec",)
 
 
 def test_skipping_gates_skips_any_number_of_consecutive_gate_states():
     workflow = parse_workflow(CONSECUTIVE_GATES)
 
-    assert next_state(workflow, "grill", skip_gates=True).name == "spec"
+    assert next_states(workflow, "grill", skip_gates=True) == ("spec",)
 
 
 def test_a_terminal_state_is_never_skipped_however_it_is_declared():
@@ -95,7 +126,7 @@ def test_a_terminal_state_is_never_skipped_however_it_is_declared():
         "[[states]]\nname = 'done'\nterminal = true\n"
     )
 
-    assert next_state(workflow, "spec", skip_gates=True).name == "done"
+    assert next_states(workflow, "spec", skip_gates=True) == ("done",)
 
 
 def test_skipping_gates_past_the_end_of_the_workflow_resolves_to_nothing():
@@ -105,7 +136,32 @@ def test_skipping_gates_past_the_end_of_the_workflow_resolves_to_nothing():
         "[[states]]\nname = 'review'\n"
     )
 
-    assert next_state(workflow, "done", skip_gates=True) is None
+    assert next_states(workflow, "done", skip_gates=True) == ()
+
+
+def test_a_branching_state_resolves_to_its_declared_candidates(branching):
+    """Declared candidates replace the declared order rather than adding to
+    it, so the State after a Branching State in the file is not an exit."""
+    assert next_states(branching, "classify") == ("diagnose", "grill")
+
+
+def test_a_candidate_may_name_a_state_the_declared_order_puts_earlier(branching):
+    """A branch rejoins a shared tail, and the tail is wherever the author put
+    it — the candidate is a name, not an offset."""
+    assert next_states(branching, "diagnose") == ("no-repro", "done")
+
+
+def test_a_state_between_branching_ones_keeps_its_implicit_successor(branching):
+    """Every non-branching State keeps the declared order, so expressing a
+    branch does not mean annotating the whole file."""
+    assert next_states(branching, "grill") == ("done",)
+
+
+def test_a_gate_state_named_as_a_candidate_is_never_skipped(branching):
+    """ADR 0007: skipping applies to the declared order alone. A Gate State the
+    agent may choose is a destination rather than a routine checkpoint, and
+    deleting it would tell an agent that could not reproduce a bug to finish."""
+    assert next_states(branching, "diagnose", skip_gates=True) == ("no-repro", "done")
 
 
 def test_a_run_starts_at_the_first_state_unless_one_is_named(workflow):
@@ -119,25 +175,33 @@ def test_a_run_can_start_at_a_named_state(workflow):
 def test_before_anything_is_announced_the_expectation_follows_the_starting_state(workflow):
     """At kickoff the agent has been given the first State's Prompt but has not
     announced anything, so what it owes next is that State's successor."""
-    assert expected_next_state(workflow, announced=None, started_at=None).name == "review"
+    assert expected_next_states(workflow, announced=None, started_at=None) == ("review",)
 
 
 def test_before_anything_is_announced_a_named_starting_state_is_followed(workflow):
-    assert expected_next_state(workflow, announced=None, started_at="review").name == "spec"
+    assert expected_next_states(workflow, announced=None, started_at="review") == ("spec",)
 
 
 def test_once_a_state_is_announced_the_expectation_follows_that_state(workflow):
-    assert expected_next_state(workflow, announced="review", started_at=None).name == "spec"
+    assert expected_next_states(workflow, announced="review", started_at=None) == ("spec",)
 
 
 def test_the_expectation_honours_skipped_gates(workflow):
-    expected = expected_next_state(workflow, announced="grill", started_at=None, skip_gates=True)
+    expected = expected_next_states(workflow, announced="grill", started_at=None, skip_gates=True)
 
-    assert expected.name == "spec"
+    assert expected == ("spec",)
+
+
+def test_the_expectation_at_a_fork_is_every_candidate(branching):
+    """All the agent has to go on after a Clear, so naming one of two would
+    bias it toward whichever the author happened to list first (ADR 0001)."""
+    expected = expected_next_states(branching, announced="classify", started_at=None)
+
+    assert expected == ("diagnose", "grill")
 
 
 def test_there_is_no_expectation_after_the_last_state(workflow):
-    assert expected_next_state(workflow, announced="done", started_at=None) is None
+    assert expected_next_states(workflow, announced="done", started_at=None) == ()
 
 
 def test_a_start_state_the_workflow_does_not_declare_is_rejected(workflow):
@@ -151,47 +215,62 @@ def test_a_start_state_the_workflow_does_not_declare_is_rejected(workflow):
 
 def test_announcing_the_expected_next_state_is_not_a_deviation(workflow):
     """The ordinary case: the Run is where the Workflow says it should be."""
-    assert deviation(workflow, announced="spec", previous_state="review") is None
+    assert deviation(workflow, announced="spec", previous_state="review") == ()
 
 
 def test_a_deviation_names_the_state_that_was_expected_instead(workflow):
     """Recorded because it is more often a confused agent than a decision, and
     the operator reading it later needs to know what was owed."""
-    assert deviation(workflow, announced="grill", previous_state="review") == "spec"
+    assert deviation(workflow, announced="grill", previous_state="review") == ("spec",)
+
+
+def test_announcing_any_declared_candidate_is_not_a_deviation(branching):
+    """Choosing at a fork is the judgment the Branching State exists to ask
+    for, so choosing correctly must not be recorded as a mistake."""
+    assert deviation(branching, announced="diagnose", previous_state="classify") == ()
+    assert deviation(branching, announced="grill", previous_state="classify") == ()
+
+
+def test_announcing_outside_the_candidates_deviates_from_all_of_them(branching):
+    """A human may have redirected the agent, so it is recorded rather than
+    refused — and the record has to say what the whole fork expected."""
+    deviated = deviation(branching, announced="no-repro", previous_state="classify")
+
+    assert deviated == ("diagnose", "grill")
 
 
 def test_before_any_announcement_the_run_stands_where_it_began(workflow):
     """The Run's first State was delivered at kickoff without an Announcement,
     so with nothing announced yet the expectation is that State's successor."""
-    assert deviation(workflow, announced="spec", previous_state=None) == "review"
+    assert deviation(workflow, announced="spec", previous_state=None) == ("review",)
 
 
 def test_a_run_started_partway_expects_from_the_state_it_started_at(workflow):
     partway = deviation(workflow, announced="grill", previous_state=None, started_at="review")
 
-    assert partway == "spec"
+    assert partway == ("spec",)
 
 
 def test_announcing_the_same_state_again_is_not_a_deviation(workflow):
     """The implement loop is one State announced once per ticket. Treating a
     repeat as a departure would fill the log with a Run doing exactly what its
     Workflow asks of it."""
-    assert deviation(workflow, announced="spec", previous_state="spec") is None
+    assert deviation(workflow, announced="spec", previous_state="spec") == ()
 
 
 def test_with_gates_skipped_the_expected_state_skips_them_too(workflow):
     """The expectation and the Prompt's interpolated successor are the same
     expectation, so an unattended Run must not deviate by obeying the Prompt
     it was given."""
-    assert deviation(workflow, announced="spec", previous_state="grill", skip_gates=True) is None
+    assert deviation(workflow, announced="spec", previous_state="grill", skip_gates=True) == ()
 
 
 def test_a_state_with_nothing_after_it_expects_nothing(workflow):
     """Inventing an expectation to deviate from would be worse than having
     none: at the end of a Workflow there is nothing the agent owes."""
-    assert deviation(workflow, announced="grill", previous_state="done") is None
+    assert deviation(workflow, announced="grill", previous_state="done") == ()
 
 
 def test_a_run_that_began_at_a_state_the_workflow_no_longer_declares_expects_nothing(workflow):
     """A Workflow edited mid-Run costs the expectation, not the Run."""
-    assert deviation(workflow, announced="grill", previous_state=None, started_at="gone") is None
+    assert deviation(workflow, announced="grill", previous_state=None, started_at="gone") == ()

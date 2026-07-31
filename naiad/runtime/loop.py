@@ -108,7 +108,7 @@ def tick(
             session.clear(pane)
         session.send(
             pane,
-            render_prompt(action.prompt, task=run.task, next_state=action.next_state),
+            render_prompt(action.prompt, task=run.task, next_states=action.next_states),
         )
         handled.record(announcement.seq, turns=turns.count())
     elif isinstance(action, Consult):
@@ -142,12 +142,12 @@ def tick(
 
 def _deviation(
     run: Run, workflow: Workflow, log: RunLog, announcement: Announcement | None
-) -> str | None:
+) -> tuple[str, ...]:
     """Whether this Announcement left the expected path, asked of the domain
     (ADR 0004). Where the agent stood before it is read back from the log,
     which is the only place the Announcements before the latest are kept."""
     if announcement is None:
-        return None
+        return ()
     return deviation(
         workflow,
         announced=announcement.state,

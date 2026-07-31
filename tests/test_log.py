@@ -36,7 +36,7 @@ def test_every_announcement_and_every_action_is_recorded_in_order(log):
     """One narrative, read top to bottom. Out of order it is not a
     reconstruction of anything."""
     log.record_announcement(announcement(seq=1, state="grill"))
-    log.record(Deliver(state="grill", prompt="/grill", clear=False, next_state="review"), seq=1)
+    log.record(Deliver(state="grill", prompt="/grill", clear=False, next_states=("review",)), seq=1)
     log.record_announcement(announcement(seq=2, state="review"))
     log.record(Notify(reason="state 'review' is a Gate State"), seq=2)
 
@@ -47,7 +47,8 @@ def test_delivering_a_prompt_and_answering_a_question_are_told_apart(log):
     """Both type into the same session, and a log that showed them alike would
     leave the operator unable to tell an answered Question from a phase that
     started twice."""
-    log.record(Deliver(state="implement", prompt="/implement", clear=True, next_state="pr"), seq=1)
+    delivered = Deliver(state="implement", prompt="/implement", clear=True, next_states=("pr",))
+    log.record(delivered, seq=1)
     log.record(Respond(question=QUESTION, answer="the client"), seq=2)
 
     assert kinds(log) == ["delivered", "answered"]
@@ -118,11 +119,33 @@ def test_a_tick_that_did_nothing_is_not_recorded(log):
 
 
 def test_a_deviating_announcement_names_both_the_expected_state_and_the_announced_one(log):
-    log.record_announcement(announcement(seq=5, state="grill"), deviated_from="implement")
+    log.record_announcement(announcement(seq=5, state="grill"), deviated_from=("implement",))
 
     deviated = log.deviations()[-1]
     assert deviated.state == "grill"
     assert deviated.expected == "implement"
+
+
+def test_a_deviation_from_a_fork_records_every_candidate_in_one_string(log):
+    """Plural in the domain, joined for the record. The persisted shape is a
+    human-readable diagnostic and deviations() only tests for presence, so
+    widening it would strand existing Run logs for no gain."""
+    log.record_announcement(
+        announcement(seq=5, state="grill"), deviated_from=("no-repro", "pull-request")
+    )
+
+    assert log.deviations()[-1].expected == "no-repro or pull-request"
+
+
+def test_a_run_log_written_before_forks_existed_still_parses(log):
+    """The field was a single State name and still is one, so an existing log
+    is read back unchanged rather than migrated."""
+    log.path.write_text(
+        '[{"kind": "announced", "seq": 1, "state": "grill", '
+        '"detail": null, "expected": "implement"}]\n'
+    )
+
+    assert [entry.expected for entry in log.deviations()] == ["implement"]
 
 
 def test_an_announcement_on_the_expected_path_is_not_a_deviation(log):
@@ -134,7 +157,7 @@ def test_an_announcement_on_the_expected_path_is_not_a_deviation(log):
 def test_an_announcement_that_is_never_delivered_can_still_deviate(log):
     """A jump straight to the end, or to a Gate out of order, is the Deviation
     most worth seeing — and Naiad delivers nothing for either."""
-    log.record_announcement(announcement(seq=6, state="done"), deviated_from="implement")
+    log.record_announcement(announcement(seq=6, state="done"), deviated_from=("implement",))
     log.record(Finish(state="done"), seq=6)
 
     assert [entry.expected for entry in log.deviations()] == ["implement"]

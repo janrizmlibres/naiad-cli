@@ -10,36 +10,53 @@ from naiad.domain.protocol import render_nudge, render_protocol
 
 
 def test_names_the_command_that_announces_a_state():
-    assert "naiad state" in render_protocol(next_state="spec")
+    assert "naiad state" in render_protocol(next_states=("spec",))
 
 
 def test_names_the_command_that_asks_a_question():
-    assert "naiad ask" in render_protocol(next_state="spec")
+    assert "naiad ask" in render_protocol(next_states=("spec",))
 
 
 def test_instructs_the_agent_never_to_ask_a_human_directly():
-    protocol = render_protocol(next_state="spec").lower()
+    protocol = render_protocol(next_states=("spec",)).lower()
 
     assert "never" in protocol
     assert "ask" in protocol and "human" in protocol
 
 
 def test_names_the_expected_next_state():
-    assert "spec" in render_protocol(next_state="spec")
+    assert "spec" in render_protocol(next_states=("spec",))
+
+
+def test_at_a_fork_every_candidate_is_named():
+    """Naming one of two would bias the agent toward whichever the Workflow
+    author happened to list first, in precisely the case where its judgment is
+    the whole point (ADR 0001). It is also all a Cleared agent has to go on."""
+    protocol = render_protocol(next_states=("no-repro", "pull-request"))
+
+    assert "no-repro" in protocol
+    assert "pull-request" in protocol
+
+
+def test_a_fork_is_phrased_as_a_choice_rather_than_an_instruction():
+    """Told to announce both, an agent standing at a fork would try to."""
+    protocol = render_protocol(next_states=("no-repro", "pull-request")).lower()
+
+    assert "whichever" in protocol or "one of" in protocol
 
 
 def test_the_commands_are_named_as_the_agent_must_actually_invoke_them():
     """A session's PATH is whatever tmux inherited, which need not hold the
     naiad that is driving the Run. Naming a command the agent cannot run costs
     it the ability to participate at all."""
-    protocol = render_protocol(next_state="spec", naiad="/opt/naiad/bin/naiad")
+    protocol = render_protocol(next_states=("spec",), naiad="/opt/naiad/bin/naiad")
 
     assert "/opt/naiad/bin/naiad state" in protocol
     assert "/opt/naiad/bin/naiad ask" in protocol
 
 
 def test_a_run_with_no_next_state_is_told_so_rather_than_left_a_placeholder():
-    protocol = render_protocol(next_state=None)
+    protocol = render_protocol(next_states=())
 
     assert "{" not in protocol
     assert "None" not in protocol

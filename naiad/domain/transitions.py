@@ -1,8 +1,13 @@
-"""Which State comes next, and which State a Run begins at.
+"""Which States may come next, and which State a Run begins at.
 
-Pure: a Workflow and a State name in, a State out. The Workflow file is the
-single source of truth for ordering, so a Prompt names its successor by
+Pure: a Workflow and a State name in, States out. The Workflow file is the
+single source of truth for ordering, so a Prompt names its successors by
 interpolation rather than by hand.
+
+What comes next is plural throughout — usually a set of one, and every
+candidate at a Branching State. One resolver with a plural return rather than a
+singular and a plural accessor side by side: two would drift, and the caller
+reaching for the singular one would silently drop a branch.
 
 Both operator options that bend the ordering live here. Neither writes the
 State file — Naiad only ever interpolates a different value, which is what
@@ -19,18 +24,34 @@ class UnknownState(Exception):
     exists. Carries the valid names so the operator can correct a typo."""
 
 
-def next_state(workflow: Workflow, current: str, *, skip_gates: bool = False) -> State | None:
-    """The State the agent is expected to announce after `current`.
+def next_states(workflow: Workflow, current: str, *, skip_gates: bool = False) -> tuple[str, ...]:
+    """The States the agent may announce after `current`, by name.
 
-    None when there is nothing after it, and also when `current` is not
+    A Branching State resolves to its declared candidates verbatim; any other
+    State resolves to the single successor the declared order supplies.
+
+    Empty when there is nothing after it, and also when `current` is not
     declared — the agent may have been sent somewhere by a human, and having no
     expectation of it is more honest than inventing one.
+
+    Names rather than States because a successor is only ever spoken: it is
+    interpolated into a Prompt, named in the Protocol, and compared against
+    what the agent announced. Nothing asks a successor what it is, so handing
+    back States would leave every caller unwrapping them the same way.
+
+    Gate-skipping applies to the declared order alone (ADR 0007). A Gate State
+    named as a candidate is a destination the agent chose rather than a routine
+    checkpoint, and deleting it would overrule the judgment ADR 0001 gives away.
     """
+    state = workflow.state(current)
+    if state is not None and state.next_candidates:
+        return state.next_candidates
+
     for candidate in _after(workflow, current):
         if skip_gates and candidate.is_gate_state and not candidate.terminal:
             continue
-        return candidate
-    return None
+        return (candidate.name,)
+    return ()
 
 
 def start_state(workflow: Workflow, named: str | None) -> State:
@@ -57,16 +78,16 @@ def standing_state(workflow: Workflow, *, announced: str | None, started_at: str
     return announced if announced is not None else start_state(workflow, started_at).name
 
 
-def expected_next_state(
+def expected_next_states(
     workflow: Workflow,
     *,
     announced: str | None,
     started_at: str | None,
     skip_gates: bool = False,
-) -> State | None:
+) -> tuple[str, ...]:
     """What the agent owes next, told to it by the Protocol."""
     standing = standing_state(workflow, announced=announced, started_at=started_at)
-    return next_state(workflow, standing, skip_gates=skip_gates)
+    return next_states(workflow, standing, skip_gates=skip_gates)
 
 
 def deviation(
@@ -76,8 +97,13 @@ def deviation(
     previous_state: str | None,
     started_at: str | None = None,
     skip_gates: bool = False,
-) -> str | None:
-    """The State that was expected instead, when this Announcement was not it.
+) -> tuple[str, ...]:
+    """The States that were expected instead, when this Announcement was none
+    of them. Empty when the Announcement was expected.
+
+    Plural because a Branching State expects several: announcing any declared
+    candidate is on the path, so choosing correctly at a fork is not recorded
+    as a mistake.
 
     A Deviation is permitted and delivered — any State the Workflow declares is
     a legal target, backward ones included, because the human may have
@@ -91,7 +117,7 @@ def deviation(
 
     Two Announcements are not Deviations. Re-announcing the State the agent is
     already standing in is the implement loop — one State, announced once per
-    ticket — and an expectation of None is a State with nothing after it, where
+    ticket — and an empty expectation is a State with nothing after it, where
     inventing an expectation to deviate from would be worse than having none.
     """
     try:
@@ -100,14 +126,12 @@ def deviation(
         # A Workflow edited mid-Run that no longer declares the State this one
         # began at. That costs the expectation, not the Run: the same choice is
         # made where the Protocol is rendered (naiad.cli.protocol).
-        return None
+        return ()
 
     if announced == standing:
-        return None
-    expected = next_state(workflow, standing, skip_gates=skip_gates)
-    if expected is None or expected.name == announced:
-        return None
-    return expected.name
+        return ()
+    expected = next_states(workflow, standing, skip_gates=skip_gates)
+    return () if announced in expected else expected
 
 
 def _after(workflow: Workflow, current: str) -> tuple[State, ...]:
@@ -120,8 +144,8 @@ def _after(workflow: Workflow, current: str) -> tuple[State, ...]:
 __all__ = [
     "UnknownState",
     "deviation",
-    "expected_next_state",
-    "next_state",
+    "expected_next_states",
+    "next_states",
     "standing_state",
     "start_state",
 ]

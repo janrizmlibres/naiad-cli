@@ -11,7 +11,7 @@ from typing import Protocol
 
 from naiad.domain.prompt import render_prompt
 from naiad.domain.session import SessionSpec, session_name
-from naiad.domain.transitions import next_state
+from naiad.domain.transitions import next_states
 from naiad.domain.transitions import start_state as resolve_start_state
 from naiad.domain.workflow import load_workflow
 from naiad.runtime.resolve import RUN_ID_VARIABLE
@@ -40,7 +40,7 @@ def start_run(
     # the error message.
     workflow = load_workflow(workflow_path)
     first = resolve_start_state(workflow, start_state)
-    successor = next_state(workflow, first.name, skip_gates=skip_gates)
+    successors = next_states(workflow, first.name, skip_gates=skip_gates)
 
     run = store.create(
         run_id=run_id,
@@ -63,7 +63,7 @@ def start_run(
         else render_prompt(
             first.prompt or "",
             task=task,
-            next_state=successor.name if successor else None,
+            next_states=successors,
         )
     )
 

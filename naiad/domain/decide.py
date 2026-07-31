@@ -13,7 +13,7 @@ from dataclasses import dataclass
 from naiad.domain.announcement import Announcement
 from naiad.domain.answerer import Consultation, Escalated
 from naiad.domain.question import Question
-from naiad.domain.transitions import next_state
+from naiad.domain.transitions import next_states as resolve_next_states
 from naiad.domain.workflow import State, Workflow
 
 # How many Nudges an Announcement is worth before Naiad stops and the human is
@@ -88,12 +88,17 @@ class Deliver:
     Carries no Deviation. Delivery happens whether or not the Announcement left
     the expected path, so a Deviation changes nothing here; it classifies the
     Announcement rather than the Action, and is recorded against it
-    (naiad.domain.transitions.deviation)."""
+    (naiad.domain.transitions.deviation).
+
+    next_states carries every State the agent may announce from here — one
+    usually, both exits at a Branching State. Plural rather than singular so
+    that no caller can render a fork as a single name and quietly decide the
+    branch on the agent's behalf."""
 
     state: str
     prompt: str
     clear: bool
-    next_state: str | None
+    next_states: tuple[str, ...]
 
 
 @dataclass(frozen=True)
@@ -235,12 +240,11 @@ def decide(workflow: Workflow, signals: Signals, *, skip_gates: bool = False) ->
             # alive, and why there is no approve command.
             return _notify(signals, f"state '{state.name}' is a Gate State and is waiting for you")
 
-        successor = next_state(workflow, state.name, skip_gates=skip_gates)
         return Deliver(
             state=state.name,
             prompt=state.prompt,
             clear=state.clear,
-            next_state=successor.name if successor else None,
+            next_states=resolve_next_states(workflow, state.name, skip_gates=skip_gates),
         )
 
     # Nothing to deliver. Either the agent is working — the common case, and

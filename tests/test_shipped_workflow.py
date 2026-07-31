@@ -13,7 +13,7 @@ import pytest
 
 from naiad.cli.kickoff import start_run
 from naiad.domain.prompt import render_prompt
-from naiad.domain.transitions import next_state
+from naiad.domain.transitions import next_states
 from naiad.domain.workflow import load_workflow
 from naiad.runtime.run import RunStore
 
@@ -42,11 +42,10 @@ def workflow():
 def delivered(workflow, state_name):
     """A State's Prompt as the agent actually reads it, with the successor the
     Workflow resolves interpolated — which is what Naiad sends (naiad.runtime.loop)."""
-    successor = next_state(workflow, state_name)
     return render_prompt(
         workflow.state(state_name).prompt,
         task=TASK,
-        next_state=successor.name if successor else None,
+        next_states=next_states(workflow, state_name),
     )
 
 
@@ -81,9 +80,9 @@ def test_each_prompt_names_the_state_to_announce_next(workflow, state_name):
     """The Workflow file owns the ordering, so a Prompt names its successor by
     interpolation rather than by hand — and the agent is told a name it can
     announce rather than an unsubstituted placeholder."""
-    successor = next_state(workflow, state_name)
+    (successor,) = next_states(workflow, state_name)
 
-    assert f"announce {successor.name}" in delivered(workflow, state_name)
+    assert f"announce {successor}" in delivered(workflow, state_name)
 
 
 def test_only_the_kickoff_state_is_told_the_task(workflow):
@@ -190,5 +189,5 @@ def test_a_run_can_be_started_from_it(tmp_path, sessions):
 def test_an_unattended_run_resolves_past_the_review_gate_state(workflow):
     """The same file run with --skip-gates: the grilling State's Prompt names
     the spec rather than the Gate State nobody is there to release."""
-    assert next_state(workflow, "grill", skip_gates=True).name == "spec"
-    assert next_state(workflow, "grill").name == "review"
+    assert next_states(workflow, "grill", skip_gates=True) == ("spec",)
+    assert next_states(workflow, "grill") == ("review",)

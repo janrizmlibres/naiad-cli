@@ -41,10 +41,33 @@ name = "done"
 terminal = true
 """
 
+# A fork whose short branch ends at a Gate State, which is the shape ADR 0007
+# is about: the exit an unattended Run must still be offered.
+BRANCHING = """
+name = "bug"
+
+[[states]]
+name = "diagnose"
+prompt = "/diagnosing-bugs"
+next = ["no-repro", "done"]
+
+[[states]]
+name = "no-repro"
+
+[[states]]
+name = "done"
+terminal = true
+"""
+
 
 @pytest.fixture
 def workflow():
     return parse_workflow(WORKFLOW)
+
+
+@pytest.fixture
+def branching():
+    return parse_workflow(BRANCHING)
 
 
 QUESTION = Question(text="Which module owns retries?", options=("the client", "the caller"))
@@ -84,7 +107,7 @@ def test_an_unhandled_announcement_with_a_turn_ended_delivers_that_states_prompt
         state="grill",
         prompt="/grill-with-docs {task}",
         clear=False,
-        next_state="review",
+        next_states=("review",),
     )
 
 
@@ -129,11 +152,28 @@ def test_a_state_with_no_prompt_is_not_delivered(workflow):
 
 
 def test_delivery_names_the_next_state_in_declared_order(workflow):
-    assert decide(workflow, signals("implement")).next_state == "done"
+    assert decide(workflow, signals("implement")).next_states == ("done",)
 
 
 def test_with_gates_skipped_delivery_names_the_next_state_that_has_a_prompt(workflow):
-    assert decide(workflow, signals("grill"), skip_gates=True).next_state == "implement"
+    assert decide(workflow, signals("grill"), skip_gates=True).next_states == ("implement",)
+
+
+def test_delivery_from_a_branching_state_names_every_candidate(branching):
+    """The delivered Prompt is where the agent reads its exits, so a fork that
+    delivered one of two would decide the branch on the agent's behalf."""
+    assert decide(branching, signals("diagnose")).next_states == ("no-repro", "done")
+
+
+def test_a_gate_state_reached_as_a_candidate_still_notifies_with_gates_skipped(branching):
+    """ADR 0007: the stop an author put on a fork is one an unattended Run
+    honours, so a bug it could not reproduce parks rather than opening a pull
+    request on no diagnosis."""
+    delivered = decide(branching, signals("diagnose"), skip_gates=True)
+    parked = decide(branching, signals("no-repro"), skip_gates=True)
+
+    assert delivered.next_states == ("no-repro", "done")
+    assert isinstance(parked, Notify)
 
 
 def test_a_gate_state_notifies_the_operator(workflow):

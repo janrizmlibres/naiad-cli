@@ -18,11 +18,13 @@ events under thousands of lines.
 from __future__ import annotations
 
 import json
+from collections.abc import Sequence
 from dataclasses import dataclass, replace
 from pathlib import Path
 
 from naiad.domain.announcement import Announcement
 from naiad.domain.decide import Action, Consult, Deliver, Finish, Notify, Nudge, Respond
+from naiad.domain.prompt import render_candidates
 from naiad.domain.question import Question
 from naiad.runtime.atomic import write_atomically
 
@@ -50,10 +52,15 @@ class Entry:
     put to the Answerer, the answer sent back.
 
     expected is set only on a Deviation, and names the State the Workflow
-    expected instead of the one in state. It belongs to an Announcement rather
-    than to the Action taken about it, because an Announcement that is never
-    delivered — a jump to a Gate State, or straight to the end — deviates just
-    as loudly as one that is.
+    expected instead of the one in state — or, at a fork, every candidate it
+    expected, joined into that one string. Deliberately inconsistent with the
+    domain, which is plural throughout: this is a human-readable diagnostic,
+    deviations() only tests whether it is present, and widening the persisted
+    shape would strand existing Run logs for no gain.
+
+    It belongs to an Announcement rather than to the Action taken about it,
+    because an Announcement that is never delivered — a jump to a Gate State,
+    or straight to the end — deviates just as loudly as one that is.
     """
 
     kind: str
@@ -133,17 +140,18 @@ class RunLog:
         return earlier[-1].state if earlier else None
 
     def record_announcement(
-        self, announcement: Announcement | None, *, deviated_from: str | None = None
+        self, announcement: Announcement | None, *, deviated_from: Sequence[str] = ()
     ) -> None:
         """What the agent said, written once however often it is read.
 
         The tick loop reads the latest Announcement several times a minute and
         acts on it once; the log follows the acting rather than the reading.
 
-        deviated_from is the State expected instead, when this Announcement was
-        not it (naiad.domain.transitions.deviation). It is recorded here rather
-        than against the Action so that an Announcement Naiad delivers nothing
-        for still shows the Run leaving its path.
+        deviated_from is the States expected instead, when this Announcement was
+        none of them (naiad.domain.transitions.deviation), and empty when it was
+        expected. It is recorded here rather than against the Action so that an
+        Announcement Naiad delivers nothing for still shows the Run leaving its
+        path — joined into one string, for the reason Entry.expected gives.
         """
         if announcement is None or self._holds(announcement.seq):
             return
@@ -157,7 +165,7 @@ class RunLog:
                 # apart: a log reading them alike shows a State that never was.
                 state=announcement.state,
                 detail=_question(question) if question is not None else None,
-                expected=deviated_from,
+                expected=render_candidates(deviated_from) or None,
             )
         )
 
@@ -186,10 +194,13 @@ def _entry_for(action: Action) -> Entry | None:
     reader must be able to tell apart: both type into the same session, and
     conflating them shows an answered Question as a phase begun twice."""
     if isinstance(action, Deliver):
+        # Joined for the same reason Entry.expected is: the log is prose for a
+        # human, not a shape anything queries.
+        successors = render_candidates(action.next_states)
         return Entry(
             kind="delivered",
             state=action.state,
-            detail=f"next: {action.next_state}" if action.next_state else None,
+            detail=f"next: {successors}" if successors else None,
         )
     if isinstance(action, Respond):
         return Entry(kind="answered", detail=f"{_question(action.question)} -> {action.answer}")

@@ -11,6 +11,10 @@ been Cleared has no memory of having read it before.
 
 from __future__ import annotations
 
+from collections.abc import Sequence
+
+from naiad.domain.prompt import render_candidates
+
 ANNOUNCE_SUBCOMMAND = "state"
 ASK_SUBCOMMAND = "ask"
 
@@ -42,6 +46,12 @@ once per iteration. Announcing is not a report of progress: announce when the
 phase is genuinely done."""
 
 _NEXT_STATE = "When this phase is done, announce: {next_state}"
+
+# A fork is phrased as a choice rather than an instruction: told to announce
+# both, an agent standing at one would try to. Which candidate applies is the
+# State's own Prompt to say — Naiad supplies the names and nothing else.
+_NEXT_STATES = "When this phase is done, announce whichever applies: {next_states}"
+
 _NO_NEXT_STATE = (
     "There is no State expected after this one. Announce whichever State the "
     "workflow calls for; an unknown name is rejected with the valid ones listed."
@@ -96,10 +106,15 @@ def render_answer(answer: str) -> str:
     return _ANSWER.format(answer=answer)
 
 
-def render_protocol(*, next_state: str | None, naiad: str = DEFAULT_NAIAD) -> str:
-    """The Protocol as the agent meets it, naming the State it is expected to
-    announce next. The Workflow file owns that ordering, so it is interpolated
-    here rather than restated by hand.
+def render_protocol(*, next_states: Sequence[str], naiad: str = DEFAULT_NAIAD) -> str:
+    """The Protocol as the agent meets it, naming every State it may announce
+    next. The Workflow file owns that ordering, so it is interpolated here
+    rather than restated by hand.
+
+    Plural because of the fork: naming a single candidate at a Branching State
+    would bias the agent toward whichever the Workflow author happened to list
+    first, in precisely the case where its judgment is the point (ADR 0001).
+    This matters most after a Clear, when the Protocol is all the agent has.
 
     naiad is the command the agent must type. The caller passes the absolute
     path of the naiad driving the Run, because a session's PATH need not hold
@@ -109,7 +124,16 @@ def render_protocol(*, next_state: str | None, naiad: str = DEFAULT_NAIAD) -> st
         announce=f"{naiad} {ANNOUNCE_SUBCOMMAND}",
         ask=f"{naiad} {ASK_SUBCOMMAND}",
     )
-    expectation = _NEXT_STATE.format(next_state=next_state) if next_state else _NO_NEXT_STATE
+    # Three sentences rather than one plural sentence covering all three
+    # cases: 'announce whichever applies' offers a choice, and offering one
+    # where there is a single successor invites the agent to look for the
+    # alternative it was not given.
+    if not next_states:
+        expectation = _NO_NEXT_STATE
+    elif len(next_states) == 1:
+        expectation = _NEXT_STATE.format(next_state=next_states[0])
+    else:
+        expectation = _NEXT_STATES.format(next_states=render_candidates(next_states))
     return f"{preamble}\n\n{expectation}\n"
 
 
