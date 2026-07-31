@@ -139,10 +139,29 @@ name = "review"
 
 # The spec and the tickets are synthesised from the grilling conversation, so
 # neither Clears. These are the two phases that genuinely need what was said.
+#
+# The seam decision is pinned here for the same reason the triage label below
+# is, and the reason is worth stating twice: the skill is external and not ours
+# to edit, so an instruction added to the skill file is lost the next time the
+# skill is updated. Pinning it in the Prompt is the only place it survives.
+#
+# Left to itself /to-spec sketches its seams and offers them — which in a Run is
+# a question nobody is awake to answer. It is not one the Answerer can settle
+# either: which seam a feature is tested at is a judgment about the work, and
+# ADR 0001 puts those with the agent, which is the party holding the codebase.
+# So the instruction is not "choose well" but "choose, and write down what you
+# chose": recording the seams in the spec is what keeps the decision reviewable,
+# because the human reads it at the review Gate beside everything else instead
+# of being woken to approve it in advance.
+#
+# An input to the skill rather than a copy of its logic — how it chooses seams
+# stays its own, and only where the choice is recorded is added.
 [[states]]
 name = "spec"
 prompt = """
 /to-spec
+
+Decide the seams on your own judgement and carry straight on to writing the spec. Do not stop to have them confirmed and do not raise them as a question. Record the seams you chose, and any you rejected, in the spec's Testing Decisions section, so that the choice is reviewed where the rest of the spec is reviewed.
 
 When the spec is published to the tracker, announce {next_state}.
 """
