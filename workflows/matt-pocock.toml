@@ -1,0 +1,90 @@
+# The Matt Pocock feature chain, and the only Workflow that ships.
+#
+# Every Prompt opens with the slash command of the skill it runs: Claude Code
+# reads a slash command only at the start of a message, so prose in front of it
+# would send the skill's name as chat. What follows the command is the argument
+# the human would have typed — which work, which input — and never a procedure:
+# a skill's own logic stays in the skill, or it is maintained in two places.
+#
+# The Protocol is not restated in any Prompt. Naiad injects it into every fresh
+# context, including the ones the Clearing States below create.
+
+name = "matt-pocock"
+
+# Kickoff. The only State told the task in words; everything after it reads the
+# Artifacts this conversation and its successors leave behind.
+[[states]]
+name = "grill"
+prompt = """
+/grill-with-docs {task}
+
+When the interview is finished and its ADRs and glossary entries are written, announce {next_state}.
+"""
+
+# The Gate State: no Prompt, so Naiad delivers nothing and waits. The human
+# reads the ADRs and the glossary the interview produced and types into the
+# session — approving, redirecting, or correcting in the one action.
+[[states]]
+name = "review"
+
+# The spec and the tickets are synthesised from the grilling conversation, so
+# neither Clears. These are the two phases that genuinely need what was said.
+[[states]]
+name = "spec"
+prompt = """
+/to-spec
+
+When the spec is published to the tracker, announce {next_state}.
+"""
+
+[[states]]
+name = "tickets"
+prompt = """
+/to-tickets
+
+When every ticket is published with its blocking edges declared, announce {next_state}.
+"""
+
+# The loop: one State, Cleared and announced once per ticket. Naiad models no
+# iteration and no exhaustion condition — which tickets remain is recorded in
+# the ticket files, and the agent decides when it has run out. The loop's own
+# name is written out because the interpolated successor is the State after the
+# loop, which is the wrong thing to announce while tickets remain.
+[[states]]
+name = "implement"
+clear = true
+prompt = """
+/implement the next ticket in the project's issue tracker that is ready to start, and only that one.
+
+If tickets remain after it, announce implement again to take the next. If that was the last one, announce {next_state}.
+"""
+
+# Clears, though the PR skill prefers the session's context. What the loop
+# leaves behind is one ticket's context rather than the branch's, so carrying it
+# would describe the last ticket as though it were the whole pull request;
+# Cleared, the skill compares the branch against its base and sees all of them.
+[[states]]
+name = "pull-request"
+clear = true
+prompt = """
+/hcgps-pr
+
+When the pull request is open, announce {next_state}.
+"""
+
+# Names the pull request by its branch rather than as the one just opened: this
+# Prompt arrives in a Cleared context, which remembers opening nothing.
+[[states]]
+name = "review-fix"
+clear = true
+prompt = """
+/fix-review the review left on the open pull request for this branch — fetch its comments from the pull request.
+
+When the review is addressed and pushed, announce {next_state}.
+"""
+
+# Terminal, and with no Prompt: the Run ends here rather than holding for a
+# human, so it is not a Gate State.
+[[states]]
+name = "done"
+terminal = true

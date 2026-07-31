@@ -22,18 +22,6 @@ terminal = true
 """
 
 
-class RecordingSessions:
-    """Stands in for the tmux adapter. Records the SessionSpec it was handed;
-    the command a spec produces is covered by tests/test_session_spec.py."""
-
-    def __init__(self):
-        self.spawned = []
-
-    def spawn(self, spec):
-        self.spawned.append(spec)
-        return "%42"
-
-
 @pytest.fixture
 def repo(tmp_path):
     path = tmp_path / "repo"
@@ -45,11 +33,6 @@ def repo(tmp_path):
 @pytest.fixture
 def store(tmp_path):
     return RunStore(tmp_path / "naiad" / "runs")
-
-
-@pytest.fixture
-def sessions():
-    return RecordingSessions()
 
 
 def start(repo, store, sessions, **overrides):
