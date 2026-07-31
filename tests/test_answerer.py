@@ -34,6 +34,17 @@ def test_the_consultation_names_what_is_inferable_and_what_must_be_escalated():
         assert invented in consultation
 
 
+def test_the_consultation_asks_for_the_decision_rather_than_a_plan():
+    """The Answerer settles questions for an agent that is working in the same
+    repository and can pick its own file paths, follow its own precedents and
+    sequence its own work. Told only to make the answer actionable, it wrote
+    implementation plans and restated the agent's own survey back to it."""
+    consultation = render_consultation(RETRIES, task="add dark mode").lower()
+
+    assert "own judgement" in consultation
+    assert "implementation plan" in consultation
+
+
 def test_the_consultation_carries_the_question_and_every_option():
     """The Answerer chooses between the alternatives the agent faced."""
     consultation = render_consultation(RETRIES, task="add dark mode")

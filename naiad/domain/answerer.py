@@ -104,6 +104,17 @@ Your authority is bounded by one test:
 Choose from the options given unless every one of them is wrong, in which case
 say so and say what should happen instead.
 
+Answer briefly. The agent asking is working in this same repository with its
+own judgement: it can choose file paths, follow the precedents it has already
+found, and sequence its own work. Decide the question it actually asked and
+stop there. Do not restate its own survey back to it, do not argue against
+options it has already rejected, and do not hand it an implementation plan.
+
+Say more than the decision only where the agent would otherwise get it wrong —
+something it appears not to know, or a consequence of the choice it has not
+seen. If it would change what the agent does, it belongs in the answer; if it
+only shows your working, leave it out.
+
 The task this run is working on:
 {task}
 
@@ -117,7 +128,7 @@ Reply with your reasoning, then end with ONE final line. Choose which of these
 two it is — emit exactly one of them, never both. If you settled the question,
 the answer line is the only line; there is no "nothing to escalate" to report.
 
-{answer_marker} <the answer, stated so the agent can act on it directly>
+{answer_marker} <the decision, in as few words as it takes to be unambiguous>
 
 or, if and only if you did not settle it:
 
