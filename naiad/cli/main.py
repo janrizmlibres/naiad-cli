@@ -18,13 +18,15 @@ from collections.abc import Callable
 from datetime import datetime, timezone
 from pathlib import Path
 
+from naiad.adapters.answerer import HeadlessAnswerer
 from naiad.adapters.executable import naiad_command
 from naiad.adapters.notify import DesktopNotifications
 from naiad.adapters.tmux import TmuxError, TmuxSessions
 from naiad.cli.announce import AnnounceError, announce_state
+from naiad.cli.ask import AskError, ask_question
 from naiad.cli.kickoff import start_run
 from naiad.cli.protocol import injection_for
-from naiad.domain.decide import Deliver, Nudge
+from naiad.domain.decide import Consult, Deliver, Nudge, Respond
 from naiad.domain.transitions import UnknownState
 from naiad.domain.workflow import WorkflowError, load_workflow
 from naiad.hooks.install import DEFAULT_SETTINGS_PATH, install_hooks
@@ -38,7 +40,15 @@ Handler = Callable[[argparse.Namespace], int]
 
 # Everything a command can fail with that the operator or agent should read as
 # a message rather than a traceback.
-FAILURES = (AnnounceError, NoRunError, StorageError, TmuxError, UnknownState, WorkflowError)
+FAILURES = (
+    AnnounceError,
+    AskError,
+    NoRunError,
+    StorageError,
+    TmuxError,
+    UnknownState,
+    WorkflowError,
+)
 
 # Fast enough that a finished turn is picked up promptly, slow enough that a
 # Run waiting on a human is not spinning.
@@ -74,6 +84,17 @@ def main(argv: list[str] | None = None) -> int:
     state = subcommands.add_parser("state", help="announce the State you are in")
     state.add_argument("name", help="the State's name, as declared by the Workflow")
     state.set_defaults(handler=_announce)
+
+    ask = subcommands.add_parser("ask", help="ask a Question you cannot decide alone")
+    ask.add_argument("question", help="what you need decided")
+    ask.add_argument(
+        "--option",
+        dest="options",
+        action="append",
+        default=None,
+        help="an option you were weighing; pass one per option, and pass every one",
+    )
+    ask.set_defaults(handler=_ask)
 
     stopped = subcommands.add_parser("stopped", help="record that a turn ended (Stop hook)")
     stopped.set_defaults(handler=_stopped)
@@ -112,6 +133,23 @@ def _announce(arguments: argparse.Namespace) -> int:
         return 2
 
     print(f"announced {announcement.state} ({announcement.seq})")
+    return 0
+
+
+def _ask(arguments: argparse.Namespace) -> int:
+    """Missing options are rejected here rather than by argparse's own
+    `required`, so that the agent is told why every option is wanted and can
+    correct the call itself."""
+    try:
+        run = _current_run()
+        announcement = ask_question(
+            arguments.question, options=arguments.options or [], run=run
+        )
+    except FAILURES as error:
+        print(f"naiad: {error}", file=sys.stderr)
+        return 2
+
+    print(f"asked ({announcement.seq}); the answer will arrive in this session")
     return 0
 
 
@@ -163,6 +201,7 @@ def _watch(arguments: argparse.Namespace) -> int:
 
     session = TmuxSessions()
     notifier = DesktopNotifications()
+    answerer = HeadlessAnswerer()
     # The naiad driving this Run, so a nudged agent is told to type the command
     # that exists rather than whatever the session's PATH happens to hold.
     naiad = naiad_command()
@@ -175,10 +214,15 @@ def _watch(arguments: argparse.Namespace) -> int:
                 workflow=workflow,
                 session=session,
                 notifier=notifier,
+                answerer=answerer,
                 naiad=naiad,
             )
             if isinstance(action, Deliver):
                 print(f"delivered {action.state}")
+            elif isinstance(action, Consult):
+                print(f"consulting the answerer: {action.question.text}")
+            elif isinstance(action, Respond):
+                print(f"answered: {action.answer}")
             elif isinstance(action, Nudge):
                 print(f"nudged the agent ({action.attempt})")
             time.sleep(TICK_SECONDS)

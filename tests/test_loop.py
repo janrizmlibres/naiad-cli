@@ -7,9 +7,21 @@ Announcement — the two ways this could be wrong without any rule being wrong.
 
 import pytest
 
-from naiad.domain.decide import NOTHING, HANG_SECONDS, SILENCE_SECONDS, Deliver, Notify, Nudge
+from naiad.domain.answerer import Answered, Escalated
+from naiad.domain.decide import (
+    NOTHING,
+    HANG_SECONDS,
+    SILENCE_SECONDS,
+    Consult,
+    Deliver,
+    Notify,
+    Nudge,
+    Respond,
+)
+from naiad.domain.question import Question
 from naiad.domain.workflow import parse_workflow
 from naiad.runtime.announcements import Announcements
+from naiad.runtime.answers import AnswerLog
 from naiad.runtime.loop import UndrivableRun, tick
 from naiad.runtime.records import Turns
 from naiad.runtime.run import RunStore
@@ -80,7 +92,7 @@ def workflow():
     return parse_workflow(WORKFLOW)
 
 
-def drive(run, workflow, session, *, notifier=None, now=None):
+def drive(run, workflow, session, *, notifier=None, answerer=None, now=None):
     """Every tick is given its moment, so no test reads the wall clock. The
     default is the instant of the Run's newest record: nothing has been idle."""
     return tick(
@@ -88,6 +100,7 @@ def drive(run, workflow, session, *, notifier=None, now=None):
         workflow=workflow,
         session=session,
         notifier=notifier or RecordingNotifier(),
+        answerer=answerer or RecordingAnswerer(),
         now=now if now is not None else _later(run, 0),
     )
 
@@ -367,3 +380,173 @@ def test_an_agent_that_never_announces_at_all_is_nudged_after_its_first_turn(
 
     assert action == Nudge(attempt=1)
     assert [entry[0] for entry in session.sent] == ["send"]
+
+
+class RecordingAnswerer:
+    """The Answerer with the headless session taken out: it records what it was
+    asked and returns whatever the test scripted."""
+
+    def __init__(self, *outcomes):
+        self.outcomes = list(outcomes)
+        self.consulted = []
+
+    def consult(self, specification):
+        self.consulted.append(specification)
+        return self.outcomes.pop(0) if self.outcomes else Answered(text="the client")
+
+
+def ask(run, question, *options, then_stop=True):
+    """The agent asks and then stops, which is what waiting for an answer looks
+    like from outside. The turn end is what lets the answer be sent back."""
+    announcement = Announcements(run.root).ask(
+        Question(text=question, options=tuple(options)), state="implement"
+    )
+    if then_stop:
+        Turns(run.root).record_end(latest_seq=announcement.seq)
+    return announcement
+
+
+def resolve(run, workflow, session, answerer, *, notifier=None):
+    """Consult, then act on what came back — the two decisions a Question takes."""
+    notifier = notifier or RecordingNotifier()
+    consulted = drive(run, workflow, session, answerer=answerer, notifier=notifier)
+    acted = drive(run, workflow, session, answerer=answerer, notifier=notifier)
+    return consulted, acted
+
+
+def test_an_unacted_on_question_consults_the_answerer_and_sends_nothing(run, workflow, session):
+    ask(run, "Which module owns retries?", "the client", "the caller")
+    answerer = RecordingAnswerer()
+
+    action = drive(run, workflow, session, answerer=answerer)
+
+    assert isinstance(action, Consult)
+    assert len(answerer.consulted) == 1
+    assert session.sent == []
+
+
+def test_the_answerer_runs_against_the_target_repository(run, workflow, session):
+    """Its answers must reflect the conventions actually in use, which it can
+    only read by being in the repository."""
+    ask(run, "Which module owns retries?", "the client")
+    answerer = RecordingAnswerer()
+
+    drive(run, workflow, session, answerer=answerer)
+
+    assert answerer.consulted[0].cwd == run.target_repo
+
+
+def test_the_first_consultation_starts_an_answerer_session_and_records_it(run, workflow, session):
+    ask(run, "Which module owns retries?", "the client")
+    answerer = RecordingAnswerer()
+
+    drive(run, workflow, session, answerer=answerer)
+
+    assert answerer.consulted[0].resume is False
+    assert run.answerer_session_id
+    assert answerer.consulted[0].claude_session_id == run.answerer_session_id
+
+
+def test_every_later_consultation_resumes_the_same_answerer_session(run, workflow, session):
+    """One Answerer per Run, resumed, so that its later answers cannot
+    contradict its earlier ones — the operator reads them as a single log."""
+    answerer = RecordingAnswerer()
+    ask(run, "Which module owns retries?", "the client")
+    resolve(run, workflow, session, answerer)
+
+    ask(run, "Where do the tests live?", "beside the code")
+    resolve(run, workflow, session, answerer)
+
+    first, second = answerer.consulted
+    assert second.resume is True
+    assert second.claude_session_id == first.claude_session_id
+
+
+def test_an_answer_is_sent_into_the_session_and_appended_to_the_answer_log(
+    run, workflow, session
+):
+    ask(run, "Which module owns retries?", "the client", "the caller")
+    answerer = RecordingAnswerer(Answered(text="the client"))
+
+    _, acted = resolve(run, workflow, session, answerer)
+
+    assert isinstance(acted, Respond)
+    assert "the client" in session.sent[0][2]
+    entry = AnswerLog(run.root).entries()[0]
+    assert (entry.question, entry.options, entry.answer, entry.escalated) == (
+        "Which module owns retries?", ("the client", "the caller"), "the client", False,
+    )
+
+
+def test_an_escalation_notifies_and_is_logged_and_sends_nothing_into_the_session(
+    run, workflow, session
+):
+    """Nothing may reach the agent: the Answerer declined to decide, so there
+    is no answer to give, and inventing one is what escalating avoids."""
+    ask(run, "Which SMS vendor?", "Twilio", "Vonage")
+    answerer = RecordingAnswerer(Escalated(reason="vendor choice is not in the repository"))
+    notifier = RecordingNotifier()
+
+    _, acted = resolve(run, workflow, session, answerer, notifier=notifier)
+
+    assert isinstance(acted, Notify)
+    assert session.sent == []
+    assert "vendor choice is not in the repository" in notifier.notified[0][1]
+    entry = AnswerLog(run.root).entries()[0]
+    assert entry.escalated is True
+    assert entry.options == ("Twilio", "Vonage")
+
+
+def test_a_question_is_consulted_once_however_often_the_loop_ticks(run, workflow, session):
+    """Consulting is a headless Claude call: repeating it every couple of
+    seconds spends money and risks contradicting the answer already sent."""
+    ask(run, "Which module owns retries?", "the client")
+    answerer = RecordingAnswerer()
+
+    for _ in range(4):
+        drive(run, workflow, session, answerer=answerer)
+
+    assert len(answerer.consulted) == 1
+
+
+def test_an_answered_question_is_responded_to_once_however_often_the_loop_ticks(
+    run, workflow, session
+):
+    ask(run, "Which module owns retries?", "the client")
+    answerer = RecordingAnswerer()
+
+    for _ in range(4):
+        drive(run, workflow, session, answerer=answerer)
+
+    assert len(session.sent) == 1
+    assert len(AnswerLog(run.root).entries()) == 1
+
+
+def test_the_answer_log_shows_every_question_in_the_order_they_occurred(run, workflow, session):
+    answerer = RecordingAnswerer(
+        Answered(text="the client"), Escalated(reason="not in the repository")
+    )
+    ask(run, "Which module owns retries?", "the client")
+    resolve(run, workflow, session, answerer)
+    ask(run, "Which SMS vendor?", "Twilio")
+    resolve(run, workflow, session, answerer)
+
+    entries = AnswerLog(run.root).entries()
+
+    assert [entry.question for entry in entries] == [
+        "Which module owns retries?", "Which SMS vendor?",
+    ]
+    assert [entry.escalated for entry in entries] == [False, True]
+
+
+def test_an_answer_is_held_back_from_a_session_still_working(run, workflow, session):
+    """The agent asked and carried on rather than stopping. Sending the answer
+    now would type over the work it is doing."""
+    ask(run, "Which module owns retries?", "the client", then_stop=False)
+    answerer = RecordingAnswerer()
+
+    drive(run, workflow, session, answerer=answerer)
+    drive(run, workflow, session, answerer=answerer)
+
+    assert answerer.consulted, "the answerer should still be consulted; consulting sends nothing"
+    assert session.sent == []

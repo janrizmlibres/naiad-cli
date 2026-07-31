@@ -77,6 +77,25 @@ def render_nudge(*, attempt: int, naiad: str = DEFAULT_NAIAD) -> str:
     return _NUDGES[attempt - 1].format(announce=f"{naiad} {ANNOUNCE_SUBCOMMAND}")
 
 
+_ANSWER = """\
+The answer to the question you asked:
+
+{answer}
+
+That is settled. Carry on with the phase you are in, and announce when it is done."""
+
+
+def render_answer(answer: str) -> str:
+    """How an answer arrives in the agent's session.
+
+    Framed as an answer rather than sent bare, because it lands as a message in
+    a session that has been working on other things: an unattributed sentence
+    reads as a new instruction, and the agent would act on it instead of
+    resuming what it asked about.
+    """
+    return _ANSWER.format(answer=answer)
+
+
 def render_protocol(*, next_state: str | None, naiad: str = DEFAULT_NAIAD) -> str:
     """The Protocol as the agent meets it, naming the State it is expected to
     announce next. The Workflow file owns that ordering, so it is interpolated
@@ -94,4 +113,4 @@ def render_protocol(*, next_state: str | None, naiad: str = DEFAULT_NAIAD) -> st
     return f"{preamble}\n\n{expectation}\n"
 
 
-__all__ = ["DEFAULT_NAIAD", "render_nudge", "render_protocol"]
+__all__ = ["DEFAULT_NAIAD", "render_answer", "render_nudge", "render_protocol"]

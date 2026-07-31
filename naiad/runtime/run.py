@@ -48,10 +48,22 @@ class Run:
     tmux_session: str | None = None
     tmux_pane: str | None = None
     claude_session_id: str | None = None
+    # The Answerer's own session, one per Run and resumed across every Question
+    # so that its later answers cannot contradict its earlier ones. Recorded
+    # here rather than held in the loop because it must survive a watch that is
+    # interrupted and restarted, and because nothing about a Run may be
+    # module-global (ADR 0004).
+    answerer_session_id: str | None = None
 
     @property
     def metadata_path(self) -> Path:
         return self.root / METADATA_FILENAME
+
+    def attach_answerer(self, session_id: str) -> None:
+        """Record the Answerer session this Run consults, so every Question
+        after the first resumes it rather than starting afresh."""
+        self.answerer_session_id = session_id
+        self.save()
 
     def attach_session(
         self,
@@ -82,6 +94,7 @@ class Run:
             "tmux_session": self.tmux_session,
             "tmux_pane": self.tmux_pane,
             "claude_session_id": self.claude_session_id,
+            "answerer_session_id": self.answerer_session_id,
         }
 
 
@@ -155,6 +168,9 @@ class RunStore:
             tmux_session=document["tmux_session"],
             tmux_pane=document["tmux_pane"],
             claude_session_id=document["claude_session_id"],
+            # Read with a default: a Run started before it had an Answerer is
+            # still a Run, and has simply never consulted one.
+            answerer_session_id=document.get("answerer_session_id"),
         )
 
 

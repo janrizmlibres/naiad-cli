@@ -23,6 +23,7 @@ import json
 from pathlib import Path
 
 from naiad.domain.announcement import Announcement
+from naiad.domain.question import Question
 from naiad.runtime.atomic import write_atomically
 
 STATE_FILENAME = "state.json"
@@ -40,15 +41,46 @@ class Announcements:
             document = json.loads(self.path.read_text())
         except FileNotFoundError:
             return None
-        return Announcement(seq=document["seq"], state=document["state"])
+        question = document.get("question")
+        return Announcement(
+            seq=document["seq"],
+            state=document["state"],
+            question=(
+                Question(text=question["text"], options=tuple(question["options"]))
+                if question
+                else None
+            ),
+        )
 
     def announce(self, state: str) -> Announcement:
+        """A State, carrying no Question.
+
+        Announcing a State is also how a Question stops being current: the
+        agent has been answered and moved on, and a Question left clinging to
+        the next Announcement would be consulted again after the fact.
+        """
+        return self._write(state=state, question=None)
+
+    def ask(self, question: Question, *, state: str) -> Announcement:
+        """A Question, taking its number from the same sequence as States so
+        that the two are ordered against each other.
+
+        The State is carried rather than replaced because it is where the agent
+        is standing and where it carries on once the answer arrives.
+        """
+        return self._write(state=state, question=question)
+
+    def _write(self, *, state: str, question: Question | None) -> Announcement:
         previous = self.latest()
-        announcement = Announcement(seq=(previous.seq + 1) if previous else 1, state=state)
-        write_atomically(
-            self.path,
-            json.dumps({"seq": announcement.seq, "state": announcement.state}, indent=2) + "\n",
+        announcement = Announcement(
+            seq=(previous.seq + 1) if previous else 1,
+            state=state,
+            question=question,
         )
+        document: dict[str, object] = {"seq": announcement.seq, "state": announcement.state}
+        if question is not None:
+            document["question"] = {"text": question.text, "options": list(question.options)}
+        write_atomically(self.path, json.dumps(document, indent=2) + "\n")
         return announcement
 
 

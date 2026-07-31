@@ -11,6 +11,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from naiad.domain.announcement import Announcement
+from naiad.domain.answerer import Consultation, Escalated
+from naiad.domain.question import Question
 from naiad.domain.transitions import next_state
 from naiad.domain.workflow import Workflow
 
@@ -55,6 +57,13 @@ class Signals:
 
     idle_for is elapsed seconds since the last signal of any kind. It is handed
     in rather than read, so every rule below is testable as data in, Action out.
+
+    consultation is what the Answerer has said about the Question currently
+    announced, or None if it has not been asked yet. It is a signal rather than
+    something fetched here for the reason resolving a Question takes two
+    decisions at all: the Answerer returns either an answer or an Escalation,
+    and choosing between those is a rule. Branching on it where the Answerer is
+    called would put that rule in the adapter layer (ADR 0004).
     """
 
     announcement: Announcement | None
@@ -64,6 +73,7 @@ class Signals:
     notified: bool = False
     nudges: int = 0
     idle_for: float = 0.0
+    consultation: Consultation = None
 
 
 @dataclass(frozen=True)
@@ -86,12 +96,37 @@ class Nudge:
 
 
 @dataclass(frozen=True)
+class Consult:
+    """Put this Question to the Answerer. Nothing is sent into the Run's
+    session: what comes back is a signal for the next decision to act on."""
+
+    question: Question
+
+
+@dataclass(frozen=True)
+class Respond:
+    """Send the Answerer's answer into the session and append it to the Answer
+    log. The Question rides along because the log records the alternatives the
+    answer was chosen from, and Naiad is the only party holding both halves."""
+
+    question: Question
+    answer: str
+
+
+@dataclass(frozen=True)
 class Notify:
     """The human is needed. The Run stays alive and keeps ticking — they type,
     the agent announces, and delivery resumes. Only a Terminal State ends a
-    Run, which is why this is not Finish."""
+    Run, which is why this is not Finish.
+
+    question is set when what needs a human is an Escalated Question, so that
+    the Answer log records what became of it beside the ones that were
+    answered. An Escalation is not a separate Action — a Gate reached, an
+    Answerer escalating, an agent gone silent and an agent hung are one
+    behaviour, and Naiad needs one behaviour here rather than v1's taxonomy."""
 
     reason: str
+    question: Question | None = None
 
 
 @dataclass(frozen=True)
@@ -101,7 +136,7 @@ class Nothing:
 
 NOTHING = Nothing()
 
-Action = Deliver | Nudge | Notify | Nothing
+Action = Consult | Deliver | Notify | Nudge | Respond | Nothing
 
 
 def decide(workflow: Workflow, signals: Signals, *, skip_gates: bool = False) -> Action:
@@ -111,6 +146,32 @@ def decide(workflow: Workflow, signals: Signals, *, skip_gates: bool = False) ->
     still never writes the State file (ADR 0001).
     """
     announcement = _unhandled(signals)
+
+    if announcement is not None and announcement.question is not None:
+        # A Question outranks the State it was asked from. The agent is
+        # standing in a State it has already been given the Prompt for, so
+        # without this the answer to 'which of these two?' would be the Prompt
+        # it is in the middle of working on.
+        question = announcement.question
+        consultation = signals.consultation
+
+        # Consulting and escalating both send nothing into the session, so
+        # neither can type over work in progress and neither waits on a turn
+        # ending. That exemption is theirs alone.
+        if consultation is None:
+            return Consult(question=question)
+        if isinstance(consultation, Escalated):
+            return _notify(
+                signals, f"the Answerer escalated: {consultation.reason}", question=question
+            )
+        if signals.stopped:
+            return Respond(question=question, answer=consultation.text)
+
+        # An answer in hand, but no turn has ended. Sending it now would type
+        # over an agent still working, exactly as delivering a Prompt would.
+        # Falling through rather than returning is deliberate: it leaves the
+        # hang rule below reachable, so an answer waiting on a session that has
+        # died is not waited on forever.
 
     if announcement is not None and signals.stopped:
         state = workflow.state(announcement.state)
@@ -171,12 +232,12 @@ def _unhandled(signals: Signals) -> Announcement | None:
     return announcement
 
 
-def _notify(signals: Signals, reason: str) -> Action:
+def _notify(signals: Signals, reason: str, *, question: Question | None = None) -> Action:
     """Notification is once per Announcement, not once per tick. Every
     condition reaching here persists with identical signals until a human acts,
     so without this the operator is woken every couple of seconds until they do
     (PRD, 'The Answerer')."""
-    return NOTHING if signals.notified else Notify(reason=reason)
+    return NOTHING if signals.notified else Notify(reason=reason, question=question)
 
 
 __all__ = [
@@ -185,10 +246,12 @@ __all__ = [
     "NUDGE_LIMIT",
     "SILENCE_SECONDS",
     "Action",
+    "Consult",
     "Deliver",
     "Nothing",
     "Notify",
     "Nudge",
+    "Respond",
     "Signals",
     "decide",
 ]

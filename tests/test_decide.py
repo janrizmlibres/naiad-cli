@@ -3,17 +3,21 @@
 import pytest
 
 from naiad.domain.announcement import Announcement
+from naiad.domain.answerer import Answered, Escalated
 from naiad.domain.decide import (
     HANG_SECONDS,
     NOTHING,
     NUDGE_LIMIT,
     SILENCE_SECONDS,
+    Consult,
     Deliver,
     Notify,
     Nudge,
+    Respond,
     Signals,
     decide,
 )
+from naiad.domain.question import Question
 from naiad.domain.workflow import parse_workflow
 
 WORKFLOW = """
@@ -42,6 +46,9 @@ def workflow():
     return parse_workflow(WORKFLOW)
 
 
+QUESTION = Question(text="Which module owns retries?", options=("the client", "the caller"))
+
+
 def signals(
     state,
     *,
@@ -52,15 +59,18 @@ def signals(
     notified=False,
     nudges=0,
     idle_for=0.0,
+    question=None,
+    consultation=None,
 ):
     return Signals(
-        announcement=Announcement(seq=seq, state=state) if state else None,
+        announcement=Announcement(seq=seq, state=state, question=question) if state else None,
         handled_seq=handled_seq,
         stopped=stopped,
         stopped_since_action=stopped_since_action,
         notified=notified,
         nudges=nudges,
         idle_for=idle_for,
+        consultation=consultation,
     )
 
 
@@ -287,3 +297,119 @@ def test_with_gates_skipped_delivery_is_otherwise_unchanged(workflow):
     skipped = decide(workflow, signals("grill"), skip_gates=True)
 
     assert (skipped.state, skipped.prompt, skipped.clear) == (kept.state, kept.prompt, kept.clear)
+
+
+def test_an_unacted_on_question_consults_the_answerer(workflow):
+    """The whole point of the Answerer: a Question resolves without a human."""
+    action = decide(workflow, signals("implement", question=QUESTION))
+
+    assert action == Consult(question=QUESTION)
+
+
+def test_a_question_is_consulted_even_before_a_turn_has_ended(workflow):
+    """Consulting sends nothing into the session, so unlike a Prompt it cannot
+    type over work in progress — and the Answerer may as well think while the
+    agent finishes its turn."""
+    action = decide(workflow, signals("implement", question=QUESTION, stopped=False))
+
+    assert action == Consult(question=QUESTION)
+
+
+def test_a_question_is_resolved_rather_than_its_states_prompt_redelivered(workflow):
+    """A Question rides on an Announcement, so without this the agent asking
+    one would be sent the Prompt it is already working on."""
+    action = decide(workflow, signals("implement", seq=2, handled_seq=1, question=QUESTION))
+
+    assert not isinstance(action, Deliver)
+
+
+def test_an_answer_from_the_answerer_is_sent_back_with_its_question(workflow):
+    """The Answer log needs the Question and its options beside the answer, and
+    Naiad holds both halves — the agent cannot log an answer it never saw."""
+    answered = signals("implement", question=QUESTION, consultation=Answered(text="the client"))
+
+    assert decide(workflow, answered) == Respond(question=QUESTION, answer="the client")
+
+
+def test_an_escalation_from_the_answerer_notifies_rather_than_responding(workflow):
+    """Escalation is mechanically the Gate State: Naiad stops acting and the
+    human types into the session themselves."""
+    escalated = signals(
+        "implement", question=QUESTION, consultation=Escalated(reason="that is a budget call")
+    )
+
+    action = decide(workflow, escalated)
+
+    assert isinstance(action, Notify)
+    assert "that is a budget call" in action.reason
+
+
+def test_an_escalation_notification_carries_the_question_for_the_answer_log(workflow):
+    """An escalation is what became of that Question, so the operator reading
+    the log sees it beside the Questions that were answered."""
+    escalated = signals(
+        "implement", question=QUESTION, consultation=Escalated(reason="that is a budget call")
+    )
+
+    assert decide(workflow, escalated).question == QUESTION
+
+
+def test_an_escalation_notifies_once_however_often_the_decision_is_made(workflow):
+    """The condition persists with identical signals until the human acts."""
+    already = signals(
+        "implement",
+        question=QUESTION,
+        consultation=Escalated(reason="that is a budget call"),
+        notified=True,
+    )
+
+    assert decide(workflow, already) is NOTHING
+
+
+def test_a_question_already_acted_on_is_not_consulted_twice(workflow):
+    """Consulting is a headless Claude call. Repeating it every couple of
+    seconds would spend money and could contradict the answer already sent."""
+    handled = signals("implement", seq=3, handled_seq=3, question=QUESTION)
+
+    assert decide(workflow, handled) is NOTHING
+    assert decide(workflow, handled) is NOTHING
+
+
+def test_an_announcement_carrying_no_question_is_delivered_as_before(workflow):
+    """Questions are an addition to Announcements, not a replacement."""
+    assert isinstance(decide(workflow, signals("implement")), Deliver)
+
+
+def test_an_answer_is_not_sent_into_a_session_that_has_not_ended_its_turn(workflow):
+    """Respond types into the pane exactly as Deliver does, so it wants the
+    same guard. Consulting needs none — it sends nothing — but the branch that
+    sends must not inherit that exemption: the agent that asked may still be
+    working, and typing over it is destructive."""
+    working = signals(
+        "implement", question=QUESTION, consultation=Answered(text="the client"), stopped=False
+    )
+
+    assert not isinstance(decide(workflow, working), Respond)
+
+
+def test_an_answer_waiting_on_a_session_that_never_ends_a_turn_still_notifies(workflow):
+    """Holding the answer back must not swallow the hang rule: an answer in
+    hand cannot mean waiting on a dead session forever."""
+    hung = signals(
+        "implement",
+        question=QUESTION,
+        consultation=Answered(text="the client"),
+        stopped=False,
+        idle_for=HANG_SECONDS,
+    )
+
+    assert isinstance(decide(workflow, hung), Notify)
+
+
+def test_an_answer_is_sent_once_the_turn_has_ended(workflow):
+    """The guard delays the answer, it does not lose it."""
+    stopped = signals(
+        "implement", question=QUESTION, consultation=Answered(text="the client"), stopped=True
+    )
+
+    assert decide(workflow, stopped) == Respond(question=QUESTION, answer="the client")
