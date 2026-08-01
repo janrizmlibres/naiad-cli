@@ -636,16 +636,21 @@ def test_the_implement_loop_implements_only_agent_ready_tickets(workflow):
     assert IMPLEMENTABLE in delivered(workflow, "implement")
 
 
-def test_the_implement_loop_sends_every_other_status_to_the_gate(workflow):
+def test_the_implement_loop_sends_every_other_open_status_to_the_gate(workflow):
     """Not only `ready-for-human`. An unrecognised or missing status is routed
     the same way, because an unnecessary pause costs one operator interaction
     while implementing a `needs-info` ticket — one whose specification is known
-    to be incomplete — costs a review cycle and a revert."""
+    to be incomplete — costs a review cycle and a revert. `wontfix` is the one
+    exception: closed by decision, it is walked past rather than handed over
+    (ADR 0027), so it must not appear among the statuses routed to the gate."""
     prompt = delivered(workflow, "implement")
 
-    for status in (NEEDS_A_HUMAN, "needs-info", "needs-triage", "wontfix"):
+    for status in (NEEDS_A_HUMAN, "needs-info", "needs-triage"):
         assert status in prompt
     assert "announce handover" in prompt
+
+    gate_lines = [line for line in prompt.split("\n") if "handover" in line]
+    assert not any("wontfix" in line for line in gate_lines)
 
 
 def test_the_implement_loop_reports_which_status_stopped_it(workflow):
@@ -681,16 +686,28 @@ def test_the_implement_loop_marks_the_finished_ticket_resolved(workflow):
     assert "set that ticket's Status line to resolved" in delivered(workflow, "implement")
 
 
-def test_the_implement_loop_reads_only_unresolved_tickets_when_it_scans(workflow):
-    """The scan routes every status other than ready-for-agent to handover, so a
-    resolved ticket left in the frontier would park the loop on its own finished
-    work. The frontier is the unresolved tickets alone, and a blocking edge is
-    satisfied when the ticket it names is resolved — the meaning issue-tracker.md
-    already gives `resolved`."""
+def test_the_implement_loop_reads_only_open_tickets_when_it_scans(workflow):
+    """A closed ticket left in the frontier would park the loop — on its own
+    finished work if `resolved` stopped it, or on a decision already made if
+    `wontfix` did (the incident behind ADR 0027). The frontier is the open
+    tickets alone, closed being `resolved` or `wontfix` — the meaning
+    issue-tracker.md gives both."""
     prompt = delivered(workflow, "implement")
 
-    assert "lowest-numbered ticket that is not resolved" in prompt
-    assert "no unresolved tickets remain" in prompt
+    assert "lowest-numbered ticket that is open" in prompt
+    assert "no open tickets remain" in prompt
+
+
+def test_the_implement_loop_treats_wontfix_as_closed(workflow):
+    """`resolved` closes by completion, `wontfix` by decision, and the scan
+    treats them identically — including the blocking edges, which are satisfied
+    by a closed ticket. What makes the edge rule safe is the convention the
+    Prompt leans on: no ticket is born `wontfix`, and whoever drops one tends
+    its dependents in the same act (ADR 0027)."""
+    prompt = delivered(workflow, "implement")
+
+    assert "resolved or wontfix" in prompt
+    assert "an edge is satisfied when the ticket it names is closed" in prompt
 
 
 def test_the_handover_gate_delivers_nothing(workflow):

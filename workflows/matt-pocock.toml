@@ -279,14 +279,18 @@ When every ticket is published with its blocking edges declared, announce {next_
 # implementable, and splitting those across two contexts holds the same
 # knowledge twice (ADR 0010).
 #
-# Every status other than ready-for-agent goes to the gate, and the agent says
-# which it found: routing an unknown label and routing ready-for-human are the
-# same action needing opposite responses — fix the label, or do the work.
+# Every open status other than ready-for-agent goes to the gate, and the agent
+# says which it found: routing an unknown label and routing ready-for-human are
+# the same action needing opposite responses — fix the label, or do the work.
+# wontfix does not go to the gate: it is closed by decision as resolved is by
+# completion, and both are walked past — the drop was deliberate and whoever
+# made it tended the dependents in the same act, which is what lets the scan
+# trust every surviving edge (ADR 0027).
 #
 # The finished ticket is marked resolved here, in the Prompt, rather than left
 # to /implement: the skill did it unreliably — sometimes marking a ticket done,
 # sometimes not — and the Status line is the only record the loop and a reader
-# have. Marking it is also what shrinks the frontier: the scan reads unresolved
+# have. Marking it is also what shrinks the frontier: the scan reads open
 # tickets only, so a ticket left unmarked is one this loop picks again. resolved
 # is issue-tracker.md's own completion status — the wayfinding axis already uses
 # it, and an edge is unblocked when its ticket is resolved — reused here rather
@@ -305,11 +309,11 @@ prompt = """
 
 When it is done — the work complete, its tests green and the working tree clean — set that ticket's Status line to resolved and save it, before you do anything else. That line is the only record the ticket is finished: left unmarked, it is a ticket this loop's scan picks again and one a reader cannot tell from outstanding work.
 
-Then choose what comes next. Scan the project's issue tracker for the lowest-numbered ticket that is not resolved and whose blocking edges are all satisfied — an edge is satisfied when the ticket it names is resolved — and read its Status line:
+Then choose what comes next. A ticket is closed when its Status line reads resolved or wontfix — closed by completion or closed by decision — and open otherwise. Scan the project's issue tracker for the lowest-numbered ticket that is open and whose blocking edges are all satisfied — an edge is satisfied when the ticket it names is closed — and read its Status line:
 
 - ready-for-agent — announce implement, passing that ticket's file as the subject.
-- any other status, including ready-for-human, needs-info, needs-triage, wontfix, one this repository does not define, or no Status line at all — announce handover, passing that ticket's file as the subject, and say in the session which status you found and why you are stopping.
-- no unresolved tickets remain — announce pull-request.
+- any other status, including ready-for-human, needs-info, needs-triage, one this repository does not define, or no Status line at all — announce handover, passing that ticket's file as the subject, and say in the session which status you found and why you are stopping.
+- no open tickets remain — announce pull-request.
 """
 
 # Where the loop puts a ticket it will not do. A Gate State: no Prompt, so Naiad
