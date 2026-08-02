@@ -1,5 +1,5 @@
 """The entry point's odds and ends: how a Run is named, driving one by name, and
-installing the hooks.
+installing into the operator's Claude configuration.
 
 `naiad run` has its own file (tests/test_run_command.py) now that it is one
 entrance to the Queue rather than a way to spawn a session, and the Queue's
@@ -59,10 +59,22 @@ def test_watching_a_run_while_a_supervisor_holds_the_lock_is_refused(
     assert "supervisor" in capsys.readouterr().err
 
 
-def test_installing_hooks_writes_the_settings_file_the_operator_named(tmp_path, capsys):
+def _install(tmp_path, *arguments):
+    """Installing into a configuration of the operator's that is this test's."""
+    return [
+        "install",
+        "--settings",
+        str(tmp_path / ".claude" / "settings.json"),
+        "--skills",
+        str(tmp_path / ".claude" / "skills"),
+        *arguments,
+    ]
+
+
+def test_installing_writes_the_settings_file_the_operator_named(tmp_path, capsys):
     settings = tmp_path / ".claude" / "settings.json"
 
-    assert main(["install-hooks", "--settings", str(settings)]) == 0
+    assert main(_install(tmp_path)) == 0
 
     installed = json.loads(settings.read_text())["hooks"]
     assert sorted(entry["matcher"] for entry in installed["SessionStart"]) == [
@@ -73,15 +85,48 @@ def test_installing_hooks_writes_the_settings_file_the_operator_named(tmp_path, 
     assert str(settings) in capsys.readouterr().out
 
 
-def test_installing_hooks_over_an_unreadable_settings_file_is_reported_not_a_traceback(
+def test_installing_ships_the_adopt_skill_beside_the_hooks(tmp_path, capsys):
+    """One command for the machine's whole setup: an operator who installed the
+    hooks and not the skill has a naiad the operator's intent cannot reach."""
+    skill = tmp_path / ".claude" / "skills" / "naiad-adopt" / "SKILL.md"
+
+    assert main(_install(tmp_path)) == 0
+
+    # That the skill arrived, and nothing about what it says: its contents are
+    # tests/test_adopt_skill.py's, and the naiad it names is whichever one
+    # installed it rather than a string this test could predict.
+    assert "name: naiad-adopt" in skill.read_text()
+    assert str(skill) in capsys.readouterr().out
+
+
+def test_installing_over_an_unreadable_settings_file_is_reported_not_a_traceback(
     tmp_path, capsys
 ):
     settings = tmp_path / ".claude" / "settings.json"
     settings.parent.mkdir(parents=True)
     settings.write_text("{ not json")
 
-    assert main(["install-hooks", "--settings", str(settings)]) == 2
+    assert main(_install(tmp_path)) == 2
     assert "not valid JSON" in capsys.readouterr().err
+
+
+def test_installing_over_a_skill_naiad_did_not_write_is_reported_not_a_traceback(
+    tmp_path, capsys
+):
+    """And what the hooks did is said before the refusal, because they were
+    installed: an operator told only that something was refused would not know
+    which half of the command had already happened."""
+    theirs = tmp_path / ".claude" / "skills" / "naiad-adopt" / "SKILL.md"
+    theirs.parent.mkdir(parents=True)
+    theirs.write_text("my own adopt notes\n")
+
+    assert main(_install(tmp_path)) == 2
+
+    printed = capsys.readouterr()
+    assert "refusing to overwrite" in printed.err
+    assert "hooks" in printed.out
+    assert "hooks" in json.loads((tmp_path / ".claude" / "settings.json").read_text())
+    assert theirs.read_text() == "my own adopt notes\n"
 
 
 def test_run_ids_of_concurrent_runs_differ():

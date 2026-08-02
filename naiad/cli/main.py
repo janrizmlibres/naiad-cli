@@ -58,6 +58,7 @@ from naiad.runtime.queue import Queue, status_of
 from naiad.runtime.records import Clears, Turns
 from naiad.runtime.resolve import NoRunError, RunResolver
 from naiad.runtime.run import Run, RunStore
+from naiad.skills.install import DEFAULT_SKILLS_ROOT, install_adopt_skill
 
 Handler = Callable[[argparse.Namespace], int]
 
@@ -196,15 +197,21 @@ def main(argv: list[str] | None = None) -> int:
     protocol.set_defaults(handler=_protocol)
 
     install = subcommands.add_parser(
-        "install-hooks", help="install Naiad's hooks into your Claude Code settings"
+        "install", help="install Naiad's hooks and skills into your Claude Code configuration"
     )
     install.add_argument(
         "--settings",
         type=Path,
         default=DEFAULT_SETTINGS_PATH,
-        help=f"which settings file to install into (default: {DEFAULT_SETTINGS_PATH})",
+        help=f"which settings file to install the hooks into (default: {DEFAULT_SETTINGS_PATH})",
     )
-    install.set_defaults(handler=_install_hooks)
+    install.add_argument(
+        "--skills",
+        type=Path,
+        default=DEFAULT_SKILLS_ROOT,
+        help=f"which skills directory to install into (default: {DEFAULT_SKILLS_ROOT})",
+    )
+    install.set_defaults(handler=_install)
 
     watch_parser = subcommands.add_parser(
         "watch", help="drive a Run until it ends or is interrupted"
@@ -444,16 +451,29 @@ def _hook_source() -> str | None:
     return source if isinstance(source, str) else None
 
 
-def _install_hooks(arguments: argparse.Namespace) -> int:
-    """Installed once for the machine rather than per Run: the hooks do nothing
-    when no Run is attached to the session that fired them."""
+def _install(arguments: argparse.Namespace) -> int:
+    """Everything Naiad puts into the operator's Claude configuration: the two
+    hooks, and the skill that turns the operator's stated intent into `naiad adopt`
+    (ADR 0028).
+
+    Installed once for the machine rather than per Run: the hooks do nothing
+    when no Run is attached to the session that fired them, and the skill is
+    reached for only when the operator asks for an Adoption.
+
+    One command rather than one per surface, because a machine with the hooks
+    and not the skill is a machine where the intent phrase reaches nothing —
+    and each is reported as it lands, so that a refusal on the second is read
+    against what the first already did.
+    """
     try:
-        path = install_hooks(settings_path=arguments.settings)
+        settings = install_hooks(settings_path=arguments.settings)
+        print(f"installed naiad's hooks into {settings}")
+        skill = install_adopt_skill(skills_root=arguments.skills)
+        print(f"installed the adopt skill into {skill}")
     except (OSError, ValueError) as error:
         print(f"naiad: {error}", file=sys.stderr)
         return 2
 
-    print(f"installed naiad's hooks into {path}")
     return 0
 
 
