@@ -13,6 +13,23 @@ from pathlib import Path
 
 
 @dataclass(frozen=True)
+class Attachment:
+    """The live Session an Adoption's Run joins instead of one being opened for
+    it (ADR 0028).
+
+    The pane is the whole of what delivery needs and is why an Adoption is tmux
+    only: a session Naiad cannot type into is one it cannot drive. The Claude
+    session id is a second key for the resolution seam and optional in value,
+    because it may be unknowable from inside the tool call that adopts —
+    whichever keys can be gathered are recorded, and the pane is the reliable
+    one.
+    """
+
+    tmux_pane: str
+    claude_session_id: str | None = None
+
+
+@dataclass(frozen=True)
 class Entry:
     """One piece of work waiting to be run.
 
@@ -41,9 +58,14 @@ class Entry:
     start_state: str | None = None
     subject: str | None = None
     skip_gates: bool = False
+    # Which Session this Entry's Run attaches to, absent for the ordinary Entry
+    # whose Run is spawned one of its own. Nothing else about the Entry changes
+    # for being marked: it takes its place in the Lane, is claim-checked, listed
+    # and removed exactly as any other (ADR 0028).
+    attachment: Attachment | None = None
     # What became of it: absent until the Entry starts, and the only field that
     # says anything about the Run. Everything else is asked of the Run itself.
     run_id: str | None = None
 
 
-__all__ = ["Entry"]
+__all__ = ["Attachment", "Entry"]

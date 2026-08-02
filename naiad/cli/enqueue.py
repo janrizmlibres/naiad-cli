@@ -19,7 +19,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from naiad.cli.refusals import MissingSubject, MissingTask, Remedy, check_start
-from naiad.domain.entry import Entry
+from naiad.domain.entry import Attachment, Entry
 from naiad.domain.transitions import UnknownState
 from naiad.domain.workflow import WorkflowError
 from naiad.runtime.home import real_path
@@ -52,6 +52,12 @@ class Work:
     start_state: str | None = None
     subject: str | None = None
     skip_gates: bool = False
+    # The Session an Adoption's Run joins rather than one being opened for it
+    # (ADR 0028). Described here beside everything else the work was described
+    # with, because an Adoption is one piece of work like any other and reaches
+    # the Queue through this same enqueue — a second path could queue something
+    # this one would have refused.
+    attachment: Attachment | None = None
 
 
 class BranchAlreadyClaimed(Exception):
@@ -170,6 +176,7 @@ def prepare(
         start_state=work.start_state,
         subject=work.subject,
         skip_gates=work.skip_gates,
+        attachment=work.attachment,
     )
 
 

@@ -29,6 +29,7 @@ from naiad.adapters.executable import naiad_command
 from naiad.adapters.lock import SupervisorLock
 from naiad.adapters.notify import DesktopNotifications
 from naiad.adapters.tmux import TmuxError, TmuxSessions
+from naiad.cli.adopt import NotInTmux, attachment_in, teaching_for
 from naiad.cli.announce import AnnounceError, announce_state
 from naiad.cli.ask import AskError, ask_question
 from naiad.cli.batch import BatchError, enqueue_batch, load_batch
@@ -38,11 +39,11 @@ from naiad.cli.hold import HoldError, declare_hold
 from naiad.cli.library import LibraryError, resolve_workflow
 from naiad.cli.kickoff import start_run
 from naiad.cli.protocol import injection_for
-from naiad.cli.refusals import ADD_COMMAND, RUN_COMMAND, Remedy
+from naiad.cli.refusals import ADD_COMMAND, ADOPT_COMMAND, RUN_COMMAND, Remedy
 from naiad.cli.supervisor import supervise_queue
 from naiad.cli.wait import WaitError, declare_wait
 from naiad.cli.watch import tick_once, watch
-from naiad.domain.entry import Entry
+from naiad.domain.entry import Attachment, Entry
 from naiad.domain.workflow import load_workflow
 from naiad.hooks.install import DEFAULT_SETTINGS_PATH, install_hooks
 from naiad.runtime.announcements import Announcements
@@ -71,6 +72,7 @@ FAILURES = (
     WaitError,
     LibraryError,
     NoRunError,
+    NotInTmux,
     StorageError,
     TmuxError,
     # Everything describing a piece of work can be refused for, taken from the
@@ -121,6 +123,25 @@ def main(argv: list[str] | None = None) -> int:
     )
     queue_rm.add_argument("entry_id", help="which Entry, as `naiad queue list` names it")
     queue_rm.set_defaults(handler=_queue_rm)
+
+    adopt = subcommands.add_parser(
+        "adopt", help="queue a run that adopts the session you are in, from inside it"
+    )
+    adopt.add_argument(
+        "workflow",
+        help="path to the Workflow file, or the bare name of one in the library",
+    )
+    # A flag rather than a positional, and required: an Adoption has no natural
+    # Subject to stand in for a Task (ADR 0028), and the agent is the one party
+    # holding the conversation the operator's intent came out of, so it writes
+    # the Task rather than repeating a line the operator never typed.
+    adopt.add_argument(
+        "--task",
+        required=True,
+        help="what the work is, distilled from the conversation in this session",
+    )
+    _describe_where_and_how(adopt)
+    adopt.set_defaults(handler=_adopt)
 
     state = subcommands.add_parser("state", help="announce the State you are in")
     state.add_argument("name", help="the State's name, as declared by the Workflow")
@@ -232,6 +253,19 @@ def _describe_the_work(parser: argparse.ArgumentParser, *, required: bool = True
         nargs="?",
         default=None,
     )
+    _describe_where_and_how(parser)
+
+
+def _describe_where_and_how(parser: argparse.ArgumentParser) -> None:
+    """Everything qualifying a piece of work rather than naming it: which
+    repository, which branch, what it stands on, where it starts, on what, and
+    whether Gates are resolved past.
+
+    Apart from the two positionals because `naiad adopt` names its work
+    differently — its task is a flag, an Adoption having no Subject to stand in
+    for one (ADR 0028) — while these six mean there exactly what they mean at
+    the other entrances, and two copies would drift apart.
+    """
     parser.add_argument(
         "--repo",
         type=Path,
@@ -591,6 +625,47 @@ def _queue_add(arguments: argparse.Namespace) -> int:
     return 0 if _queued(arguments, remedy=ADD_COMMAND) is not None else 2
 
 
+def _adopt(arguments: argparse.Namespace) -> int:
+    """Adopt this session: queue an Entry marked to attach to it, teach the
+    agent the Protocol, and return.
+
+    It starts nothing, for the reason `naiad queue add` does not — a tool call
+    that became a process blocking for hours is the failure the Queue exists to
+    avoid — and because the Supervisor is the one entrance to starting Runs
+    (ADR 0014). What it prints is the whole of what the hitherto-undriven agent
+    knows: the Protocol, what to do with the rest of this turn, and, when
+    nothing is supervising, the warning to relay.
+    """
+    try:
+        # Before anything is queued, because a session with no pane is one the
+        # Supervisor could never attach to: an Entry marked to attach to
+        # nowhere would only defer the refusal to a moment nobody is at.
+        attachment = attachment_in(os.environ)
+    except FAILURES as error:
+        print(f"naiad: {error}", file=sys.stderr)
+        return 2
+
+    entry = _queued(arguments, remedy=ADOPT_COMMAND, attachment=attachment)
+    if entry is None:
+        return 2
+
+    print()
+    print(
+        teaching_for(
+            entry,
+            # Asked rather than acted on: a Supervisor started as a side effect
+            # of a tool call would have no terminal, no owner and no end, so
+            # what is left is telling the agent to tell the human (ADR 0028).
+            supervised=SupervisorLock(default_lock_path()).held(),
+            # The naiad the agent must type, for the reason the Protocol names
+            # one: this session's PATH is whatever the human's shell held.
+            naiad=naiad_command(),
+        ),
+        end="",
+    )
+    return 0
+
+
 def _describes_one_entry(arguments: argparse.Namespace) -> bool:
     """Whether anything on the command line describes a single piece of work.
     Every option `_describe_the_work` adds, because a batch file says all of
@@ -642,7 +717,16 @@ def _queued_from_file(arguments: argparse.Namespace) -> int:
     return 0
 
 
-def _queued(arguments: argparse.Namespace, *, remedy: Remedy) -> Entry | None:
+def _queued(
+    arguments: argparse.Namespace,
+    *,
+    remedy: Remedy,
+    # The Session this work's Run attaches to instead of one being opened for
+    # it, for an Adoption alone (ADR 0028). Threaded through the one enqueue
+    # rather than given a path of its own, so that an Adoption cannot queue
+    # something the other entrances would have refused.
+    attachment: Attachment | None = None,
+) -> Entry | None:
     """One Entry from what was typed, or nothing when it was refused.
 
     Shared by both entrances so that neither can queue something the other
@@ -668,6 +752,7 @@ def _queued(arguments: argparse.Namespace, *, remedy: Remedy) -> Entry | None:
                 start_state=arguments.start_state,
                 subject=arguments.subject,
                 skip_gates=arguments.skip_gates,
+                attachment=attachment,
             ),
             queue=Queue(default_queue_root()),
             runs=RunStore(default_runs_root()),

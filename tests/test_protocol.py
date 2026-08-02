@@ -6,7 +6,7 @@ than on exact wording, which is prose and will be tuned.
 """
 
 from naiad.domain.decide import NUDGE_LIMIT
-from naiad.domain.protocol import render_nudge, render_protocol
+from naiad.domain.protocol import render_adoption, render_nudge, render_protocol
 
 
 def test_names_the_command_that_announces_a_state():
@@ -156,3 +156,99 @@ def test_there_is_a_wording_for_every_nudge_naiad_is_willing_to_send():
     for attempt in range(1, NUDGE_LIMIT + 1):
         assert render_nudge(attempt=attempt)
         assert render_nudge(attempt=attempt, expired_wait="a check")
+
+
+# The Adoption output: what a hitherto-undriven agent is taught at the moment it
+# hands its session over (ADR 0028). It is the Protocol plus what only an
+# Adoption has to say — settle the branch, end the turn, and relay a warning
+# when nothing is supervising.
+
+
+def adoption(**overrides):
+    fields = dict(next_states=("spec",), working_branch="MC-AGENT-8546", supervised=True)
+    fields.update(overrides)
+    return render_adoption(**fields)
+
+
+def test_an_adoption_teaches_the_whole_protocol():
+    """The manual session never met the SessionStart injection and no Clear
+    will fire before the agent must announce, so this output is the only place
+    it learns the verbs."""
+    taught = adoption()
+
+    assert "naiad state" in taught
+    assert "naiad ask" in taught
+    assert "naiad wait" in taught
+    assert "naiad hold" in taught
+
+
+def test_an_adoption_names_the_state_expected_after_the_one_it_starts_at():
+    assert "spec" in adoption(next_states=("spec",))
+
+
+def test_an_adoption_tells_the_agent_to_end_its_turn():
+    """Nothing arrives while the turn runs: delivery waits for the Turn to end,
+    so an agent that carries on working is an agent nothing reaches."""
+    assert "end your turn" in adoption().lower()
+
+
+def test_an_adoption_says_the_prompt_arrives_once_the_lane_is_free():
+    """An Adoption waits its Lane turn like any Entry, so an agent told only to
+    end its turn would read the silence that follows as a failure."""
+    taught = adoption().lower()
+
+    assert "lane" in taught
+    assert "prompt" in taught
+
+
+def test_an_adoption_carrying_a_branch_names_it_rather_than_asking_for_one():
+    """The human already made it and the Entry claims it, so an agent told to
+    derive one here would create a second branch for the same work."""
+    taught = adoption(working_branch="MC-AGENT-8546")
+
+    assert "MC-AGENT-8546" in taught
+    assert "naiad branch" not in taught
+
+
+def test_an_adoption_carrying_no_branch_asks_the_agent_to_derive_and_declare_one():
+    """Both Workflow branch heads are skipped by a mid-Workflow start, so the
+    ADR 0022 discipline moves into the act of adopting."""
+    taught = adoption(working_branch=None)
+
+    assert "naiad branch" in taught
+    assert "None" not in taught
+
+
+def test_an_adoption_with_nothing_supervising_quotes_the_command_that_starts_one():
+    """A queued Adoption nobody will ever take is the failure this warning
+    exists to prevent; the agent relays it to the human."""
+    taught = adoption(supervised=False)
+
+    assert "naiad queue watch" in taught
+
+
+def test_an_adoption_a_supervisor_will_take_carries_no_warning():
+    """The remedy is only a remedy when there is something to remedy; quoted
+    always, it would be relayed always."""
+    assert "naiad queue watch" not in adoption(supervised=True)
+
+
+def test_an_adoption_names_the_commands_as_the_agent_must_invoke_them():
+    """A session's PATH is whatever the human's shell held, which need not hold
+    the naiad that will drive the Run."""
+    taught = render_adoption(
+        next_states=("spec",),
+        working_branch=None,
+        supervised=False,
+        naiad="/opt/naiad/bin/naiad",
+    )
+
+    assert "/opt/naiad/bin/naiad state" in taught
+    assert "/opt/naiad/bin/naiad branch" in taught
+    assert "/opt/naiad/bin/naiad queue watch" in taught
+
+
+def test_no_adoption_is_left_holding_a_placeholder():
+    for working_branch in (None, "MC-AGENT-8546"):
+        for supervised in (True, False):
+            assert "{" not in adoption(working_branch=working_branch, supervised=supervised)

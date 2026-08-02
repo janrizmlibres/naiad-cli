@@ -70,6 +70,16 @@ def _typed(command: str) -> Remedy:
 # job is to name where its reader wrote.
 RUN_COMMAND = _typed("naiad run")
 ADD_COMMAND = _typed("naiad queue add")
+# Work described at the session being handed over. Spelled out rather than made
+# by `_typed`, because an Adoption names its work in flags: there is no Subject
+# to stand in for a Task, so the Task is required and the line reads
+# differently from either operator command's (ADR 0028).
+ADOPT_COMMAND = Remedy(
+    subject="try: naiad adopt <workflow> --at {state} --task <task> --subject <value>",
+    # Unreachable, `--task` being required — worded anyway, so that a Remedy is
+    # never a field holding nothing and a later relaxation cannot find one.
+    task="try: naiad adopt <workflow> --at <state> --task <task>",
+)
 # Work described in a batch file. The refusal names the file and the Entry's
 # position, so what is left to say is which key that Entry is missing.
 BATCH_ENTRY = Remedy(
@@ -134,6 +144,7 @@ def check_start(
 
 __all__ = [
     "ADD_COMMAND",
+    "ADOPT_COMMAND",
     "BATCH_ENTRY",
     "RUN_COMMAND",
     "MissingSubject",

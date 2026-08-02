@@ -19,6 +19,10 @@ ANNOUNCE_SUBCOMMAND = "state"
 ASK_SUBCOMMAND = "ask"
 WAIT_SUBCOMMAND = "wait"
 HOLD_SUBCOMMAND = "hold"
+BRANCH_SUBCOMMAND = "branch"
+# Two words rather than one, because what an unsupervised Adoption is waiting
+# for is a Supervisor and `naiad queue watch` is how a human starts one.
+SUPERVISE_SUBCOMMAND = "queue watch"
 
 # What the agent is told to type when nobody says which naiad to name. A
 # session's PATH is whatever tmux inherited, so the caller passes the absolute
@@ -197,10 +201,78 @@ def render_protocol(*, next_states: Sequence[str], naiad: str = DEFAULT_NAIAD) -
     return f"{preamble}\n\n{expectation}\n"
 
 
+# What only an Adoption has to say, after the Protocol the agent has just been
+# taught (ADR 0028). Three things it cannot work out for itself: that nothing
+# arrives until its turn ends, that the Prompt waits on the Lane, and — where
+# the Entry queued branchless — that settling the branch is its job here,
+# because both of the Workflow's branch heads were skipped by starting
+# mid-Workflow.
+_ADOPTION_CLOSING = """\
+This run is queued and is not driving you yet. Its work belongs on the branch
+`{working_branch}`, which the human already made: check it out if you are not
+standing on it, then end your turn."""
+
+# The branchless wording. The ADR 0022 discipline in as many words, because the
+# State that would ordinarily have prepared the branch is behind this start.
+_ADOPTION_CLOSING_BRANCHLESS = """\
+This run is queued and is not driving you yet. It has no working branch: derive
+one from this repository's conventions, create it, and declare it with
+`{branch} <name>` — Naiad invents no branch name. Then end your turn."""
+
+_ADOPTION_LANE = """\
+The first prompt arrives once the lane for this repository is free; nothing
+reaches you while your turn is still running."""
+
+# Relayed rather than acted on: a Supervisor started as a side effect of a tool
+# call would have no terminal, no owner and no end, so what the agent can do is
+# tell the human.
+_ADOPTION_UNSUPERVISED = """\
+Tell the human this: no supervisor is running, so this entry will wait in the
+queue indefinitely. They start one with `{supervise}`."""
+
+_ADOPTION_SUPERVISED = """\
+A supervisor is running and will take this entry in its turn."""
+
+
+def render_adoption(
+    *,
+    next_states: Sequence[str],
+    working_branch: str | None,
+    supervised: bool,
+    naiad: str = DEFAULT_NAIAD,
+) -> str:
+    """What `naiad adopt` prints: the Protocol, and then the little an Adoption
+    has to add to it.
+
+    The Protocol arrives here rather than by being typed into the pane, because
+    typing would be a second delivery with ordering rules of its own — and the
+    agent has to learn the verbs before the Prompt it will answer with them
+    arrives (ADR 0028).
+
+    The branch instruction is written for the case it is in rather than
+    covering both: an agent whose Entry already claims a branch and is told to
+    derive one would create a second branch for the same work, and one told
+    only 'settle the branch' has to guess which case it stands in.
+    """
+    closing = (
+        _ADOPTION_CLOSING_BRANCHLESS.format(branch=f"{naiad} {BRANCH_SUBCOMMAND}")
+        if working_branch is None
+        else _ADOPTION_CLOSING.format(working_branch=working_branch)
+    )
+    supervision = (
+        _ADOPTION_SUPERVISED
+        if supervised
+        else _ADOPTION_UNSUPERVISED.format(supervise=f"{naiad} {SUPERVISE_SUBCOMMAND}")
+    )
+    protocol = render_protocol(next_states=next_states, naiad=naiad).rstrip("\n")
+    return f"{protocol}\n\n{closing}\n\n{_ADOPTION_LANE}\n\n{supervision}\n"
+
+
 __all__ = [
     "DEFAULT_NAIAD",
     "HOLD_SUBCOMMAND",
     "WAIT_SUBCOMMAND",
+    "render_adoption",
     "render_answer",
     "render_nudge",
     "render_protocol",

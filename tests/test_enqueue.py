@@ -13,6 +13,7 @@ import pytest
 from naiad.cli.batch import BatchError, enqueue_batch
 from naiad.cli.enqueue import BranchAlreadyClaimed, Work, enqueue
 from naiad.cli.refusals import ADD_COMMAND, MissingSubject, MissingTask
+from naiad.domain.entry import Attachment
 from naiad.domain.transitions import UnknownState
 from naiad.domain.workflow import WorkflowError
 from naiad.runtime.queue import Queue
@@ -106,6 +107,23 @@ def test_an_entry_joins_the_queue_carrying_what_kickoff_would_be_told(repo, queu
     assert queued.start_state == "implement"
     assert queued.subject == "docs/ticket.md"
     assert queued.skip_gates is True
+
+
+def test_work_marked_to_attach_becomes_an_entry_carrying_the_mark(repo, queue):
+    """An Adoption reaches the Queue through this one enqueue rather than a
+    path of its own, so that nothing it can queue is something the other
+    entrances would have refused (ADR 0028)."""
+    attachment = Attachment(tmux_pane="%42", claude_session_id="a-session")
+
+    add(repo, queue, attachment=attachment)
+
+    assert queue.all()[0].attachment == attachment
+
+
+def test_work_that_is_not_an_adoption_becomes_an_entry_marked_with_none(repo, queue):
+    add(repo, queue)
+
+    assert queue.all()[0].attachment is None
 
 
 def test_adding_an_entry_supervises_nothing(repo, queue, tmp_path):

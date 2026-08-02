@@ -23,7 +23,7 @@ from dataclasses import replace
 from pathlib import Path
 from typing import Any, Literal
 
-from naiad.domain.entry import Entry
+from naiad.domain.entry import Attachment, Entry
 from naiad.runtime.announcements import Announcements
 from naiad.runtime.atomic import write_atomically
 from naiad.runtime.home import StorageError, refuse_inside_repository
@@ -127,6 +127,18 @@ class Queue:
             raise StorageError(f"entry file {path} cannot be read ({error})") from error
 
     @staticmethod
+    def _attachment_from(mark: dict[str, Any] | None) -> Attachment | None:
+        """The Session an Adoption attaches to, or nothing for the ordinary
+        Entry. Read with a default, as skip_gates is: an Entry written before
+        Adoption existed still loads, and simply attaches to nothing."""
+        if mark is None:
+            return None
+        return Attachment(
+            tmux_pane=mark["tmux_pane"],
+            claude_session_id=mark.get("claude_session_id"),
+        )
+
+    @staticmethod
     def _entry_from(document: dict[str, Any]) -> Entry:
         return Entry(
             id=document["id"],
@@ -139,6 +151,7 @@ class Queue:
             start_state=document.get("start_state"),
             subject=document.get("subject"),
             skip_gates=document.get("skip_gates", False),
+            attachment=Queue._attachment_from(document.get("attachment")),
             run_id=document.get("run_id"),
         )
 
@@ -206,7 +219,17 @@ def _document(entry: Entry) -> dict[str, Any]:
         "start_state": entry.start_state,
         "subject": entry.subject,
         "skip_gates": entry.skip_gates,
+        "attachment": _attachment_document(entry.attachment),
         "run_id": entry.run_id,
+    }
+
+
+def _attachment_document(attachment: Attachment | None) -> dict[str, Any] | None:
+    if attachment is None:
+        return None
+    return {
+        "tmux_pane": attachment.tmux_pane,
+        "claude_session_id": attachment.claude_session_id,
     }
 
 

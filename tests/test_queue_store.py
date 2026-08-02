@@ -11,7 +11,7 @@ from dataclasses import replace
 import pytest
 
 from naiad.domain.decide import Finish
-from naiad.domain.entry import Entry
+from naiad.domain.entry import Attachment, Entry
 from naiad.domain.question import Question
 from naiad.runtime.announcements import Announcements
 from naiad.runtime.home import StorageError
@@ -77,6 +77,29 @@ def test_an_entry_that_has_not_started_records_no_run(queue, repo):
     queue.add(entry(repo))
 
     assert queue.all()[0].run_id is None
+
+
+def test_an_adoption_records_the_session_its_run_attaches_to(queue, repo):
+    """An Adoption is an Entry marked to attach rather than spawn (ADR 0028),
+    and the mark is the session it joins."""
+    queue.add(entry(repo, attachment=Attachment(tmux_pane="%42", claude_session_id="a-session")))
+
+    (reloaded,) = queue.all()
+    assert reloaded.attachment == Attachment(tmux_pane="%42", claude_session_id="a-session")
+
+
+def test_an_adoption_that_could_not_gather_a_claude_session_id_still_attaches(queue, repo):
+    """The id may be unknowable from inside a tool call, so the pane is the
+    reliable key and the mark stands without the other."""
+    queue.add(entry(repo, attachment=Attachment(tmux_pane="%42")))
+
+    assert queue.all()[0].attachment == Attachment(tmux_pane="%42")
+
+
+def test_an_entry_that_is_not_an_adoption_is_marked_with_no_attachment(queue, repo):
+    queue.add(entry(repo))
+
+    assert queue.all()[0].attachment is None
 
 
 def test_entries_come_back_in_id_order_however_they_were_written(queue, repo):
