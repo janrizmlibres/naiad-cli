@@ -56,6 +56,25 @@ WAIT_BUDGET_SECONDS = 1800.0
 
 
 @dataclass(frozen=True)
+class Opening:
+    """The Prompt a Run has been given a session for and has not been given
+    (ADR 0028).
+
+    An Adoption alone has one. A Run that spawned its session was handed its
+    first Prompt as that session launched, so it is owed nothing before it
+    announces; a Run that joined a session already running was handed nothing,
+    and what it is owed is the Prompt of the State it was adopted at.
+
+    The Subject rides along because there is no Announcement to carry it: it
+    was named when the Entry was made, and the State adopted at may name it
+    (ADR 0009).
+    """
+
+    state: str
+    subject: str | None = None
+
+
+@dataclass(frozen=True)
 class Signals:
     """Everything the decision is made from.
 
@@ -106,6 +125,12 @@ class Signals:
     the next Announcement re-arms it like everything else kept per
     Announcement (ADR 0025).
 
+    opening is the Prompt the Run is owed before it has announced anything, set
+    for an Adoption between the moment it joins its session and that Prompt
+    going out, and absent everywhere else. It is a fact about the Run rather
+    than about an Announcement — there is no Announcement yet — and what
+    re-arms it is the delivery itself.
+
     cleared and clear_attempts are the Clear handshake as signals (ADR 0019).
     cleared says this Announcement's /clear has been confirmed by the
     SessionStart hook; clear_attempts is how many times it has been typed. They
@@ -117,6 +142,7 @@ class Signals:
     announcement: Announcement | None
     handled_seq: int | None
     stopped: bool
+    opening: Opening | None = None
     stopped_since_action: bool = False
     notified: bool = False
     nudges: int = 0
@@ -307,6 +333,19 @@ def decide(workflow: Workflow, signals: Signals, *, skip_gates: bool = False) ->
         # hang rule below reachable, so an answer waiting on a session that has
         # died is not waited on forever.
 
+    if signals.announcement is None and signals.opening is not None and signals.stopped:
+        # An Adoption. The Run has joined a session and has said nothing in
+        # it, so what it is owed is the Prompt of the State it was adopted at
+        # rather than an answer to an Announcement.
+        #
+        # Waited for a turn to end for the reason every delivery is: the
+        # adopted session is mid-conversation, and typing into one still
+        # working types over the work. Falling through when none has ended is
+        # deliberate, as it is for an answer in hand: it leaves the hang rule
+        # below reachable, so a session that died before it could end a turn is
+        # not waited on forever.
+        return _open(workflow, signals, signals.opening, skip_gates=skip_gates)
+
     if announcement is not None and signals.stopped:
         state = workflow.state(announcement.state)
         if state is None:
@@ -376,6 +415,37 @@ def decide(workflow: Workflow, signals: Signals, *, skip_gates: bool = False) ->
     if signals.idle_for < HANG_SECONDS:
         return NOTHING
     return _notify(signals, f"the session produced no signal for {int(signals.idle_for)}s")
+
+
+def _open(
+    workflow: Workflow, signals: Signals, opening: Opening, *, skip_gates: bool
+) -> Action:
+    """The first Prompt of an adopted Run, or why there is none to send.
+
+    The two refusals the delivery above makes, made again over the State the
+    Run was adopted at rather than the one it announced: a State the Workflow
+    does not declare leaves nothing to deliver, and a Gate State is the human's
+    to answer. Both are said out loud rather than gone quiet on, because a Run
+    that is owed a Prompt it never gets waits for good.
+    """
+    state = workflow.state(opening.state)
+    if state is None:
+        return _notify(
+            signals,
+            f"this run was adopted at '{opening.state}', "
+            f"which is not a State of this workflow",
+        )
+    if state.prompt is None:
+        return _notify(signals, f"state '{state.name}' is a Gate State and is waiting for you")
+
+    return Deliver(
+        state=state.name,
+        prompt=state.prompt,
+        next_states=resolve_next_states(workflow, state.name, skip_gates=skip_gates),
+        subject=opening.subject,
+        model=state.model,
+        effort=state.effort,
+    )
 
 
 def _terminal(workflow: Workflow, announcement: Announcement | None) -> State | None:
@@ -450,6 +520,7 @@ __all__ = [
     "Nothing",
     "Notify",
     "Nudge",
+    "Opening",
     "Respond",
     "Signals",
     "decide",

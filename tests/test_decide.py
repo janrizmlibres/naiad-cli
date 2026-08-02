@@ -17,6 +17,7 @@ from naiad.domain.decide import (
     Finish,
     Notify,
     Nudge,
+    Opening,
     Respond,
     Signals,
     decide,
@@ -96,6 +97,7 @@ def signals(
     wait_reason=None,
     holding=False,
     hold_reason=None,
+    opening=None,
 ):
     return Signals(
         announcement=(
@@ -103,6 +105,7 @@ def signals(
             if state
             else None
         ),
+        opening=opening,
         handled_seq=handled_seq,
         stopped=stopped,
         stopped_since_action=stopped_since_action,
@@ -283,6 +286,105 @@ def test_a_clear_is_not_typed_before_a_turn_has_ended(workflow):
 
 def test_nothing_announced_yet_takes_no_action(workflow):
     assert decide(workflow, signals(None, stopped=False)) is NOTHING
+
+
+# An Adoption: a Run that joined a session already running has
+# announced nothing, and what it is owed is the Prompt of the State it was
+# adopted at (ADR 0028).
+
+
+def test_a_run_adopted_at_a_state_is_owed_that_states_prompt(workflow):
+    action = decide(workflow, signals(None, opening=Opening(state="grill")))
+
+    assert action == Deliver(
+        state="grill",
+        prompt="/grill-with-docs {task}",
+        next_states=("review",),
+    )
+
+
+def test_the_prompt_an_adoption_is_owed_waits_for_a_turn_to_end(workflow):
+    """The never-type-over-a-working-agent rule an Answer already obeys: the
+    adopted session is mid-conversation, and its agent is most likely still
+    writing when the Supervisor reaches the Entry."""
+    owed = signals(None, opening=Opening(state="grill"), stopped=False)
+
+    assert decide(workflow, owed) is NOTHING
+
+
+def test_the_adopted_states_model_and_effort_ride_that_delivery(workflow):
+    """The switches ride Prompt delivery wherever it happens (ADR 0026). A
+    spawned Run wears them as flags on its launch; an adopted Run has no launch,
+    so the first delivery is where they arrive."""
+    keyed = parse_workflow(
+        """
+        name = "feature"
+        model = "sonnet"
+        effort = "medium"
+
+        [[states]]
+        name = "spec"
+        prompt = "/to-spec {task}"
+        model = "opus"
+
+        [[states]]
+        name = "done"
+        terminal = true
+        """
+    )
+
+    action = decide(keyed, signals(None, opening=Opening(state="spec")))
+
+    assert action == Deliver(
+        state="spec",
+        prompt="/to-spec {task}",
+        next_states=("done",),
+        model="opus",
+        effort="medium",
+    )
+
+
+def test_the_subject_an_adoption_named_rides_that_delivery(workflow):
+    """There is no Announcement to carry it: an Adoption's Subject was named
+    when the Entry was made, and the State adopted at may name it (ADR 0009)."""
+    owed = signals(None, opening=Opening(state="implement", subject="04-x.md"))
+
+    assert decide(workflow, owed).subject == "04-x.md"
+
+
+def test_a_run_adopted_at_a_gate_state_parks_for_the_human(workflow):
+    """The general rule, unchanged: a Gate State has nothing to deliver, so the
+    human types into the session and Naiad stands back."""
+    action = decide(workflow, signals(None, opening=Opening(state="review")))
+
+    assert isinstance(action, Notify)
+    assert "review" in action.reason
+
+
+def test_a_run_adopted_at_a_state_the_workflow_no_longer_declares_notifies(workflow):
+    """The checks were made when the Entry was queued and again at the
+    Run was attached; a Workflow edited after that leaves nothing to deliver and
+    nobody but a human to say what was meant."""
+    action = decide(workflow, signals(None, opening=Opening(state="spek")))
+
+    assert isinstance(action, Notify)
+    assert "spek" in action.reason
+
+
+def test_an_adopted_session_that_produces_no_signal_at_all_is_not_waited_on_forever(workflow):
+    """No turn end means no delivery, but a session that died before it could
+    end one would otherwise be waited on for good."""
+    hung = signals(None, opening=Opening(state="grill"), stopped=False, idle_for=HANG_SECONDS)
+
+    assert isinstance(decide(workflow, hung), Notify)
+
+
+def test_an_announcement_settles_what_is_owed_rather_than_the_adoption(workflow):
+    """From its first Announcement the adopted Run is an ordinary Run: what it
+    said it is doing outranks what it was adopted at."""
+    announced = signals("implement", cleared=True, opening=Opening(state="grill"))
+
+    assert decide(workflow, announced).state == "implement"
 
 
 def test_a_state_with_no_prompt_is_not_delivered(workflow):

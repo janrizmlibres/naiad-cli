@@ -35,6 +35,28 @@ class TmuxSessions:
         the Run can later be resolved from its pane."""
         return self._run(_new_session_argv(spec)).strip()
 
+    def attach(self, pane: str) -> str:
+        """Join a session that is already running and report back the name of
+        the session holding that pane — the human's own, since Naiad did not
+        name it, and what the operator is told to attach to.
+
+        Nothing is opened and nothing is typed: the pane is already there and
+        its Prompt is the tick loop's to deliver once a Turn has ended (ADR
+        0028). Asking is also what catches a pane the human has since closed,
+        which is the one thing about an adopted session that can have changed
+        between the Entry being queued and the Supervisor reaching it.
+
+        An empty answer is that closed pane: tmux reports a target it cannot
+        find on stderr and still exits 0, so the refusal has to be made here
+        rather than read off the return code. Refused loudly rather than
+        recorded, because a Run whose session name is blank has nothing to tell
+        the operator to attach to.
+        """
+        name = self._run([TMUX, "display-message", "-p", "-t", pane, "#{session_name}"]).strip()
+        if not name:
+            raise TmuxError(f"no pane {pane}: the session this run was to adopt has gone")
+        return name
+
     def send(self, pane: str, text: str) -> None:
         """Type text into the session and submit it.
 

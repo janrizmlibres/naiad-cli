@@ -37,7 +37,7 @@ from naiad.cli.branch import BranchError, declare_branch
 from naiad.cli.enqueue import REFUSALS, Work, enqueue
 from naiad.cli.hold import HoldError, declare_hold
 from naiad.cli.library import LibraryError, resolve_workflow
-from naiad.cli.kickoff import start_run
+from naiad.cli.kickoff import start_entry
 from naiad.cli.protocol import injection_for
 from naiad.cli.refusals import ADD_COMMAND, ADOPT_COMMAND, RUN_COMMAND, Remedy
 from naiad.cli.supervisor import supervise_queue
@@ -882,29 +882,23 @@ def _supervise(*, following: bool) -> int:
 
 
 def _start_entry(entry: Entry, predecessor: str | None) -> Run:
-    """Turn one Entry into the Run it always described.
+    """Hand one Entry the dependencies turning it into a Run.
 
     Everything identifying the Run — its id, its Claude session, the moment it
     started — is made here rather than carried on the Entry, because an Entry
-    queued last night is started now. The Predecessor comes from the Action
-    rather than from the Entry, since what an Entry stands on is resolved when
-    it starts (ADR 0015).
+    queued last night is started now. Which way that Run meets its session is
+    not decided here: an Entry marked to attach joins one and every other opens
+    one, and that choice lives with the two functions it chooses between.
     """
     started = datetime.now(timezone.utc)
-    return start_run(
-        workflow_path=entry.workflow_path,
-        task=entry.task,
-        target_repo=entry.target_repo,
-        working_branch=entry.working_branch,
+    return start_entry(
+        entry,
         predecessor=predecessor,
         store=RunStore(default_runs_root()),
         sessions=TmuxSessions(),
         run_id=_run_id(started, entry.workflow_path),
         claude_session_id=str(uuid.uuid4()),
         created_at=_timestamp(started),
-        start_state=entry.start_state,
-        skip_gates=entry.skip_gates,
-        subject=entry.subject,
     )
 
 

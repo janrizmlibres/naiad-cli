@@ -1,9 +1,11 @@
 import pytest
 
-from naiad.cli.kickoff import start_run
+from naiad.cli.kickoff import attach_run, start_entry, start_run
 from naiad.cli.refusals import MissingSubject
+from naiad.domain.entry import Attachment, Entry
 from naiad.domain.transitions import UnknownState
 from naiad.domain.workflow import WorkflowError
+from naiad.runtime.log import RunLog
 from naiad.runtime.resolve import RUN_ID_VARIABLE, RunResolver
 from naiad.runtime.run import RunStore
 
@@ -323,6 +325,176 @@ def test_a_run_with_no_predecessor_delivers_the_prompt_with_it_empty(repo, store
 
     (spawn,) = sessions.spawned
     assert spawn.initial_prompt == "work on MC-AGENT-8546 based on "
+
+
+# An Adoption: the other way a Run meets its session (ADR 0028).
+# Nothing is opened and nothing is delivered — the Run joins the pane the Entry
+# named, and its first Prompt waits for the tick loop and a Turn end.
+
+
+def attach(repo, store, sessions, **overrides):
+    fields = dict(
+        workflow_path=repo / "workflow.toml",
+        task="add dark mode",
+        target_repo=repo,
+        working_branch="MC-AGENT-8546",
+        attachment=Attachment(tmux_pane="%7"),
+        store=store,
+        sessions=sessions,
+        run_id="20260719-120000-feature",
+        created_at="2026-07-19T12:00:00Z",
+    )
+    fields.update(overrides)
+    return attach_run(**fields)
+
+
+def test_an_adoption_attaches_to_the_named_pane_rather_than_spawning_a_session(
+    repo, store, sessions
+):
+    """The whole point of the feature: the session is the one the human has
+    been talking to, so opening a second would throw away the conversation."""
+    attach(repo, store, sessions)
+
+    assert sessions.spawned == []
+    assert sessions.attached == ["%7"]
+
+
+def test_the_adopted_runs_metadata_records_the_session_it_joined(repo, store, sessions):
+    run = attach(
+        repo,
+        store,
+        sessions,
+        attachment=Attachment(
+            tmux_pane="%7", claude_session_id="22222222-2222-2222-2222-222222222222"
+        ),
+    )
+
+    reloaded = store.load(run.id)
+    assert reloaded.tmux_pane == "%7"
+    assert reloaded.tmux_session == "the-humans-session"
+    assert reloaded.claude_session_id == "22222222-2222-2222-2222-222222222222"
+
+
+def test_an_adoption_that_could_gather_no_session_id_records_none(repo, store, sessions):
+    """The id may be unknowable from inside the tool call that adopts; the pane
+    is the reliable key and the one an Adoption turns on."""
+    run = attach(repo, store, sessions)
+
+    assert store.load(run.id).claude_session_id is None
+
+
+def test_the_adopted_run_is_resolvable_from_its_pane_without_the_environment_variable(
+    repo, store, sessions
+):
+    """A variable cannot be injected into a process that already exists, so the
+    shortcut is simply absent: the hooks and the agent's own commands find this
+    Run through the resolution seam's second key."""
+    run = attach(repo, store, sessions)
+    resolver = RunResolver(store, environ={})
+
+    assert resolver.resolve(tmux_pane="%7").id == run.id
+
+
+def test_attaching_delivers_nothing_and_leaves_that_to_the_loop(repo, store, sessions):
+    """Delivery waits on a turn ending, and attaching is not where that is
+    known: the agent is most likely mid-turn when the Supervisor reaches it."""
+    run = attach(repo, store, sessions)
+
+    assert RunLog(run.root).opened() is False
+    assert RunLog(run.root).delivered_states() == []
+
+
+def test_the_adoption_is_the_first_line_of_the_adopted_runs_log(repo, store, sessions):
+    run = attach(repo, store, sessions)
+
+    (line,) = RunLog(run.root).entries()
+    assert line.kind == "adopted"
+    assert "%7" in line.detail
+
+
+def test_the_adopted_run_remembers_what_it_was_adopted_with(repo, store, sessions):
+    """The first Prompt goes out in a later tick, in a process that may not be
+    the one that attached the Run, so what it renders from lives on the Run."""
+    run = attach(repo, store, sessions, start_state="implement", subject="04-x.md")
+
+    reloaded = store.load(run.id)
+    assert reloaded.adopted is True
+    assert reloaded.start_state == "implement"
+    assert reloaded.start_subject == "04-x.md"
+
+
+def test_a_workflow_edited_since_the_adoption_was_queued_is_refused(repo, store, sessions):
+    """The checks are made again here for the reason kickoff makes them again:
+    an Entry queued at the session is taken hours later, and the file it names
+    may have been edited in between."""
+    (repo / "workflow.toml").write_text(
+        'name = "w"\n'
+        "[[states]]\nname = 'spec'\nprompt = '/to-spec {subject}'\n"
+        "[[states]]\nname = 'done'\nterminal = true\n"
+    )
+
+    with pytest.raises(MissingSubject) as caught:
+        attach(repo, store, sessions, start_state="spec")
+
+    assert "naiad adopt" in str(caught.value)
+
+
+def test_a_refused_adoption_creates_no_run_and_attaches_nothing(repo, store, sessions):
+    with pytest.raises(UnknownState):
+        attach(repo, store, sessions, start_state="spek")
+
+    assert sessions.attached == []
+    assert store.all() == []
+
+
+# One place turns an Entry into the Run it always described, whichever way that
+# Run meets its session.
+
+
+def test_an_attach_marked_entry_becomes_a_run_that_joined_its_session(repo, store, sessions):
+    run = start_entry(
+        _entry(repo, attachment=Attachment(tmux_pane="%7")),
+        predecessor=None,
+        store=store,
+        sessions=sessions,
+        run_id="20260719-120000-feature",
+        claude_session_id="11111111-1111-1111-1111-111111111111",
+        created_at="2026-07-19T12:00:00Z",
+    )
+
+    assert run.adopted is True
+    assert sessions.attached == ["%7"]
+    assert sessions.spawned == []
+
+
+def test_an_ordinary_entry_becomes_a_run_with_a_session_of_its_own(repo, store, sessions):
+    run = start_entry(
+        _entry(repo),
+        predecessor="MC-AGENT-8000",
+        store=store,
+        sessions=sessions,
+        run_id="20260719-120000-feature",
+        claude_session_id="11111111-1111-1111-1111-111111111111",
+        created_at="2026-07-19T12:00:00Z",
+    )
+
+    assert run.adopted is False
+    assert run.predecessor == "MC-AGENT-8000"
+    assert sessions.attached == []
+    assert len(sessions.spawned) == 1
+
+
+def _entry(repo, **overrides):
+    fields = dict(
+        id="20260719-115900-feature",
+        workflow_path=repo / "workflow.toml",
+        task="add dark mode",
+        target_repo=repo,
+        working_branch="MC-AGENT-8546",
+        created_at="2026-07-19T11:59:00Z",
+    )
+    fields.update(overrides)
+    return Entry(**fields)
 
 
 def test_a_malformed_workflow_creates_no_run_directory_and_no_session(repo, store, sessions):

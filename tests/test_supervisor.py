@@ -17,7 +17,7 @@ import pytest
 
 from naiad.cli.supervisor import supervise_queue
 from naiad.domain.decide import Finish
-from naiad.domain.entry import Entry
+from naiad.domain.entry import Attachment, Entry
 from naiad.runtime.home import StorageError
 from naiad.runtime.log import RunLog
 from naiad.runtime.queue import Queue
@@ -101,6 +101,12 @@ class Supervision:
             created_at=entry.created_at,
             working_branch=entry.working_branch,
             predecessor=predecessor,
+            # Which way this Entry's Run met its session, carried the way the
+            # real wiring carries it (naiad.cli.kickoff.start_entry): an Entry
+            # marked to attach becomes an adopted Run. Kept so that a test
+            # about an Adoption is about one, rather than passing whether or
+            # not the mark is there.
+            adopted=entry.attachment is not None,
         )
 
     def tick(self, run):
@@ -343,6 +349,53 @@ def test_resolution_continues_past_an_undeclared_run_to_the_branch_before_it(que
         (headless.id, first.working_branch),
         (third.id, first.working_branch),
     ]
+
+
+# An Adoption is an Entry like any other: it waits its Lane's turn and jumps
+# nothing (ADR 0028).
+
+
+def test_an_adoption_behind_a_live_run_in_its_lane_waits_for_it(queue, runs, repo):
+    """It attaches when its turn comes. Started sooner it would put a second
+    agent into a working tree a Run is already live in — which is the single
+    thing one Run per working tree exists to prevent, and the session an
+    Adoption would be typing into is the human's own."""
+    queued(queue, repo, "one")
+    queued(queue, repo, "two", attachment=Attachment(tmux_pane="%7"))
+    supervision = Supervision(runs, never_finishes={"run-1"})
+
+    with pytest.raises(Interrupted):
+        supervising(queue, runs, supervision)
+
+    assert supervision.started == [("one", None)]
+    # Nothing joined the human's session: the only Run there is spawned one.
+    assert [run.adopted for run in runs.all()] == [False]
+
+
+def test_an_adoption_starts_once_the_run_ahead_of_it_finishes(queue, runs, repo):
+    first = queued(queue, repo, "one")
+    adoption = queued(queue, repo, "two", attachment=Attachment(tmux_pane="%7"))
+    supervision = Supervision(runs)
+
+    supervising(queue, runs, supervision)
+
+    assert supervision.started == [(first.id, None), (adoption.id, first.working_branch)]
+    assert runs.load("run-2").adopted is True
+
+
+def test_another_lane_proceeds_beside_an_adoption_waiting_its_turn(
+    queue, runs, repo, other_repo
+):
+    queued(queue, repo, "a-parked")
+    queued(queue, repo, "b-adoption", attachment=Attachment(tmux_pane="%7"))
+    elsewhere = queued(queue, other_repo, "c-elsewhere")
+    supervision = Supervision(runs, never_finishes={"run-1"})
+
+    with pytest.raises(Interrupted):
+        supervising(queue, runs, supervision)
+
+    assert supervision.started == [("a-parked", None), (elsewhere.id, None)]
+    assert [run.adopted for run in runs.all()] == [False, False]
 
 
 # Crash recovery: there is no resume path, because there is no state to resume.

@@ -235,7 +235,10 @@ class Handled:
         turns = _read(self.path).get("turns")
         return turns if isinstance(turns, int) else 0
 
-    def record(self, seq: int, *, turns: int = 0) -> None:
+    def record(self, seq: int | None, *, turns: int = 0) -> None:
+        """A seq of None is an adopted Run's first Prompt, which answers no
+        Announcement (ADR 0028): nothing has been acted on, and what is being
+        recorded is the turn baseline the next silence is measured against."""
         _write(self.path, {"seq": seq, "turns": turns})
 
 

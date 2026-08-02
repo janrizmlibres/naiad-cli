@@ -23,6 +23,7 @@ from naiad.domain.decide import (
     Finish,
     Notify,
     Nudge,
+    Opening,
     Respond,
     Signals,
     decide,
@@ -31,7 +32,7 @@ from naiad.domain.announcement import Announcement
 from naiad.domain.prompt import render_prompt
 from naiad.domain.protocol import DEFAULT_NAIAD, render_answer, render_nudge
 from naiad.domain.question import Question
-from naiad.domain.transitions import deviation
+from naiad.domain.transitions import UnknownState, deviation, start_state
 from naiad.domain.workflow import Workflow
 from naiad.runtime.announcements import Announcements
 from naiad.runtime.answers import AnswerLog
@@ -112,6 +113,7 @@ def tick(
         workflow,
         Signals(
             announcement=announcement,
+            opening=_opening(run, workflow, log),
             handled_seq=handled.seq(),
             stopped=turns.ended_since(announcement),
             stopped_since_action=turns.ended_since_action(handled),
@@ -137,7 +139,7 @@ def tick(
         # hook has confirmed the discard (ADR 0019).
         session.clear(_pane(run))
         clearing.record_attempt(announcement, landed=clears.count())
-    elif isinstance(action, Deliver) and announcement is not None:
+    elif isinstance(action, Deliver):
         # The State's model and effort are typed ahead of its Prompt, each switch as its
         # own send because a slash command is read only at the start of a
         # message — and on every delivery, not only on change, so a switch the
@@ -162,7 +164,11 @@ def tick(
                 predecessor=run.predecessor,
             ),
         )
-        handled.record(announcement.seq, turns=turns.count())
+        # An adopted Run's first delivery answers no Announcement, so there is
+        # no seq to record against it — only the turn baseline, which is what
+        # keeps the agent working on what it was just given from reading as a
+        # silent one (ADR 0028).
+        handled.record(announcement.seq if announcement is not None else None, turns=turns.count())
     elif isinstance(action, Consult):
         consultations.record(
             announcement, answerer.consult(_consultation(run, workflow, action.question))
@@ -195,6 +201,28 @@ def tick(
 
     log.record(action, seq=announcement.seq if announcement is not None else None)
     return action
+
+
+def _opening(run: Run, workflow: Workflow, log: RunLog) -> Opening | None:
+    """The Prompt this Run is owed and has not been given (ADR 0028).
+
+    Only an adopted Run is ever owed one — a spawned Run was handed its first
+    Prompt as its session launched — and only until it goes out, which the log
+    is what says. Both facts are read rather than kept: which of the two ways a
+    Run met its session is written on the Run, and what has been delivered into
+    it is written in its log.
+    """
+    if not run.adopted or log.opened():
+        return None
+    try:
+        name = start_state(workflow, run.start_state).name
+    except UnknownState:
+        # The Workflow no longer declares the State this Run was adopted at.
+        # Carried through under the name it was queued with rather than
+        # swallowed here, so that the decision is the one that says so — a Run
+        # owed a Prompt that will never come has to be said out loud.
+        name = str(run.start_state)
+    return Opening(state=name, subject=run.start_subject)
 
 
 def _deviation(

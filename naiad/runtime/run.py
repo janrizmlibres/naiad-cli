@@ -44,6 +44,16 @@ class Run:
     # the Workflow: the same Workflow file runs supervised or unattended.
     skip_gates: bool = False
     start_state: str | None = None
+    # What the Run's first Prompt is to say it is about, when the State it
+    # begins at names a Subject (ADR 0009). Kept on the Run rather than passed
+    # to the delivery, because an adopted Run's first Prompt goes out in a later
+    # tick — in a process that may not be the one that started it.
+    start_subject: str | None = None
+    # Whether this Run joined a Session that already existed instead of opening
+    # one (ADR 0028). It changes one thing: an adopted Run is owed the Prompt of
+    # the State it began at, delivered once a Turn has ended, where a spawned
+    # Run was handed it as its session launched.
+    adopted: bool = False
     tmux_session: str | None = None
     tmux_pane: str | None = None
     claude_session_id: str | None = None
@@ -92,6 +102,8 @@ class Run:
             "predecessor": self.predecessor,
             "skip_gates": self.skip_gates,
             "start_state": self.start_state,
+            "start_subject": self.start_subject,
+            "adopted": self.adopted,
             "tmux_session": self.tmux_session,
             "tmux_pane": self.tmux_pane,
             "claude_session_id": self.claude_session_id,
@@ -118,6 +130,8 @@ class RunStore:
         predecessor: str | None = None,
         skip_gates: bool = False,
         start_state: str | None = None,
+        start_subject: str | None = None,
+        adopted: bool = False,
     ) -> Run:
         target_repo = real_path(target_repo)
         refuse_inside_repository(self.root, target_repo, what="run directory")
@@ -138,6 +152,8 @@ class RunStore:
             predecessor=predecessor,
             skip_gates=skip_gates,
             start_state=start_state,
+            start_subject=start_subject,
+            adopted=adopted,
         )
         run.save()
         return run
@@ -178,6 +194,8 @@ class RunStore:
             predecessor=document.get("predecessor"),
             skip_gates=document.get("skip_gates", False),
             start_state=document.get("start_state"),
+            start_subject=document.get("start_subject"),
+            adopted=document.get("adopted", False),
             tmux_session=document["tmux_session"],
             tmux_pane=document["tmux_pane"],
             claude_session_id=document["claude_session_id"],

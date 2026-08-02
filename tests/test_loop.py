@@ -320,6 +320,192 @@ def test_a_run_with_no_pane_recorded_is_refused_rather_than_sent_anywhere(
     assert session.sent == []
 
 
+# An adopted Run's first Prompt (ADR 0028). A Run that spawned its session was
+# handed one as that session launched; a Run that joined a session already
+# running is owed one, and is owed it until a turn has ended.
+
+
+def adopted_at(tmp_path, state=None, *, text=WORKFLOW, **overrides):
+    """A Run attached to a session that was already there — the human's own
+    pane, with no session of Naiad's naming and no session id to be had.
+
+    A start State is named for the case the feature exists for, where the early
+    States were done by hand; without one the Run begins where the Workflow
+    does, as any Run does.
+    """
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / "workflow.toml").write_text(text)
+    created = RunStore(tmp_path / "runs").create(
+        run_id="an-adopted-run",
+        workflow_path=repo / "workflow.toml",
+        task="add dark mode",
+        target_repo=repo,
+        created_at="2026-07-19T12:00:00Z",
+        adopted=True,
+        start_state=state,
+        **overrides,
+    )
+    created.attach_session(tmux_session="mine", tmux_pane="%7", claude_session_id=None)
+    RunLog(created.root).record_adoption(pane="%7")
+    return created
+
+
+@pytest.fixture
+def adopted(tmp_path):
+    return adopted_at(tmp_path)
+
+
+def end_turn(run):
+    """Stand in for the Stop hook firing in a session that has announced
+    nothing — which is every adopted session before its first Announcement."""
+    Turns(run.root).record_end(latest_seq=None)
+
+
+def workflow_of(run):
+    return parse_workflow(run.workflow_path.read_text())
+
+
+def test_an_adopted_run_is_delivered_the_prompt_of_the_state_it_was_adopted_at(
+    adopted, workflow, session
+):
+    end_turn(adopted)
+
+    action = drive(adopted, workflow, session)
+
+    assert isinstance(action, Deliver)
+    assert session.sent == [
+        ("send", "%7", "/grill-with-docs add dark mode, then announce review")
+    ]
+
+
+def test_an_adopted_run_is_left_alone_until_a_turn_has_ended(adopted, workflow, session):
+    """The Run joins the session while the agent is still mid-conversation: the
+    Prompt waits, exactly as an Answer waits."""
+    drive(adopted, workflow, session)
+
+    assert session.sent == []
+
+
+def test_the_prompt_an_adoption_was_owed_is_delivered_once_however_often_it_ticks(
+    adopted, workflow, session
+):
+    """Nothing is announced between the delivery and the agent's first
+    Announcement, so a loop reading the same signals must not send again."""
+    end_turn(adopted)
+
+    drive(adopted, workflow, session)
+    drive(adopted, workflow, session)
+    drive(adopted, workflow, session)
+
+    assert len(session.sent) == 1
+
+
+def test_the_adopted_states_model_and_effort_are_typed_ahead_of_that_prompt(
+    adopted, session
+):
+    """An adopted Run has no launch for the switches to ride as flags, so the
+    first delivery is where they arrive (ADR 0026)."""
+    keyed = parse_workflow(
+        """
+        name = "feature"
+        model = "sonnet"
+        effort = "medium"
+
+        [[states]]
+        name = "grill"
+        prompt = "work, then announce done"
+        model = "opus"
+
+        [[states]]
+        name = "done"
+        terminal = true
+        """
+    )
+    end_turn(adopted)
+
+    drive(adopted, keyed, session)
+
+    assert session.sent == [
+        ("send", "%7", "/model opus"),
+        ("send", "%7", "/effort medium"),
+        ("send", "%7", "work, then announce done"),
+    ]
+
+
+def test_the_subject_an_adoption_named_reaches_the_pane_in_that_prompt(tmp_path, session):
+    """The State adopted at may name a Subject, and there is no Announcement to
+    carry it: it was described when the Entry was made and rides on the Run.
+
+    A State that does not Clear, so that what is asserted is the Subject alone.
+    """
+    naming = (
+        'name = "w"\n'
+        "[[states]]\nname = 'spec'\nprompt = '/to-spec {subject}'\n"
+        "[[states]]\nname = 'done'\nterminal = true\n"
+    )
+    run = adopted_at(tmp_path, "spec", text=naming, start_subject="04-x.md")
+    end_turn(run)
+
+    drive(run, parse_workflow(naming), session)
+
+    assert session.sent == [("send", "%7", "/to-spec 04-x.md")]
+
+
+def test_a_run_adopted_at_a_gate_state_notifies_and_sends_nothing(tmp_path, session):
+    run = adopted_at(tmp_path, "review")
+    end_turn(run)
+    notifier = RecordingNotifier()
+
+    action = drive(run, workflow_of(run), session, notifier=notifier)
+
+    assert isinstance(action, Notify)
+    assert session.sent == []
+    assert "review" in notifier.notified[0][1]
+
+
+def test_an_agent_working_on_the_prompt_it_was_adopted_with_is_not_nudged(
+    adopted, workflow, session
+):
+    """The turn end that let the first Prompt be delivered is spent by that
+    delivery, exactly as it is for a delivery answering an Announcement."""
+    end_turn(adopted)
+    drive(adopted, workflow, session)
+
+    assert drive(adopted, workflow, session, now=_later(adopted, SILENCE_SECONDS)) is NOTHING
+
+
+def test_the_first_announcement_of_an_adopted_run_is_delivered_as_any_other(
+    adopted, workflow, session
+):
+    """From its first Announcement the adopted Run is an ordinary Run: what it
+    announces is delivered, and what it was adopted at is over and done with."""
+    end_turn(adopted)
+    drive(adopted, workflow, session)
+    announce(adopted, "grill")
+
+    action = drive(adopted, workflow, session)
+
+    assert isinstance(action, Deliver)
+    assert len(session.sent) == 2
+
+
+def test_the_adoption_and_everything_after_it_reach_the_run_log(adopted, workflow, session):
+    """The log is the diagnostic, and an adopted Run's is readable from the
+    moment it joined the session rather than from its first Announcement."""
+    end_turn(adopted)
+    drive(adopted, workflow, session)
+    announce(adopted, "review")
+    drive(adopted, workflow, session)
+
+    assert [(e.kind, e.state) for e in RunLog(adopted.root).entries()] == [
+        ("adopted", None),
+        ("delivered", "grill"),
+        ("announced", "review"),
+        ("notified", None),
+    ]
+
+
 def test_a_run_started_with_gates_skipped_delivers_the_next_state_that_has_a_prompt(
     tmp_path, session
 ):

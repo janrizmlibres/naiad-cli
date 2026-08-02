@@ -143,6 +143,18 @@ class RunLog:
         ]
         return earlier[-1].state if earlier else None
 
+    def opened(self) -> bool:
+        """Whether the Prompt an adopted Run was owed when it joined its
+        session has gone out (ADR 0028).
+
+        A delivery with no Announcement to tie it to is that one and no other:
+        every delivery after it answers something the agent said and carries
+        that Announcement's seq. Read back from the log rather than kept as a
+        flag of its own, for the reason `finished` is — the fact is already
+        written here, and one fact deserves one home.
+        """
+        return any(entry.kind == "delivered" and entry.seq is None for entry in self.entries())
+
     def delivered_states(self) -> list[str]:
         """Every State whose Prompt was sent into the session, in order.
 
@@ -153,7 +165,8 @@ class RunLog:
 
         Kickoff's delivery of the first Prompt is not among them: it happens
         before the log exists, and the State the Run began at is the Run's own
-        fact to answer with.
+        fact to answer with. An adopted Run's first Prompt is among them, since
+        it goes out from the tick loop like every other delivery (ADR 0028).
         """
         return [
             entry.state
@@ -195,6 +208,17 @@ class RunLog:
                 expected=render_candidates(deviated_from) or None,
             )
         )
+
+    def record_adoption(self, *, pane: str) -> None:
+        """That this Run joined a Session that was already running, rather than
+        opening one of its own (ADR 0028).
+
+        The first line of an adopted Run's narrative, written where a spawned
+        Run's log simply begins at its first Announcement: nothing else in the
+        Run's record says the session came from somewhere else, and which pane
+        it was is what a human reads to find the conversation it landed in.
+        """
+        self._append(LogLine(kind="adopted", detail=f"attached to pane {pane}"))
 
     def record_branch(self, name: str) -> None:
         """The agent's declaration of the Run's Working branch (ADR 0022).
