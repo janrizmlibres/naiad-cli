@@ -344,42 +344,40 @@ def decide(workflow: Workflow, signals: Signals, *, skip_gates: bool = False) ->
         # deliberate, as it is for an answer in hand: it leaves the hang rule
         # below reachable, so a session that died before it could end a turn is
         # not waited on forever.
-        return _open(workflow, signals, signals.opening, skip_gates=skip_gates)
+        return _owed(
+            workflow,
+            signals,
+            state_name=signals.opening.state,
+            subject=signals.opening.subject,
+            # Said out loud rather than gone quiet on, because a Run owed a
+            # Prompt that will never come waits for good. The checks were made
+            # when the Entry was queued and again when the Run was attached, so
+            # reaching this means the Workflow was edited after that.
+            unknown=(
+                f"this run was adopted at '{signals.opening.state}', "
+                f"which is not a State of this workflow"
+            ),
+            skip_gates=skip_gates,
+        )
 
     if announcement is not None and signals.stopped:
-        state = workflow.state(announcement.state)
-        if state is None:
-            # A State this Workflow does not declare. The announce command
-            # rejects one, so this is the agent having found a way around it;
-            # there is nothing to deliver and nobody but a human can say what
-            # was meant. It is not a Deviation — a Deviation is a legal target
-            # reached out of order — but the Run log holds the Announcement and
-            # this notification's reason beside it, which is what the operator
-            # reads to find out what the agent thought it was doing.
-            return _notify(
-                signals,
-                f"the agent announced '{announcement.state}', "
-                f"which is not a State of this workflow",
-            )
-        if state.prompt is None:
-            # A Gate State: there is nothing to deliver and the human types
-            # into the session directly. That is why the session must stay
-            # alive, and why there is no approve command.
-            return _notify(signals, f"state '{state.name}' is a Gate State and is waiting for you")
-
-        if state.clear and not signals.cleared:
-            # The context must be discarded before the Prompt, and the discard
-            # confirmed rather than assumed. Until then delivery waits, exactly
-            # as it waits on a turn ending above (ADR 0019).
-            return _clear(signals, state.name)
-
-        return Deliver(
-            state=state.name,
-            prompt=state.prompt,
-            next_states=resolve_next_states(workflow, state.name, skip_gates=skip_gates),
+        return _owed(
+            workflow,
+            signals,
+            state_name=announcement.state,
             subject=announcement.subject,
-            model=state.model,
-            effort=state.effort,
+            # The announce command rejects a State this Workflow does not
+            # declare, so reaching this is the agent having found a way around
+            # it; nobody but a human can say what was meant. It is not a
+            # Deviation — a Deviation is a legal target reached out of order —
+            # but the Run log holds the Announcement and this notification's
+            # reason beside it, which is what the operator reads to find out
+            # what the agent thought it was doing.
+            unknown=(
+                f"the agent announced '{announcement.state}', "
+                f"which is not a State of this workflow"
+            ),
+            skip_gates=skip_gates,
         )
 
     # Nothing to deliver. Either the agent is working — the common case, and
@@ -417,32 +415,56 @@ def decide(workflow: Workflow, signals: Signals, *, skip_gates: bool = False) ->
     return _notify(signals, f"the session produced no signal for {int(signals.idle_for)}s")
 
 
-def _open(
-    workflow: Workflow, signals: Signals, opening: Opening, *, skip_gates: bool
+def _owed(
+    workflow: Workflow,
+    signals: Signals,
+    *,
+    state_name: str,
+    subject: str | None,
+    unknown: str,
+    skip_gates: bool,
 ) -> Action:
-    """The first Prompt of an adopted Run, or why there is none to send.
+    """What a Run standing at one State is owed: its Prompt, the Clear that has
+    to come first, or why there is nothing to send at all.
 
-    The two refusals the delivery above makes, made again over the State the
-    Run was adopted at rather than the one it announced: a State the Workflow
-    does not declare leaves nothing to deliver, and a Gate State is the human's
-    to answer. Both are said out loud rather than gone quiet on, because a Run
-    that is owed a Prompt it never gets waits for good.
+    One copy of those rules, reached from both entrances to delivery — the
+    State the agent announced, and the State an Adoption was adopted at
+    (ADR 0028) — so that the two cannot come to disagree about what is
+    deliverable, the discipline naiad.cli.refusals keeps for what is startable.
+
+    A State the Workflow does not declare leaves nothing to deliver, and a Gate
+    State is the human's to answer: both say so rather than going quiet, since
+    a Run owed a Prompt it never gets waits for good. `unknown` is what the two
+    entrances differ in and the only thing they do: how the Run came to stand
+    at a State that is not there is what the human needs told.
+
+    The Clear is honored at either entrance, and that is where an Adoption
+    diverges from kickoff. Kickoff ignores its first State's flag because the
+    session it is about to open holds nothing to discard; the session an
+    Adoption joins holds everything, and a Workflow declaring a clean start is
+    not Naiad's to overrule (ADR 0028). The discard is confirmed rather than
+    assumed, retries and all (ADR 0019).
     """
-    state = workflow.state(opening.state)
+    state = workflow.state(state_name)
     if state is None:
-        return _notify(
-            signals,
-            f"this run was adopted at '{opening.state}', "
-            f"which is not a State of this workflow",
-        )
+        return _notify(signals, unknown)
     if state.prompt is None:
+        # A Gate State: there is nothing to deliver and the human types into
+        # the session directly. That is why the session must stay alive, and
+        # why there is no approve command.
         return _notify(signals, f"state '{state.name}' is a Gate State and is waiting for you")
+
+    if state.clear and not signals.cleared:
+        # The context must be discarded before the Prompt, and the discard
+        # confirmed rather than assumed. Until then delivery waits, exactly as
+        # it waits on a turn ending (ADR 0019).
+        return _clear(signals, state.name)
 
     return Deliver(
         state=state.name,
         prompt=state.prompt,
         next_states=resolve_next_states(workflow, state.name, skip_gates=skip_gates),
-        subject=opening.subject,
+        subject=subject,
         model=state.model,
         effort=state.effort,
     )

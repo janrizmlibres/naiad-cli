@@ -132,11 +132,16 @@ def tick(
         skip_gates=run.skip_gates,
     )
 
-    if isinstance(action, Clear) and announcement is not None:
+    if isinstance(action, Clear):
         # Type /clear and record the attempt against the current Clear count,
         # so a landing after this can be told from one before it. The Prompt
         # does not follow yet: a later tick delivers it, once the SessionStart
         # hook has confirmed the discard (ADR 0019).
+        #
+        # An adopted Run's Clear answers no Announcement, as its first delivery
+        # answers none: the attempt is kept against no seq, which is the key the
+        # next tick reads it back under while nothing has been announced
+        # (ADR 0028).
         session.clear(_pane(run))
         clearing.record_attempt(announcement, landed=clears.count())
     elif isinstance(action, Deliver):

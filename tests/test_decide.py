@@ -346,8 +346,11 @@ def test_the_adopted_states_model_and_effort_ride_that_delivery(workflow):
 
 def test_the_subject_an_adoption_named_rides_that_delivery(workflow):
     """There is no Announcement to carry it: an Adoption's Subject was named
-    when the Entry was made, and the State adopted at may name it (ADR 0009)."""
-    owed = signals(None, opening=Opening(state="implement", subject="04-x.md"))
+    when the Entry was made, and the State adopted at may name it (ADR 0009).
+
+    Past a Clear, which is what the Subject is for: the context that could have
+    named it has been discarded by the time the Prompt goes out."""
+    owed = signals(None, opening=Opening(state="implement", subject="04-x.md"), cleared=True)
 
     assert decide(workflow, owed).subject == "04-x.md"
 
@@ -377,6 +380,65 @@ def test_an_adopted_session_that_produces_no_signal_at_all_is_not_waited_on_fore
     hung = signals(None, opening=Opening(state="grill"), stopped=False, idle_for=HANG_SECONDS)
 
     assert isinstance(decide(workflow, hung), Notify)
+
+
+def test_a_run_adopted_at_a_clearing_state_is_cleared_before_that_prompt(workflow):
+    """The one place an Adoption diverges from kickoff. Kickoff ignores the
+    first State's Clear because a new session holds nothing to discard; the
+    session an Adoption joins holds everything, and the Workflow's declaration
+    of a clean start is not Naiad's to overrule (ADR 0028)."""
+    action = decide(workflow, signals(None, opening=Opening(state="implement")))
+
+    assert action == Clear(state="implement", attempt=1)
+
+
+def test_the_prompt_an_adoption_is_owed_follows_only_a_confirmed_clear(workflow):
+    """The handshake an announced Clearing State already obeys, unchanged: the
+    Prompt does not follow the /clear on faith (ADR 0019)."""
+    owed = signals(None, opening=Opening(state="implement"))
+
+    assert isinstance(decide(workflow, owed), Clear)
+    landed = signals(None, opening=Opening(state="implement"), cleared=True, clear_attempts=1)
+    assert isinstance(decide(workflow, landed), Deliver)
+
+
+def test_a_clear_an_adoption_owes_is_not_typed_before_a_turn_has_ended(workflow):
+    """A Clear types into the session, and the session an Adoption joins is the
+    human's own: Clearing one still working discards the conversation the
+    feature exists to keep."""
+    owed = signals(None, opening=Opening(state="implement"), stopped=False)
+
+    assert decide(workflow, owed) is NOTHING
+
+
+def test_a_dropped_clear_at_adoption_is_retyped_within_the_bound(workflow):
+    """The unconfirmed-Clear path behaves as delivery's already does: a window
+    is waited, then the /clear is typed again."""
+    waiting = signals(
+        None,
+        opening=Opening(state="implement"),
+        clear_attempts=1,
+        idle_for=CLEAR_CONFIRM_SECONDS - 1,
+    )
+    dropped = signals(
+        None, opening=Opening(state="implement"), clear_attempts=1, idle_for=CLEAR_CONFIRM_SECONDS
+    )
+
+    assert decide(workflow, waiting) is NOTHING
+    assert decide(workflow, dropped) == Clear(state="implement", attempt=2)
+
+
+def test_a_clear_at_adoption_that_never_lands_tells_the_human(workflow):
+    """Past the bound Naiad stops rather than delivering the Prompt into the
+    context that never cleared."""
+    exhausted = signals(
+        None,
+        opening=Opening(state="implement"),
+        clear_attempts=CLEAR_RETRY_LIMIT,
+        idle_for=CLEAR_CONFIRM_SECONDS,
+    )
+
+    assert isinstance(decide(workflow, exhausted), Notify)
 
 
 def test_an_announcement_settles_what_is_owed_rather_than_the_adoption(workflow):

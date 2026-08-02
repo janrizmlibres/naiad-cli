@@ -239,6 +239,18 @@ def test_a_run_started_at_such_a_state_with_a_subject_delivers_it(repo, store, s
     assert spawn.initial_prompt == "/implement the ticket at 04-x.md"
 
 
+def test_a_spawned_run_ignores_its_first_states_clear_flag(repo, store, sessions):
+    """The other half of the divergence an Adoption makes (ADR 0028). A session
+    about to be opened holds nothing to discard, so the flag is not acted on
+    here: nothing is cleared, and the Prompt is handed over at launch rather
+    than held back behind a Clear waiting to be confirmed."""
+    start(repo, store, sessions, start_state="implement", subject="04-x.md")
+
+    assert sessions.cleared == []
+    (spawn,) = sessions.spawned
+    assert spawn.initial_prompt == "/implement the ticket at 04-x.md"
+
+
 def test_a_subject_is_not_required_by_a_state_that_does_not_name_one(repo, store, sessions):
     """The requirement is the Workflow's to declare, by using the placeholder.
     Every State that does not is unaffected."""

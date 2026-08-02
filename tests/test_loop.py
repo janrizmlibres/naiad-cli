@@ -464,6 +464,80 @@ def test_a_run_adopted_at_a_gate_state_notifies_and_sends_nothing(tmp_path, sess
     assert "review" in notifier.notified[0][1]
 
 
+def test_an_adopted_run_at_a_clearing_state_is_cleared_before_its_prompt(tmp_path, session):
+    """The one divergence from kickoff (ADR 0028): a spawned Run's session holds
+    nothing to discard, and an adopted one holds the whole conversation. The
+    /clear goes first and the Prompt waits on the confirmation (ADR 0019)."""
+    run = adopted_at(tmp_path, "implement", start_subject="04-x.md")
+    end_turn(run)
+
+    first = drive(run, workflow_of(run), session)
+
+    assert isinstance(first, Clear)
+    assert session.sent == [("clear", "%7", None)]
+
+    land_clear(run)
+    delivered = drive(run, workflow_of(run), session)
+
+    assert isinstance(delivered, Deliver)
+    assert session.sent == [
+        ("clear", "%7", None),
+        ("send", "%7", "/implement the ticket at 04-x.md"),
+    ]
+
+
+def test_a_dropped_clear_at_adoption_is_retyped_and_then_the_human_is_told(tmp_path, session):
+    """The unconfirmed-Clear path behaves as delivery's already does: bounded
+    retries, then the operator, and never a Prompt into an un-cleared context."""
+    run = adopted_at(tmp_path, "implement", start_subject="04-x.md")
+    notifier = RecordingNotifier()
+    end_turn(run)
+
+    action = None
+    for _ in range(CLEAR_RETRY_LIMIT + 1):
+        action = drive(
+            run,
+            workflow_of(run),
+            session,
+            notifier=notifier,
+            now=_later(run, CLEAR_CONFIRM_SECONDS),
+        )
+
+    assert isinstance(action, Notify)
+    assert [kind for kind, _, _ in session.sent] == ["clear"] * CLEAR_RETRY_LIMIT
+    assert len(notifier.notified) == 1
+
+
+def test_the_clear_an_adoption_owed_reaches_the_run_log_before_its_delivery(tmp_path, session):
+    run = adopted_at(tmp_path, "implement", start_subject="04-x.md")
+    end_turn(run)
+
+    drive(run, workflow_of(run), session)
+    land_clear(run)
+    drive(run, workflow_of(run), session)
+
+    assert [(e.kind, e.state) for e in RunLog(run.root).entries()] == [
+        ("adopted", None),
+        ("cleared", "implement"),
+        ("delivered", "implement"),
+    ]
+
+
+def test_an_adoption_at_a_non_clearing_state_sends_the_prompt_and_nothing_else(
+    adopted, workflow, session
+):
+    """The whole point of the feature: the conversation the early States built
+    is the context the Prompt lands in, so nothing is typed ahead of it."""
+    end_turn(adopted)
+
+    drive(adopted, workflow, session)
+
+    assert session.sent == [
+        ("send", "%7", "/grill-with-docs add dark mode, then announce review")
+    ]
+    assert [e.kind for e in RunLog(adopted.root).entries()] == ["adopted", "delivered"]
+
+
 def test_an_agent_working_on_the_prompt_it_was_adopted_with_is_not_nudged(
     adopted, workflow, session
 ):
