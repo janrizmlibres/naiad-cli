@@ -178,7 +178,13 @@ def status_of(entry: Entry, runs: RunStore) -> Status:
     # Run's files live is the Run store's to know. Its directory rather than its
     # metadata, because every fact below is a file in it and none of them needs
     # the Run object to answer.
-    root = runs.root_for(entry.run_id)
+    return _run_status(runs.root_for(entry.run_id))
+
+
+def _run_status(root: Path) -> Status:
+    """What a Run's directory records, never waiting: a directory exists, so the
+    Run does too. One reading shared by an Entry's status and a Prune's judgment
+    of an orphan (ADR 0030), so the two cannot come apart."""
     if RunLog(root).finished():
         return DONE
     # Read with the same Wait key the loop wrote it under (ADR 0021), or a Run
@@ -202,6 +208,11 @@ class Pruned:
 
     removed: list[Entry]
     failures: list[str]
+    # The Orphaned Runs (ADR 0030): the ids of those taken, and the paths of
+    # those left because they read as running — which only the operator, who can
+    # see the session, is placed to judge.
+    orphans: list[str]
+    skipped: list[str]
 
 
 def prune(queue: Queue, runs: RunStore) -> Pruned:
@@ -220,11 +231,21 @@ def prune(queue: Queue, runs: RunStore) -> Pruned:
     ever, and a done Entry showing as running is a listing that lies. A refusal
     is recorded and the next Entry is taken anyway, so one stuck directory
     cannot spare the whole backlog.
+
+    After the Entries, the Orphaned Runs (ADR 0030): every Run directory no
+    Entry names is judged by the same reading and taken when it is done or
+    parked, left and named when it reads as running.
     """
     removed: list[Entry] = []
     failures: list[str] = []
 
-    for entry in queue.all():
+    entries = queue.all()
+    # Every Run this pass leaves a claim on: one an Entry still names must not
+    # be judged an orphan, and one whose removal was already attempted must not
+    # be attempted twice in the same pass.
+    tended = {entry.run_id for entry in entries if entry.run_id is not None}
+
+    for entry in entries:
         if status_of(entry, runs) != DONE:
             continue
 
@@ -245,7 +266,48 @@ def prune(queue: Queue, runs: RunStore) -> Pruned:
         except StorageError as error:
             failures.append(str(error))
 
-    return Pruned(removed=removed, failures=failures)
+    orphans, skipped = _take_orphans(runs, tended, failures)
+    return Pruned(removed=removed, failures=failures, orphans=orphans, skipped=skipped)
+
+
+def _take_orphans(
+    runs: RunStore, tended: set[str], failures: list[str]
+) -> tuple[list[str], list[str]]:
+    """Take every Orphaned Run that reads done or parked, and name the rest.
+
+    A Run no Entry names can never be ticked, answered or advanced, so done and
+    parked alike are finished history without a line (ADR 0030). Running is the
+    one reading that cannot tell a live Session from a dead one, and Naiad never
+    looks at tmux to find out — so a running orphan is left and named by path,
+    every Prune, until the operator who can look removes it.
+
+    A directory that cannot be read is a failure and the next is taken anyway:
+    the stop-early rule guards the Entry read, where deleting would follow a
+    misreading; here not deleting is the safe act.
+    """
+    orphans: list[str] = []
+    skipped: list[str] = []
+    if not runs.root.is_dir():
+        return orphans, skipped
+
+    for directory in sorted(path for path in runs.root.iterdir() if path.is_dir()):
+        if directory.name in tended:
+            continue
+        try:
+            status = _run_status(directory)
+        except (OSError, ValueError, KeyError, TypeError, StorageError) as error:
+            failures.append(f"orphaned run directory {directory} cannot be read ({error})")
+            continue
+        if status == RUNNING:
+            skipped.append(str(directory))
+            continue
+        try:
+            runs.remove(directory.name)
+            orphans.append(directory.name)
+        except StorageError as error:
+            failures.append(str(error))
+
+    return orphans, skipped
 
 
 def branch_of(entry: Entry, runs: RunStore) -> str | None:

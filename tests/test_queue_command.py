@@ -13,6 +13,7 @@ from naiad.adapters.lock import SupervisorLock
 from naiad.cli.main import main
 from naiad.domain.decide import Finish
 from naiad.domain.entry import Entry
+from naiad.runtime.announcements import Announcements
 from naiad.runtime.log import RunLog
 from naiad.runtime.queue import Queue
 from naiad.runtime.run import RunStore
@@ -720,6 +721,41 @@ def test_pruning_reports_a_run_directory_that_would_not_go(home, repo, capsys, m
 
     assert queue_of(home).all() == []
     assert str(run.root) in capsys.readouterr().err
+
+
+def orphan(home, repo, run_id="orphaned-run"):
+    """A Run directory no Entry names (ADR 0030)."""
+    return RunStore(home / "runs").create(
+        run_id=run_id,
+        workflow_path=repo / "workflow.toml",
+        task="add dark mode",
+        target_repo=repo,
+        created_at="2026-07-22T12:00:00Z",
+    )
+
+
+def test_pruning_takes_a_finished_orphaned_run_and_prints_its_line(home, repo, capsys):
+    """An orphan has no line in the listing, so the removal's printed line is
+    the only record it ever gets."""
+    run = orphan(home, repo)
+    RunLog(run.root).record(Finish(state="done"))
+
+    assert main(["queue", "prune"]) == 0
+
+    assert not run.root.exists()
+    assert "orphaned-run" in capsys.readouterr().out
+
+
+def test_a_running_orphan_is_left_and_named_without_failing(home, repo, capsys):
+    """Skipping a running orphan is a judgment deferred to the operator, not
+    something that went wrong — so it is named on stdout and the exit is 0."""
+    run = orphan(home, repo)
+    Announcements(run.root).announce("implement")
+
+    assert main(["queue", "prune"]) == 0
+
+    assert run.root.is_dir()
+    assert str(run.root) in capsys.readouterr().out
 
 
 def test_pruning_a_queue_holding_a_damaged_entry_reports_it_and_takes_nothing(

@@ -946,12 +946,14 @@ def _queue_rm(arguments: argparse.Namespace) -> int:
 
 
 def _queue_prune(arguments: argparse.Namespace) -> int:
-    """Take the done Entries out, each with the Run it became (ADR 0029).
+    """Take the done Entries out, each with the Run it became (ADR 0029), and
+    the finished Orphaned Runs after them (ADR 0030).
 
-    Which Entries qualify is naiad.runtime.queue's to say; this reports what
-    came back. A Run that would not go is a failure with a message, although
-    the Queue was still tidied: the orphan left behind is one the operator can
-    act on only if they are told its path.
+    Which Entries and orphans qualify is naiad.runtime.queue's to say; this
+    reports what came back. A Run that would not go is a failure with a
+    message, although the Queue was still tidied: the orphan left behind is one
+    the operator can act on only if they are told its path — and the next Prune
+    will meet it again.
     """
     try:
         pruned = prune(Queue(default_queue_root()), RunStore(default_runs_root()))
@@ -960,15 +962,26 @@ def _queue_prune(arguments: argparse.Namespace) -> int:
         print(f"naiad: {error}", file=sys.stderr)
         return 2
 
-    # Nothing taken is the whole of the empty case: a failure is only ever met
-    # after an Entry has gone, so there can be none without a removal.
-    if not pruned.removed:
-        print(f"nothing to prune: no entry in the queue is done ({default_queue_root()})")
+    if not (pruned.removed or pruned.orphans or pruned.skipped or pruned.failures):
+        print(
+            "nothing to prune: no entry in the queue is done and no run is orphaned"
+            f" ({default_queue_root()})"
+        )
         return 0
 
     for entry in pruned.removed:
         print(f"pruned {entry.id}  {entry.task}")
-    print(f"{len(pruned.removed)} pruned")
+    # An orphan has no line in the listing, so this printed line is the only
+    # record its removal ever gets (ADR 0030).
+    for run_id in pruned.orphans:
+        print(f"pruned orphaned run {run_id}")
+    if pruned.removed or pruned.orphans:
+        print(f"{len(pruned.removed) + len(pruned.orphans)} pruned")
+
+    # Left rather than failed: whether a running orphan is truly live is the
+    # operator's fact, so naming it defers the judgment without alarming them.
+    for path in pruned.skipped:
+        print(f"left orphaned run {path}: reads as running, yours to judge")
 
     for failure in pruned.failures:
         print(f"naiad: {failure}", file=sys.stderr)

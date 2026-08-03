@@ -424,6 +424,91 @@ def test_pruning_a_queue_holding_a_damaged_entry_refuses_before_taking_anything(
     assert (queue.root / "done-entry.json").exists()
 
 
+# Orphaned Runs. A Run directory no Entry names is taken by a Prune when it
+# reads done or parked, skipped and named when it reads running, and reported
+# as a failure when it cannot be read at all (ADR 0030).
+
+
+def test_pruning_takes_a_done_orphaned_run(queue, runs, repo):
+    orphan = finished(runs, repo, run_id="orphaned-run")
+
+    pruned = prune(queue, runs)
+
+    assert pruned.orphans == ["orphaned-run"]
+    assert not orphan.root.exists()
+
+
+def test_pruning_takes_a_parked_orphaned_run(queue, runs, repo):
+    """Parked protects a Run someone will return to, and no one returns to an
+    orphan: an Entry-less Run can never be ticked, answered or advanced, so its
+    parking is permanent and protects nobody."""
+    orphan = started(runs, repo, run_id="orphaned-run")
+    Notices(orphan.root).record_notified(Announcements(orphan.root).announce("handover"))
+
+    pruned = prune(queue, runs)
+
+    assert pruned.orphans == ["orphaned-run"]
+    assert not orphan.root.exists()
+
+
+def test_pruning_leaves_a_running_orphan_and_names_it_by_path(queue, runs, repo):
+    """Running cannot tell a live Session from a dead one that never announced,
+    and Naiad never looks at tmux to find out. Liveness is the operator's fact,
+    so the directory stays and its path is named, every Prune, until they act."""
+    orphan = started(runs, repo, run_id="orphaned-run")
+    Announcements(orphan.root).announce("implement")
+
+    pruned = prune(queue, runs)
+
+    assert pruned.orphans == []
+    assert pruned.skipped == [str(orphan.root)]
+    assert pruned.failures == []
+    assert orphan.root.is_dir()
+
+
+def test_a_run_an_entry_still_names_is_not_an_orphan(queue, runs, repo):
+    """However its Run reads, an Entry naming it keeps it out of the orphan
+    pass. A parked Run with its Entry is a Run asking for a human, and stays."""
+    run = started(runs, repo, run_id="parked-run")
+    Notices(run.root).record_notified(Announcements(run.root).announce("handover"))
+    queue.add(entry(repo, id="parked-entry", run_id=run.id))
+
+    pruned = prune(queue, runs)
+
+    assert pruned.orphans == []
+    assert pruned.skipped == []
+    assert run.root.is_dir()
+
+
+def test_an_unreadable_orphan_is_a_failure_and_the_rest_are_taken_anyway(queue, runs, repo):
+    """Not deleting is the safe act, so one unreadable directory is reported by
+    path and must not spare the other orphans."""
+    damaged = started(runs, repo, run_id="damaged-run")
+    (damaged.root / "state.json").write_text("{ not json")
+    willing = finished(runs, repo, run_id="willing-run")
+
+    pruned = prune(queue, runs)
+
+    assert pruned.orphans == ["willing-run"]
+    assert not willing.root.exists()
+    assert damaged.root.is_dir()
+    assert str(damaged.root) in "\n".join(pruned.failures)
+
+
+def test_an_orphan_that_would_not_go_is_a_failure_naming_its_path(queue, runs, repo, monkeypatch):
+    orphan = finished(runs, repo, run_id="orphaned-run")
+
+    def refuse(_self, _run_id):
+        raise StorageError(f"run directory {orphan.root} cannot be removed (device busy)")
+
+    monkeypatch.setattr(RunStore, "remove", refuse)
+
+    pruned = prune(queue, runs)
+
+    assert pruned.orphans == []
+    assert str(orphan.root) in "\n".join(pruned.failures)
+
+
 def test_an_entry_that_was_already_gone_is_not_claimed_as_taken(queue, runs, repo, monkeypatch):
     """Removal answers False when there was no such Entry, and a Prune has to
     believe it. Counting one anyway would print a line for a removal this Prune
