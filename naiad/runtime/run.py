@@ -12,6 +12,7 @@ can be committed into a pull request, and the record outlives the working copy
 from __future__ import annotations
 
 import json
+import shutil
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -172,6 +173,25 @@ class RunStore:
         if not metadata.is_file():
             return None
         return self._read(metadata)
+
+    def remove(self, run_id: str) -> None:
+        """Take a Run's whole directory — its metadata, its log, everything it
+        recorded. A Run that is not there needs no taking, and saying so would
+        answer a question nobody asks.
+
+        Destructive where every other method here is not, and asked for by one
+        caller alone: a Prune, which takes a done Entry and the Run it became
+        together (ADR 0029). Nothing is checked before the directory goes,
+        because whether a Run is done is read from its files by the Queue, and
+        a second reading here could disagree with the first.
+        """
+        root = self.root_for(run_id)
+        if not root.is_dir():
+            return
+        try:
+            shutil.rmtree(root)
+        except OSError as error:
+            raise StorageError(f"run directory {root} cannot be removed ({error})") from error
 
     def all(self) -> list[Run]:
         if not self.root.is_dir():

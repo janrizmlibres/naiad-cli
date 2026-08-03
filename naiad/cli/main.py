@@ -54,7 +54,7 @@ from naiad.runtime.home import (
     default_queue_root,
     default_runs_root,
 )
-from naiad.runtime.queue import Queue, status_of
+from naiad.runtime.queue import Queue, prune, status_of
 from naiad.runtime.records import Clears, Turns
 from naiad.runtime.resolve import NoRunError, RunResolver
 from naiad.runtime.run import Run, RunStore
@@ -124,6 +124,14 @@ def main(argv: list[str] | None = None) -> int:
     )
     queue_rm.add_argument("entry_id", help="which Entry, as `naiad queue list` names it")
     queue_rm.set_defaults(handler=_queue_rm)
+
+    # No arguments and nothing to confirm: a Prune can reach nothing but done
+    # work, so a flag narrowing it would guard against nothing, and `naiad
+    # queue list` already shows exactly what it will take (ADR 0029).
+    queue_prune = queue_commands.add_parser(
+        "prune", help="remove the done Entries, and the Runs they became, together"
+    )
+    queue_prune.set_defaults(handler=_queue_prune)
 
     adopt = subcommands.add_parser(
         "adopt", help="queue a run that adopts the session you are in, from inside it"
@@ -935,6 +943,36 @@ def _queue_rm(arguments: argparse.Namespace) -> int:
 
     print(f"removed {arguments.entry_id}")
     return 0
+
+
+def _queue_prune(arguments: argparse.Namespace) -> int:
+    """Take the done Entries out, each with the Run it became (ADR 0029).
+
+    Which Entries qualify is naiad.runtime.queue's to say; this reports what
+    came back. A Run that would not go is a failure with a message, although
+    the Queue was still tidied: the orphan left behind is one the operator can
+    act on only if they are told its path.
+    """
+    try:
+        pruned = prune(Queue(default_queue_root()), RunStore(default_runs_root()))
+    except FAILURES as error:
+        # A damaged Entry, met before anything was deleted.
+        print(f"naiad: {error}", file=sys.stderr)
+        return 2
+
+    # Nothing taken is the whole of the empty case: a failure is only ever met
+    # after an Entry has gone, so there can be none without a removal.
+    if not pruned.removed:
+        print(f"nothing to prune: no entry in the queue is done ({default_queue_root()})")
+        return 0
+
+    for entry in pruned.removed:
+        print(f"pruned {entry.id}  {entry.task}")
+    print(f"{len(pruned.removed)} pruned")
+
+    for failure in pruned.failures:
+        print(f"naiad: {failure}", file=sys.stderr)
+    return 2 if pruned.failures else 0
 
 
 def _run_id(started: datetime, workflow_path: Path) -> str:

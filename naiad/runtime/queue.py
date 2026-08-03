@@ -19,7 +19,7 @@ adding one is a write nothing else has to be locked for.
 from __future__ import annotations
 
 import json
-from dataclasses import replace
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any, Literal
 
@@ -188,6 +188,66 @@ def status_of(entry: Entry, runs: RunStore) -> Status:
     return PARKED if notified else RUNNING
 
 
+@dataclass(frozen=True)
+class Pruned:
+    """What a Prune took, and what it could not take.
+
+    Two independent facts rather than one verdict per Entry. `removed` is every
+    Entry that left the Queue — which is what the operator watches the listing
+    shrink by — and `failures` is every refusal met on the way, each naming the
+    Run directory that stayed behind. An Entry can appear in both: its file
+    went and its Run would not, which leaves an orphan the operator is told
+    about by path rather than a removal they were never told about at all.
+    """
+
+    removed: list[Entry]
+    failures: list[str]
+
+
+def prune(queue: Queue, runs: RunStore) -> Pruned:
+    """Take every done Entry out of the Queue, and the Run each became with it.
+
+    Done is asked of `status_of` rather than decided again here, so what the
+    listing calls done and what a Prune removes cannot come apart. The other
+    three are left where they are (ADR 0029).
+
+    The Queue is read whole before anything is deleted, so an Entry nobody can
+    read stops the Prune with the file named rather than partway through work
+    that cannot be taken back.
+
+    Per Entry the file goes first and the Run second, which is the order ADR
+    0029 turns on: a Run gone while its Entry stayed would read as running for
+    ever, and a done Entry showing as running is a listing that lies. A refusal
+    is recorded and the next Entry is taken anyway, so one stuck directory
+    cannot spare the whole backlog.
+    """
+    removed: list[Entry] = []
+    failures: list[str] = []
+
+    for entry in queue.all():
+        if status_of(entry, runs) != DONE:
+            continue
+
+        # Believed rather than assumed: an Entry somebody removed by name
+        # between the reading and the taking was theirs to remove, and its Run
+        # is one they deliberately left alone.
+        if not queue.remove(entry.id):
+            continue
+        removed.append(entry)
+
+        # A done Entry always names the Run it was read as done from, so the
+        # guard is for the type rather than for a case: no run_id is waiting,
+        # and waiting is not what we are here for.
+        if entry.run_id is None:
+            continue
+        try:
+            runs.remove(entry.run_id)
+        except StorageError as error:
+            failures.append(str(error))
+
+    return Pruned(removed=removed, failures=failures)
+
+
 def branch_of(entry: Entry, runs: RunStore) -> str | None:
     """The Working branch an Entry claims, resolved through its Run when the
     Entry's own record carries none.
@@ -238,7 +298,9 @@ __all__ = [
     "PARKED",
     "RUNNING",
     "WAITING",
+    "Pruned",
     "Queue",
     "branch_of",
+    "prune",
     "status_of",
 ]

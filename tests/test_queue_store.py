@@ -16,7 +16,7 @@ from naiad.domain.question import Question
 from naiad.runtime.announcements import Announcements
 from naiad.runtime.home import StorageError
 from naiad.runtime.log import RunLog
-from naiad.runtime.queue import DONE, PARKED, RUNNING, WAITING, Queue, status_of
+from naiad.runtime.queue import DONE, PARKED, RUNNING, WAITING, Queue, prune, status_of
 from naiad.runtime.records import Notices, Waits
 from naiad.runtime.run import RunStore
 
@@ -289,3 +289,153 @@ def test_a_finished_run_that_was_notified_along_the_way_is_done_rather_than_park
     assert status_of(entry(repo, run_id=run.id), runs) == DONE
 
 
+# Pruning. What a Prune takes is read through `status_of` rather than decided
+# again here, so that what the listing calls done and what a Prune removes can
+# never come apart (ADR 0029).
+
+
+def finished(runs, repo, run_id="a-run"):
+    run = started(runs, repo, run_id=run_id)
+    announcement = Announcements(run.root).announce("done")
+    RunLog(run.root).record(Finish(state="done"), seq=announcement.seq)
+    return run
+
+
+def test_pruning_takes_the_done_entries_and_the_runs_they_became(queue, runs, repo):
+    run = finished(runs, repo)
+    queue.add(entry(repo, id="done-entry", run_id=run.id))
+
+    pruned = prune(queue, runs)
+
+    assert [taken.id for taken in pruned.removed] == ["done-entry"]
+    assert queue.all() == []
+    assert not run.root.exists()
+
+
+def test_pruning_leaves_a_waiting_entry_where_it_is(queue, runs, repo):
+    """Waiting is future work. Taking it would cancel something, which is what
+    removing one by name is for."""
+    queue.add(entry(repo, id="waiting-entry"))
+
+    assert prune(queue, runs).removed == []
+
+    assert [held.id for held in queue.all()] == ["waiting-entry"]
+
+
+def test_pruning_leaves_a_running_entry_and_its_run_alone(queue, runs, repo):
+    run = started(runs, repo)
+    Announcements(run.root).announce("implement")
+    queue.add(entry(repo, id="running-entry", run_id=run.id))
+
+    assert prune(queue, runs).removed == []
+
+    assert [held.id for held in queue.all()] == ["running-entry"]
+    assert run.root.is_dir()
+
+
+def test_pruning_leaves_a_parked_entry_and_its_run_alone(queue, runs, repo):
+    """A parked Run is one asking for a human. It looks idle, but the work is
+    not finished, and taking it would hide the request."""
+    run = started(runs, repo)
+    Notices(run.root).record_notified(Announcements(run.root).announce("handover"))
+    queue.add(entry(repo, id="parked-entry", run_id=run.id))
+
+    assert prune(queue, runs).removed == []
+
+    assert [held.id for held in queue.all()] == ["parked-entry"]
+    assert run.root.is_dir()
+
+
+def test_pruning_takes_only_the_done_entries_out_of_a_mixed_queue(queue, runs, repo):
+    queue.add(entry(repo, id="a-waiting-entry"))
+    queue.add(entry(repo, id="b-done-entry", run_id=finished(runs, repo, run_id="done-run").id))
+    parked = started(runs, repo, run_id="parked-run")
+    Notices(parked.root).record_notified(Announcements(parked.root).announce("handover"))
+    queue.add(entry(repo, id="c-parked-entry", run_id=parked.id))
+
+    pruned = prune(queue, runs)
+
+    assert [taken.id for taken in pruned.removed] == ["b-done-entry"]
+    assert [held.id for held in queue.all()] == ["a-waiting-entry", "c-parked-entry"]
+
+
+def test_pruning_takes_the_entry_before_the_run_so_a_failure_leaves_no_lie(
+    queue, runs, repo, monkeypatch
+):
+    """The order ADR 0029 turns on, seen from the failure it is chosen for. The
+    Entry still counts as removed, because it was: one that vanished with no
+    line naming it would be a removal the operator was never told about, and
+    the orphan left behind is the separate fact the refusal states.
+    """
+    run = finished(runs, repo)
+    queue.add(entry(repo, id="done-entry", run_id=run.id))
+
+    def refuse(_self, _run_id):
+        raise StorageError(f"run directory {run.root} cannot be removed (device busy)")
+
+    monkeypatch.setattr(RunStore, "remove", refuse)
+
+    pruned = prune(queue, runs)
+
+    assert queue.all() == []
+    assert [taken.id for taken in pruned.removed] == ["done-entry"]
+    assert str(run.root) in "\n".join(pruned.failures)
+
+
+def test_one_failed_run_removal_does_not_stop_the_rest(queue, runs, repo, monkeypatch):
+    """Reported and gone past, rather than stopping: one stuck directory must
+    not spare the whole backlog."""
+    stubborn = finished(runs, repo, run_id="stubborn-run")
+    willing = finished(runs, repo, run_id="willing-run")
+    queue.add(entry(repo, id="a-entry", run_id=stubborn.id))
+    queue.add(entry(repo, id="b-entry", run_id=willing.id))
+    taking = RunStore.remove
+
+    def refuse_one(self, run_id):
+        if run_id == "stubborn-run":
+            raise StorageError(f"run directory {stubborn.root} cannot be removed (device busy)")
+        return taking(self, run_id)
+
+    monkeypatch.setattr(RunStore, "remove", refuse_one)
+
+    pruned = prune(queue, runs)
+
+    assert [taken.id for taken in pruned.removed] == ["a-entry", "b-entry"]
+    assert queue.all() == []
+    assert not willing.root.exists()
+    assert stubborn.root.is_dir()
+    assert len(pruned.failures) == 1
+
+
+def test_pruning_a_queue_holding_a_damaged_entry_refuses_before_taking_anything(
+    queue, runs, repo
+):
+    """Read whole before anything is deleted, as a batch is queued whole: an
+    Entry nobody can read might be the done one, and a Prune already under way
+    could not be taken back."""
+    run = finished(runs, repo)
+    queue.add(entry(repo, id="done-entry", run_id=run.id))
+    (queue.root / "damaged.json").write_text("{ not json")
+
+    with pytest.raises(StorageError):
+        prune(queue, runs)
+
+    assert run.root.is_dir()
+    assert (queue.root / "done-entry.json").exists()
+
+
+def test_an_entry_that_was_already_gone_is_not_claimed_as_taken(queue, runs, repo, monkeypatch):
+    """Removal answers False when there was no such Entry, and a Prune has to
+    believe it. Counting one anyway would print a line for a removal this Prune
+    did not make — and would take a Run that whoever removed the Entry by name
+    had deliberately left alone.
+    """
+    run = finished(runs, repo)
+    queue.add(entry(repo, id="done-entry", run_id=run.id))
+    monkeypatch.setattr(Queue, "remove", lambda _self, _entry_id: False)
+
+    pruned = prune(queue, runs)
+
+    assert pruned.removed == []
+    assert pruned.failures == []
+    assert run.root.is_dir()

@@ -124,3 +124,40 @@ def test_lists_every_run_it_holds(store, repo):
     create(store, repo, run_id="two")
 
     assert {run.id for run in store.all()} == {"one", "two"}
+
+
+# Removing a Run. Only a Prune ever asks for this, and only of a Run whose
+# Entry is done (ADR 0029) — the store itself checks nothing, because what a
+# Run's own files say about it is the Queue's to read rather than this store's.
+
+
+def test_removing_a_run_takes_its_whole_directory(store, repo):
+    run = create(store, repo)
+    (run.root / "log.jsonl").write_text('{"kind": "finish"}\n')
+
+    store.remove(run.id)
+
+    assert not run.root.exists()
+
+
+def test_removing_a_run_that_is_not_there_is_not_a_refusal(store, repo):
+    """A Run that is not there needs no taking, and the caller asked for it to
+    be gone rather than for it to have been there."""
+    assert store.remove("no-such-run") is None
+
+
+def test_a_run_directory_that_will_not_go_is_reported_naming_it(store, repo, monkeypatch):
+    """Read as a message rather than a traceback, as a damaged Entry is: a
+    directory the operator has locked or opened elsewhere is theirs to fix, and
+    the path is the only part of it they can act on."""
+    run = create(store, repo)
+
+    def refuse(*_arguments, **_keywords):
+        raise OSError("device or resource busy")
+
+    monkeypatch.setattr("naiad.runtime.run.shutil.rmtree", refuse)
+
+    with pytest.raises(StorageError) as refusal:
+        store.remove(run.id)
+
+    assert str(run.root) in str(refusal.value)

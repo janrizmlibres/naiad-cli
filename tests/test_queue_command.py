@@ -1,5 +1,5 @@
-"""The three Queue commands as an operator meets them: exit status, what lands
-on disk, what is printed.
+"""The Queue commands as an operator meets them: exit status, what lands on
+disk, what is printed.
 
 `naiad queue add` is also the command an agent inside a session uses, so the
 tests hold it to returning without supervising anything.
@@ -621,3 +621,117 @@ def test_a_batched_entry_carries_no_mark_of_the_file_it_came_from(home, repo):
     batched, also_batched, alone = queue_of(home).all()
     assert len(batched.id.split("-")) == len(alone.id.split("-"))
     assert batched.id < also_batched.id < alone.id
+
+
+# `naiad queue prune`. Which Entries it takes is tested against the store in
+# tests/test_queue_store.py; what is held here is the command an operator meets
+# — exit status, what is printed, and that it needs nothing typed to be safe.
+
+
+def finished(home, repo, entry_id, run_id):
+    """A done Entry: a Run whose log records an ending, and the Entry that
+    became it."""
+    run = RunStore(home / "runs").create(
+        run_id=run_id,
+        workflow_path=repo / "workflow.toml",
+        task="add dark mode",
+        target_repo=repo,
+        created_at="2026-07-22T12:00:00Z",
+    )
+    RunLog(run.root).record(Finish(state="done"))
+    queue_of(home).add(
+        Entry(
+            id=entry_id,
+            workflow_path=repo / "workflow.toml",
+            task="add dark mode",
+            target_repo=repo,
+            working_branch="MC-AGENT-8546",
+            created_at="2026-07-22T12:00:00Z",
+            run_id=run_id,
+        )
+    )
+    return run
+
+
+def test_pruning_reaches_both_stores_from_the_command(home, repo):
+    """The wiring rather than the rule: that the command reaches the Queue and
+    the Runs under the Naiad home, and that both give up what a Prune takes.
+    Which Entries qualify is held in tests/test_queue_store.py."""
+    run = finished(home, repo, entry_id="done-entry", run_id="a-run")
+
+    assert main(["queue", "prune"]) == 0
+
+    assert queue_of(home).all() == []
+    assert not run.root.exists()
+
+
+def test_pruning_leaves_everything_that_is_not_done(home, repo):
+    """Waiting work is future work, and a Prune is not the way to cancel it."""
+    add(repo, "--branch", "MC-AGENT-8547")
+    finished(home, repo, entry_id="done-entry", run_id="a-run")
+
+    assert main(["queue", "prune"]) == 0
+
+    (left,) = queue_of(home).all()
+    assert left.working_branch == "MC-AGENT-8547"
+
+
+def test_pruning_names_each_entry_it_took_and_says_how_many(home, repo, capsys):
+    """The printed lines are the report. Nothing is typed to confirm, because a
+    Prune can reach nothing but done work — so there is nothing to confirm."""
+    finished(home, repo, entry_id="first-entry", run_id="first-run")
+    finished(home, repo, entry_id="second-entry", run_id="second-run")
+
+    assert main(["queue", "prune"]) == 0
+
+    printed = capsys.readouterr().out
+    assert "first-entry" in printed and "second-entry" in printed
+    assert "add dark mode" in printed
+    assert "2" in printed
+
+
+def test_pruning_a_queue_with_nothing_done_says_so_rather_than_printing_nothing(
+    home, repo, capsys
+):
+    add(repo, "--branch", "MC-AGENT-8546")
+
+    assert main(["queue", "prune"]) == 0
+
+    assert capsys.readouterr().out.strip() != ""
+    assert len(queue_of(home).all()) == 1
+
+
+def test_pruning_an_empty_queue_is_not_a_failure(home, capsys):
+    assert main(["queue", "prune"]) == 0
+
+
+def test_pruning_reports_a_run_directory_that_would_not_go(home, repo, capsys, monkeypatch):
+    """The Entry is gone and the Run stayed, which is an orphan the operator can
+    only act on if they are told its path. Reported as a failure, since
+    something they asked for did not happen."""
+    run = finished(home, repo, entry_id="done-entry", run_id="a-run")
+
+    def refuse(*_arguments, **_keywords):
+        raise OSError("device or resource busy")
+
+    monkeypatch.setattr("naiad.runtime.run.shutil.rmtree", refuse)
+
+    assert main(["queue", "prune"]) == 2
+
+    assert queue_of(home).all() == []
+    assert str(run.root) in capsys.readouterr().err
+
+
+def test_pruning_a_queue_holding_a_damaged_entry_reports_it_and_takes_nothing(
+    home, repo, capsys
+):
+    """Read as a message rather than a traceback, as listing one is — and read
+    whole before anything is deleted, because the unreadable file might be the
+    done one."""
+    run = finished(home, repo, entry_id="done-entry", run_id="a-run")
+    (home / "queue" / "damaged.json").write_text("{ not json")
+
+    assert main(["queue", "prune"]) == 2
+
+    assert "damaged.json" in capsys.readouterr().err
+    assert run.root.is_dir()
