@@ -299,7 +299,7 @@ def decide(workflow: Workflow, signals: Signals, *, skip_gates: bool = False) ->
 
     announcement = _unhandled(signals)
 
-    ended = _terminal(workflow, signals.announcement)
+    ended = terminal_state(workflow, signals.announcement)
     if ended is not None and announcement is not None:
         # No turn end is waited for. Finishing sends nothing into the session,
         # so it cannot type over an agent still writing its last paragraph, and
@@ -470,7 +470,7 @@ def _owed(
     )
 
 
-def _terminal(workflow: Workflow, announcement: Announcement | None) -> State | None:
+def terminal_state(workflow: Workflow, announcement: Announcement | None) -> State | None:
     """The Terminal State this Announcement names, if it names one.
 
     Terminal is read from the Workflow, so Naiad recognises no State name of
@@ -479,6 +479,10 @@ def _terminal(workflow: Workflow, announcement: Announcement | None) -> State | 
     An Announcement carrying a Question is never an ending, however Terminal
     the State it was asked from: the agent is standing in that State rather
     than arriving at it, and it is waiting on an answer.
+
+    Public because the resolution seam asks it too: a Run that has ended
+    releases its Session (ADR 0035), and whether it has ended is this same
+    question. A second copy would drift on exactly the Question clause above.
     """
     if announcement is None or announcement.question is not None:
         return None
@@ -546,4 +550,5 @@ __all__ = [
     "Respond",
     "Signals",
     "decide",
+    "terminal_state",
 ]
