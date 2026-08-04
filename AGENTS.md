@@ -4,8 +4,8 @@
 
 `workflows/*.toml` is configuration a human hand-edits. Keep it that way: a
 comment is a one-line ADR pointer, never an explanation. Reasoning that needs
-writing down goes to `docs/adr/`. Prompt conventions are in
-`docs/workflow-authoring.md`.
+writing down goes to `docs/adr/`. Prompt conventions and this repository's own
+model choices are in `docs/workflow-authoring.md`.
 
 ## Agent skills
 

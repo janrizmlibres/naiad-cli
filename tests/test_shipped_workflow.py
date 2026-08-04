@@ -966,3 +966,35 @@ def test_an_unattended_run_tells_the_two_kinds_of_gate_state_apart(workflow):
 
     assert next_states(workflow, "diagnose", skip_gates=True) == ("no-repro", "pull-request")
     assert next_states(workflow, "diagnose") == ("no-repro", "pull-request")
+
+
+# The effective model and effort each State runs on (ADR 0026): read straight
+# off the file, default already applied, which is the legibility the ADR buys.
+# The file's split: classification and the implement loop step off the default
+# onto opus at high effort, and every other State — Gate States included —
+# reads as the file-level fable/medium default.
+MODELS = {
+    "classify": ("opus", "high"),
+    "diagnose": ("fable", "medium"),
+    "no-repro": ("fable", "medium"),
+    "grill": ("fable", "medium"),
+    "review": ("fable", "medium"),
+    "spec": ("fable", "medium"),
+    "tickets": ("fable", "medium"),
+    "implement": ("opus", "high"),
+    "handover": ("fable", "medium"),
+    "pull-request": ("fable", "medium"),
+    "review-fix": ("fable", "medium"),
+    "done": ("fable", "medium"),
+}
+
+
+def test_every_state_declares_the_model_and_effort_its_work_earns(workflow):
+    assert {state.name: (state.model, state.effort) for state in workflow.states} == MODELS
+
+
+def test_the_answerer_declares_its_model_and_effort(workflow):
+    """A Question is answered from the Run's own record rather than reasoned
+    out fresh — the Answerer is invoked on every Question, so what it declares
+    here is a recurring cost the file states on purpose."""
+    assert (workflow.answerer_model, workflow.answerer_effort) == ("fable", "medium")

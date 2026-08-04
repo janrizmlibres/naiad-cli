@@ -1,11 +1,21 @@
-# Prompt conventions: docs/workflow-authoring.md
+# Prompt conventions and this file's model choices: docs/workflow-authoring.md
 # Why each State is shaped as it is: the ADRs it points at, under docs/adr/.
 
 name = "matt-pocock"
 
+model = "fable"
+effort = "medium"
+
+# ADR 0026
+[answerer]
+model = "fable"
+effort = "medium"
+
 # ADR 0005
 [[states]]
 name = "classify"
+model = "opus"
+effort = "high"
 next = ["grill", "diagnose"]
 prompt = """
 Decide what kind of work the following task is, then announce where it starts.
@@ -21,6 +31,8 @@ Say in a sentence which it is and why, then announce grill or diagnose. Do no ot
 [[states]]
 name = "diagnose"
 clear = true
+model = "fable"
+effort = "medium"
 next = ["no-repro", "pull-request"]
 prompt = """
 /diagnosing-bugs {task}
@@ -52,6 +64,8 @@ next = ["pull-request"]
 [[states]]
 name = "grill"
 clear = true
+model = "fable"
+effort = "medium"
 prompt = """
 /grill-with-docs {task}
 
@@ -102,6 +116,8 @@ When every ticket is published with its blocking edges declared, announce {next_
 [[states]]
 name = "implement"
 clear = true
+model = "opus"
+effort = "high"
 next = ["implement", "handover", "pull-request"]
 prompt = """
 /implement the ticket at {subject}, and only that one. It has been triaged as ready for you; take that as given rather than re-checking it.
@@ -142,6 +158,8 @@ On that reminder, check whether the review has completed. Completed: announce re
 # ADR 0016, 0017
 [[states]]
 name = "review-fix"
+model = "fable"
+effort = "medium"
 clear = true
 prompt = """
 /fix-review the Claude Code Review posted on the open pull request for this branch — fetch its findings from the pull request.
