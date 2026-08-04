@@ -36,7 +36,12 @@ from naiad.cli.batch import BatchError, enqueue_batch, load_batch
 from naiad.cli.branch import BranchError, declare_branch
 from naiad.cli.enqueue import REFUSALS, Work, enqueue
 from naiad.cli.hold import HoldError, declare_hold
-from naiad.cli.library import LibraryError, resolve_workflow
+from naiad.cli.library import (
+    LibraryError,
+    empty_library_message,
+    resolve_workflow,
+    workflows_in,
+)
 from naiad.cli.kickoff import start_entry
 from naiad.cli.protocol import injection_for
 from naiad.cli.refusals import ADD_COMMAND, ADOPT_COMMAND, RUN_COMMAND, Remedy
@@ -44,7 +49,8 @@ from naiad.cli.supervisor import supervise_queue
 from naiad.cli.wait import WaitError, declare_wait
 from naiad.cli.watch import tick_once, watch
 from naiad.domain.entry import Attachment, Entry
-from naiad.domain.workflow import load_workflow
+from naiad.domain.listing import render_states
+from naiad.domain.workflow import WorkflowError, load_workflow
 from naiad.hooks.install import DEFAULT_SETTINGS_PATH, install_hooks
 from naiad.runtime.announcements import Announcements
 from naiad.runtime.home import (
@@ -151,6 +157,23 @@ def main(argv: list[str] | None = None) -> int:
     )
     _describe_where_and_how(adopt)
     adopt.set_defaults(handler=_adopt)
+
+    # Read before adopting, and by nothing else: the operator names a phase in
+    # their own words, and only the Workflow says what its States are actually
+    # called (ADR 0032). One letter from `state` below, which is a Protocol
+    # verb the agent types all run long — tolerated because the two fail
+    # visibly rather than quietly: this one prints a listing and announces
+    # nothing, and that one refuses without a State to name.
+    states = subcommands.add_parser(
+        "states", help="list what a Workflow declares, to choose a State to start at"
+    )
+    states.add_argument(
+        "workflow",
+        nargs="?",
+        help="path to the Workflow file, or the bare name of one in the library; "
+        "omit it to list every workflow the library holds",
+    )
+    states.set_defaults(handler=_states)
 
     state = subcommands.add_parser("state", help="announce the State you are in")
     state.add_argument("name", help="the State's name, as declared by the Workflow")
@@ -691,6 +714,53 @@ def _adopt(arguments: argparse.Namespace) -> int:
         ),
         end="",
     )
+    return 0
+
+
+def _states(arguments: argparse.Namespace) -> int:
+    """What a Workflow declares, for an agent turning the operator's words
+    into a State to start at.
+
+    Named or not, because an operator who says "naiad, spec this out" has
+    named no Workflow: one call then answers both which Workflows exist and
+    what each declares, so the agent chooses with the candidates in front of
+    it rather than from memory (ADR 0032).
+    """
+    library = default_library_root()
+    if arguments.workflow is None:
+        return _every_workflow(library)
+
+    try:
+        workflow = load_workflow(resolve_workflow(arguments.workflow, library=library))
+    except FAILURES as error:
+        # A name asked for by name is refused: the agent named one thing and
+        # printing something else would answer a question nobody asked.
+        print(f"naiad: {error}", file=sys.stderr)
+        return 2
+
+    print(render_states(workflow))
+    return 0
+
+
+def _every_workflow(library: Path) -> int:
+    """Every Workflow the library holds, as one listing.
+
+    A file that cannot be read names itself and its problem in place, rather
+    than taking the listing down with it: an agent left with nothing would go
+    back to guessing at the Workflows that are perfectly fine.
+    """
+    held = workflows_in(library)
+    if not held:
+        print(empty_library_message(library))
+        return 0
+
+    blocks = []
+    for path in held:
+        try:
+            blocks.append(render_states(load_workflow(path)))
+        except WorkflowError as error:
+            blocks.append(f"{path.stem}\n  {error}")
+    print("\n\n".join(blocks))
     return 0
 
 

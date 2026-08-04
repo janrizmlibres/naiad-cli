@@ -7,6 +7,8 @@ tuned. The document is plain text, so the rules about it are tested here rather
 than by inspecting an installed copy (tests/test_skill_install.py).
 """
 
+import re
+
 import pytest
 
 from naiad.skills.adopt import SKILL_NAME, installed_by_naiad, render_adopt_skill
@@ -26,6 +28,18 @@ def frontmatter(document):
     return block
 
 
+def quoted_intents(document):
+    """The operator's own phrases, quoted in the description. They are match
+    strings rather than vocabulary, which is why they are read out whole.
+
+    The description alone, because it is the only key Claude Code matches an
+    intent against — a quoted value under any other key is not one.
+    """
+    described = re.search(r"description: >-\n((?:  .*\n)+)", frontmatter(document))
+    assert described, "the description is not a block Claude Code would read"
+    return re.findall(r'"([^"]+)"', described.group(1))
+
+
 def test_it_carries_the_name_the_skill_is_installed_under(skill):
     assert f"name: {SKILL_NAME}" in frontmatter(skill)
 
@@ -38,6 +52,59 @@ def test_its_description_triggers_on_the_intents_that_ask_for_an_adoption(skill)
     assert "description:" in description
     assert "start to-spec" in description
     assert "take over" in description
+
+
+def test_every_intent_it_triggers_on_names_naiad(skill):
+    """"spec this out" is also the most ordinary way to ask any agent for a
+    spec. An intent naming a phase and nothing else would queue a takeover of
+    the session on an everyday request, so Naiad named is what separates the
+    two (ADR 0032)."""
+    intents = quoted_intents(skill)
+
+    assert intents
+    for intent in intents:
+        assert "naiad" in intent.lower(), f"the intent {intent!r} does not name naiad"
+
+
+def test_it_declares_the_two_arguments_the_operator_may_pass(skill):
+    """The Workflow and the State, so that `/naiad-adopt matt-pocock spec`
+    reaches the body as two values rather than one string to re-split."""
+    block = frontmatter(skill)
+
+    assert "arguments:" in block
+    assert "workflow" in block
+    assert "state" in block
+
+
+def test_the_arguments_reach_the_body_by_name(skill):
+    """Named rather than positional, because both may be omitted: Claude Code
+    expands an omitted named argument to nothing, and leaves an omitted `$1`
+    in the text as the literal `$1` for the agent to read as an instruction."""
+    assert "$workflow" in skill
+    assert "$state" in skill
+    assert "$1" not in skill
+
+
+def test_it_names_the_command_that_lists_what_a_workflow_declares(skill):
+    """The agent turns the human's words into a State name, and an agent
+    guessing at States it has not read is what the listing prevents."""
+    assert f"{COMMAND} states" in skill
+
+
+def test_it_settles_a_workflow_the_human_never_named(skill):
+    """"naiad, spec this out" names no Workflow, and an agent told only to
+    pass one would invent it. One candidate in the library is not a choice;
+    several are the human's to make."""
+    lowered = skill.lower()
+
+    assert "named none" in lowered
+    assert "ask the human" in lowered
+
+
+def test_it_asks_when_more_than_one_state_matches_the_words(skill):
+    """`review` and `review-fix` both answer to "review this", and an agent
+    that picked one silently would start the Run a phase from where it should."""
+    assert "more than one" in skill.lower() or "two or more" in skill.lower()
 
 
 def test_it_names_the_command_that_adopts_the_session(skill):

@@ -16,7 +16,18 @@ description: that is the whole of what Claude Code matches an intent against.
 The intents quoted there are the operator's own words, kept verbatim because
 they are match strings rather than vocabulary — the glossary's word for what
 they ask for is Adoption, and `handover` is reserved for a State of the shipped
-Workflow that an agent reading this must not confuse it with.
+Workflow that an agent reading this must not confuse it with. Every one of them
+names Naiad, because a phase word alone is how anyone asks for that phase's
+ordinary work, and matching it would take the session over on a request nobody
+meant that way (ADR 0032).
+
+Two arguments carry what the operator said — the Workflow and the State — and
+neither is a name Naiad will take: "spec this out" names a State called `spec`
+whose Prompt runs `/to-spec`, so the agent reads `naiad states` and settles both
+before it adopts. They are declared by name rather than by position because
+both may be omitted, and Claude Code expands an omitted named argument to
+nothing while leaving an omitted `$1` in the text as a literal the agent would
+read as an instruction.
 """
 
 from __future__ import annotations
@@ -42,8 +53,12 @@ description: >-
   Adopt this Claude Code session into a Naiad run, so that Naiad drives the
   remaining phases of a workflow here, with this conversation still in context.
   Use when the human asks for Naiad to drive the rest of the work from this
-  session — "start to-spec", "let naiad take over", "naiad, drive the rest from
-  here", "run the rest of the workflow on this".
+  session — "naiad, start to-spec", "let naiad take over", "naiad, drive the
+  rest from here", "naiad, run the rest of the workflow on this", "naiad, spec
+  this out". Each of these names Naiad, which is what separates them from an
+  ordinary request to write a spec or make tickets.
+argument-hint: "[workflow] [state]"
+arguments: [workflow, state]
 ---
 
 {marker}
@@ -57,16 +72,40 @@ than in a fresh session that would hold none of this conversation.
 
 Do all of it in one turn, in this order.
 
-## 1. Name the workflow and the state to start at
+## 1. Settle the workflow and the state to start at
 
-The workflow is a bare name from the machine's workflow library, or a path to a
-workflow file. The start state is the phase Naiad begins driving at — the one
-after the last phase the human did by hand; starting at the workflow's first
-state re-runs work that is already done.
+You were given two arguments, and either may be empty:
 
-Ask the human if either is unclear. No run is attached yet, so asking them
-directly is fine here — from the moment you adopt, the protocol's rules apply
-instead and questions go through `{naiad} ask`.
+- workflow: `$workflow`
+- state: `$state`
+
+They carry the human's words, not names Naiad will take. The human says "spec
+this out" for a state called `spec`, whose prompt runs the `/to-spec` skill.
+Only the workflow says what its states are really called, so read it before you
+choose:
+
+```
+{naiad} states $workflow
+```
+
+That prints every state the workflow declares, in order, each with the slash
+command its prompt opens with and whether starting there parks the run or ends
+it. Given no workflow it prints every workflow the library holds.
+
+Settle both from the listing:
+
+- **The workflow.** Take the one named. Named none and the library holds one,
+  take that one. Named none and the library holds several, ask the human which.
+- **The state.** Take the state whose name or slash command answers the human's
+  words. More than one answers them — "review this" fits both `review` and
+  `review-fix` — so ask the human which. The words name no phase, so ask.
+
+Settle the state rather than defaulting it. The start state is the phase after
+the last one the human did by hand, and the workflow's first state re-runs work
+that is already done.
+
+Asking is fine here, because no run is attached yet. From the moment you adopt,
+the protocol's rules apply instead and questions go through `{naiad} ask`.
 
 ## 2. Settle the working branch
 
@@ -92,6 +131,9 @@ not quote a sentence the human never typed.
 {naiad} adopt <workflow> --at <state> --task "<what the work is>"
 ```
 
+The workflow and the state are the two you settled in step 1, as the listing
+spells them, not as the human said them.
+
 Add, where they apply: `--branch <name>` (above), `--repo <path>` if the target
 repository is not the working directory, `--base <branch>` for what this work
 stands on, `--subject <value>` where the start state's prompt names a subject,
@@ -103,7 +145,10 @@ once the lane for this repository is free.
 
 If it refuses — an unknown workflow, an unknown start state, a branch another
 entry already claims, a session outside tmux — then nothing was queued. Report
-the refusal to the human as it was worded, and stop. Do not work around it.
+the refusal to the human as it was worded, and stop. Do not work around it. An
+unknown start state is a refusal like any other here: you read the listing
+before you chose, so a refusal means your reading was wrong, and that is the
+human's to see rather than yours to retry.
 
 ## 5. Relay what it printed, then end your turn
 

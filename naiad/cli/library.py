@@ -45,13 +45,44 @@ def resolve_workflow(argument: str, *, library: Path) -> Path:
     return path
 
 
+def workflows_in(library: Path) -> tuple[Path, ...]:
+    """Every Workflow file the library holds, by name.
+
+    A listing rather than a resolution, and the one place both readers share:
+    the refusal below names what the library holds, and `naiad states` prints
+    what each of them declares (ADR 0032). Sorted by stem, because the stem is
+    the address and a directory's own order is not one an operator can predict.
+
+    Files only, so nothing is claimed about a directory that happens to end in
+    the suffix; a library that does not exist holds nothing, which is the same
+    answer as an empty one and needs no separate telling.
+    """
+    if not library.is_dir():
+        return ()
+    return tuple(sorted((file for file in library.glob("*.toml") if file.is_file()), key=_stem))
+
+
+def _stem(file: Path) -> str:
+    return file.stem
+
+
+def empty_library_message(library: Path) -> str:
+    """What an empty library says, whichever question reached it: a name that
+    missed, or a listing with nothing to list (ADR 0032).
+
+    One sentence rather than one per caller, because both answer the same
+    fact — there is nothing here — and the remedy for it is the same.
+    """
+    return (
+        f"the library at {library} holds no workflows; "
+        "drop a Workflow file there to run it by name"
+    )
+
+
 def _unknown(name: str, library: Path) -> str:
-    held = sorted(file.stem for file in library.glob("*.toml"))
+    held = [file.stem for file in workflows_in(library)]
     if not held:
-        return (
-            f"no workflow named '{name}': the library at {library} holds no "
-            "workflows; drop a Workflow file there to run it by name"
-        )
+        return f"no workflow named '{name}': {empty_library_message(library)}"
     return f"no workflow named '{name}' in {library} — the library holds: {', '.join(held)}"
 
 
