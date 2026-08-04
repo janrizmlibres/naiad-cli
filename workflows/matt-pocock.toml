@@ -6,10 +6,11 @@ name = "matt-pocock"
 model = "fable"
 effort = "medium"
 
-# ADR 0026
+# ADR 0026, 0031
 [answerer]
 model = "fable"
 effort = "medium"
+fallback = "opus,sonnet"
 
 # ADR 0005
 [[states]]

@@ -209,6 +209,25 @@ def test_the_answerers_model_and_effort_ride_as_flags(tmp_path):
     assert argv[-1] == "ask"
 
 
+def test_the_answerers_fallback_rides_as_the_platforms_own_flag(tmp_path):
+    """An unavailable model otherwise comes back as error text with exit 0 —
+    a wrong answer, not a loud failure. The platform's --fallback-model does
+    the detection and the degrading, so Naiad builds neither (ADR 0031)."""
+    argv = command_for(
+        ConsultationSpec(
+            cwd=tmp_path,
+            claude_session_id="an-id",
+            text="ask",
+            resume=False,
+            model="fable",
+            fallback="opus,sonnet",
+        )
+    )
+
+    assert argv[argv.index("--fallback-model") + 1] == "opus,sonnet"
+    assert argv[-1] == "ask"
+
+
 def test_an_answerer_with_nothing_declared_passes_no_flags(tmp_path):
     argv = command_for(
         ConsultationSpec(cwd=tmp_path, claude_session_id="an-id", text="ask", resume=False)
@@ -216,6 +235,7 @@ def test_an_answerer_with_nothing_declared_passes_no_flags(tmp_path):
 
     assert "--model" not in argv
     assert "--effort" not in argv
+    assert "--fallback-model" not in argv
 
 
 def test_a_later_consultation_resumes_that_session_rather_than_starting_another(tmp_path):

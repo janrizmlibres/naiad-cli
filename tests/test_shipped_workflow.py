@@ -998,3 +998,10 @@ def test_the_answerer_declares_its_model_and_effort(workflow):
     out fresh — the Answerer is invoked on every Question, so what it declares
     here is a recurring cost the file states on purpose."""
     assert (workflow.answerer_model, workflow.answerer_effort) == ("fable", "medium")
+
+
+def test_the_answerer_declares_a_fallback_chain(workflow):
+    """Headless, an unavailable model exits 0 with error text — which would be
+    typed into the asking session as though it were the answer. The declared
+    chain hands the platform's --fallback-model the recovery (ADR 0031)."""
+    assert workflow.answerer_fallback == "opus,sonnet"

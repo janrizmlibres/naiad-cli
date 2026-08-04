@@ -68,3 +68,6 @@ The `[answerer]` table runs at the same default. The Answerer replies from the
 Run's own record rather than reasoning fresh. Naiad invokes it on every
 Question, so its cost recurs. This file takes that recurring spend at the
 default rather than discounting it.
+
+The `fallback` key is the Answerer's alone. ADR 0031 gives the reasoning and
+the syntax.

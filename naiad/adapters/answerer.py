@@ -75,6 +75,8 @@ def command_for(spec: ConsultationSpec) -> list[str]:
         argv += ["--model", spec.model]
     if spec.effort is not None:
         argv += ["--effort", spec.effort]
+    if spec.fallback is not None:
+        argv += ["--fallback-model", spec.fallback]
     return argv + [spec.text]
 
 

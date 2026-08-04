@@ -53,6 +53,10 @@ class Workflow:
     # time, so absence has no stickiness to be ambiguous about (ADR 0026).
     answerer_model: str | None = None
     answerer_effort: str | None = None
+    # Models the platform may degrade to when the Answerer's is unavailable,
+    # forwarded as --fallback-model and never parsed: a comma-separated list is
+    # the flag's own syntax, not Naiad's (ADR 0031).
+    answerer_fallback: str | None = None
 
     def state(self, name: str) -> State | None:
         for state in self.states:
@@ -84,7 +88,7 @@ def parse_workflow(text: str, *, source: str = DEFAULT_SOURCE) -> Workflow:
 
     default_model = _optional_string(document, "model", reject)
     default_effort = _optional_string(document, "effort", reject)
-    answerer_model, answerer_effort = _parse_answerer(document, reject)
+    answerer_model, answerer_effort, answerer_fallback = _parse_answerer(document, reject)
 
     raw_states = document.get("states")
     if not raw_states or not isinstance(raw_states, list):
@@ -120,6 +124,7 @@ def parse_workflow(text: str, *, source: str = DEFAULT_SOURCE) -> Workflow:
         states=tuple(states),
         answerer_model=answerer_model,
         answerer_effort=answerer_effort,
+        answerer_fallback=answerer_fallback,
     )
 
 
@@ -132,15 +137,18 @@ def _optional_string(
     return value
 
 
-def _parse_answerer(document: dict[str, Any], reject: Reject) -> tuple[str | None, str | None]:
+def _parse_answerer(
+    document: dict[str, Any], reject: Reject
+) -> tuple[str | None, str | None, str | None]:
     raw = document.get("answerer")
     if raw is None:
-        return None, None
+        return None, None, None
     if not isinstance(raw, dict):
         raise reject("answerer must be a table")
     return (
         _optional_string(raw, "model", reject, owner="answerer "),
         _optional_string(raw, "effort", reject, owner="answerer "),
+        _optional_string(raw, "fallback", reject, owner="answerer "),
     )
 
 

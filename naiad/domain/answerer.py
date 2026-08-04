@@ -86,6 +86,11 @@ class ConsultationSpec:
     # stickiness to be ambiguous about (ADR 0026).
     model: str | None = None
     effort: str | None = None
+    # The [answerer] fallback, forwarded as --fallback-model. Headless, an
+    # unavailable model exits 0 with error text — a wrong answer, not a loud
+    # failure — and the platform's flag does the detection and the degrading
+    # so Naiad builds neither (ADR 0031).
+    fallback: str | None = None
 
 
 _BRIEF = """\

@@ -262,6 +262,7 @@ def _consultation(run: Run, workflow: Workflow, question: Question) -> Consultat
         resume=resume,
         model=workflow.answerer_model,
         effort=workflow.answerer_effort,
+        fallback=workflow.answerer_fallback,
     )
 
 

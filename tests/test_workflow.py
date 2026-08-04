@@ -172,6 +172,27 @@ def test_the_answerer_table_is_parsed_with_both_keys_optional():
 
     assert workflow.answerer_model == "haiku"
     assert workflow.answerer_effort is None
+    assert workflow.answerer_fallback is None
+
+
+def test_the_answerers_fallback_is_parsed_as_an_opaque_string():
+    """A comma-separated list the platform walks, never parsed by Naiad —
+    the same opacity model and effort already have (ADR 0031)."""
+    workflow = parse_workflow(
+        """
+        name = "w"
+
+        [answerer]
+        model = "haiku"
+        fallback = "opus,sonnet"
+
+        [[states]]
+        name = "done"
+        terminal = true
+        """
+    )
+
+    assert workflow.answerer_fallback == "opus,sonnet"
 
 
 def test_a_workflow_without_an_answerer_table_has_no_answerer_opinion():
@@ -179,6 +200,7 @@ def test_a_workflow_without_an_answerer_table_has_no_answerer_opinion():
 
     assert workflow.answerer_model is None
     assert workflow.answerer_effort is None
+    assert workflow.answerer_fallback is None
 
 
 @pytest.mark.parametrize(
