@@ -8,6 +8,7 @@ docs/smoke/matt-pocock.md; what is testable here is that the file is well-formed
 and says what the Workflow requires.
 """
 
+import tomllib
 from pathlib import Path
 
 import pytest
@@ -33,6 +34,7 @@ STATES = [
     "spec",
     "tickets",
     "implement",
+    "triage",
     "handover",
     "pull-request",
     "review-fix",
@@ -50,8 +52,17 @@ SKILLS = {
     "spec": "/to-spec",
     "tickets": "/to-tickets",
     "implement": "/implement",
+    "triage": "/triage",
     "review-fix": "/fix-review",
 }
+
+# The two States that scan the tracker and route on what they find. The table
+# is written into both Prompts deliberately (ADR 0034): a selector State
+# holding one copy would spend a Clear, a delivery and a turn per ticket to
+# read one line, and would move the choice away from the context that has just
+# done the work. The copies must agree, so every rule of the table is asserted
+# against both rather than against the loop alone.
+SCANNING = ["implement", "triage"]
 
 # The States that declare candidates rather than inheriting the next State in
 # the declared order, and what each may announce. Every other successor in the
@@ -61,36 +72,42 @@ CANDIDATES = {
     "diagnose": ("no-repro", "pull-request"),
     "no-repro": ("pull-request",),
     "tickets": ("implement", "handover"),
-    "implement": ("implement", "handover", "pull-request"),
-    "handover": ("implement", "pull-request"),
+    "implement": ("implement", "triage", "handover", "pull-request"),
+    "triage": ("implement", "triage", "handover", "pull-request"),
+    "handover": ("implement", "triage", "pull-request"),
     "pull-request": ("review-fix", "done"),
 }
 
 # The feature chain as it stands today, asserted rather than assumed. `done`
 # ends the Run and so has nothing after it.
 #
-# Two edges have moved since this table was first written, both deliberately.
+# Three edges have moved since this table was first written, all deliberately.
 # `implement` gained a third exit for a ticket it must decline (ADR 0010).
 # `pull-request` gained `done` beside `review-fix`, so a Run whose host runs no
 # automated review ends rather than passing through an empty fix (ADR 0017).
-# Everything else is untouched, which is what this table is for.
+# `implement` and `handover` then gained `triage`, the exit for a ticket nobody
+# has specified yet — work the agent can do rather than work it must decline
+# (ADR 0034). Everything else is untouched, which is what this table is for.
 FEATURE_CHAIN = {
     "grill": ("review",),
     "review": ("spec",),
     "spec": ("tickets",),
     "tickets": ("implement", "handover"),
-    "implement": ("implement", "handover", "pull-request"),
-    "handover": ("implement", "pull-request"),
+    "implement": ("implement", "triage", "handover", "pull-request"),
+    "triage": ("implement", "triage", "handover", "pull-request"),
+    "handover": ("implement", "triage", "pull-request"),
     "pull-request": ("review-fix", "done"),
     "review-fix": ("done",),
     "done": (),
 }
 
 # The triage label a ticket must carry for the loop to implement it unattended,
-# and the one meaning a person must. Named from docs/agents/triage-labels.md,
-# which is where this repository maps the canonical roles to its own strings.
+# the one meaning a person must, and the one meaning nobody has specified the
+# work yet. Named from docs/agents/triage-labels.md, which is where this
+# repository maps the canonical roles to its own strings.
 IMPLEMENTABLE = "ready-for-agent"
 NEEDS_A_HUMAN = "ready-for-human"
+NEEDS_SPECIFYING = "needs-triage"
 
 # A Subject as the implement loop's Prompt actually receives one: a path to a
 # ticket file under the local markdown tracker (docs/agents/issue-tracker.md).
@@ -285,10 +302,16 @@ def test_the_branch_heads_and_the_implement_loop_clear_and_the_design_phases_do_
     Both branch heads Clear, which is what keeps the classifying State's
     reading of the task from reaching either of them — most of all the
     diagnosing State, whose job is to form a hypothesis from evidence rather
-    than to inherit a guess."""
+    than to inherit a guess.
+
+    `triage` Clears beside the loop it feeds, and for the same reason: each
+    pass reads one ticket, and the ticket is the Artifact carrying what the
+    pass needs. The path from `handover` is where that costs something, and
+    ADR 0034 records it — a human's answers at the gate belong on the ticket
+    before the Announcement, because the Clear discards the session."""
     clearing = [state.name for state in workflow.states if state.clear]
 
-    assert clearing == ["diagnose", "grill", "implement", "pull-request", "review-fix"]
+    assert clearing == ["diagnose", "grill", "implement", "triage", "pull-request", "review-fix"]
 
 
 @pytest.mark.parametrize("head", BRANCH_HEADS)
@@ -636,40 +659,58 @@ def test_the_implement_loop_implements_only_agent_ready_tickets(workflow):
     assert IMPLEMENTABLE in delivered(workflow, "implement")
 
 
-def test_the_implement_loop_sends_every_other_open_status_to_the_gate(workflow):
+@pytest.mark.parametrize("state_name", SCANNING)
+def test_each_scanning_state_sends_every_other_open_status_to_the_gate(workflow, state_name):
     """Not only `ready-for-human`. An unrecognised or missing status is routed
     the same way, because an unnecessary pause costs one operator interaction
     while implementing a `needs-info` ticket — one whose specification is known
-    to be incomplete — costs a review cycle and a revert. `wontfix` is the one
-    exception: closed by decision, it is walked past rather than handed over
-    (ADR 0027), so it must not appear among the statuses routed to the gate."""
-    prompt = delivered(workflow, "implement")
+    to be incomplete — costs a review cycle and a revert. Two statuses are
+    exceptions and must not appear among those routed to the gate: `wontfix`,
+    closed by decision and walked past (ADR 0027), and `needs-triage`, which
+    names work the agent can do itself (ADR 0034)."""
+    prompt = delivered(workflow, state_name)
 
-    for status in (NEEDS_A_HUMAN, "needs-info", "needs-triage"):
+    for status in (NEEDS_A_HUMAN, "needs-info"):
         assert status in prompt
     assert "announce handover" in prompt
 
     gate_lines = [line for line in prompt.split("\n") if "handover" in line]
     assert not any("wontfix" in line for line in gate_lines)
+    assert not any(NEEDS_SPECIFYING in line for line in gate_lines)
 
 
-def test_the_implement_loop_reports_which_status_stopped_it(workflow):
+@pytest.mark.parametrize("state_name", SCANNING)
+def test_each_scanning_state_sends_an_unspecified_ticket_to_be_triaged(workflow, state_name):
+    """The row ADR 0034 moved. `needs-triage` satisfies only half of ADR 0010's
+    bias: the loop must not implement such a ticket, but specifying it is
+    exactly what an agent can do, so the gate was waking a human to ask for a
+    brief the agent was able to write."""
+    prompt = delivered(workflow, state_name)
+
+    assert "announce triage" in only_sentence(prompt, f"- {NEEDS_SPECIFYING}")
+
+
+@pytest.mark.parametrize("state_name", SCANNING)
+def test_each_scanning_state_reports_which_status_stopped_it(workflow, state_name):
     """Routing an unknown label and routing `ready-for-human` are the same
     action needing opposite responses — fix the label, or do the work. A gate
     that cannot tell the operator which it hit wastes their time every time."""
-    prompt = delivered(workflow, "implement")
+    prompt = delivered(workflow, state_name)
 
     sentences = [line for line in prompt.split("\n") if "handover" in line]
 
     assert any("status" in line for line in sentences)
 
 
-def test_the_implement_loop_names_the_pull_request_rather_than_interpolating_it(workflow):
+@pytest.mark.parametrize("state_name", SCANNING)
+def test_each_scanning_state_names_the_pull_request_rather_than_interpolating_it(
+    workflow, state_name
+):
     """`{next_state}` renders every candidate as one joined phrase, which is
     wrong here twice over: the exhaustion line must name the pull request
     alone, and each exit carries a different condition. `diagnose` writes its
     successors out for the same reason."""
-    prompt = delivered(workflow, "implement")
+    prompt = delivered(workflow, state_name)
 
     exhausted = [line for line in prompt.split("\n") if "remain" in line or "no tickets" in line]
 
@@ -686,28 +727,53 @@ def test_the_implement_loop_marks_the_finished_ticket_resolved(workflow):
     assert "set that ticket's Status line to resolved" in delivered(workflow, "implement")
 
 
-def test_the_implement_loop_reads_only_open_tickets_when_it_scans(workflow):
+@pytest.mark.parametrize("state_name", SCANNING)
+def test_each_scanning_state_reads_only_open_tickets(workflow, state_name):
     """A closed ticket left in the frontier would park the loop — on its own
     finished work if `resolved` stopped it, or on a decision already made if
     `wontfix` did (the incident behind ADR 0027). The frontier is the open
     tickets alone, closed being `resolved` or `wontfix` — the meaning
     issue-tracker.md gives both."""
-    prompt = delivered(workflow, "implement")
+    prompt = delivered(workflow, state_name)
 
     assert "lowest-numbered ticket that is open" in prompt
     assert "no open tickets remain" in prompt
 
 
-def test_the_implement_loop_treats_wontfix_as_closed(workflow):
+@pytest.mark.parametrize("state_name", SCANNING)
+def test_each_scanning_state_treats_wontfix_as_closed(workflow, state_name):
     """`resolved` closes by completion, `wontfix` by decision, and the scan
     treats them identically — including the blocking edges, which are satisfied
     by a closed ticket. What makes the edge rule safe is the convention the
     Prompt leans on: no ticket is born `wontfix`, and whoever drops one tends
-    its dependents in the same act (ADR 0027)."""
-    prompt = delivered(workflow, "implement")
+    its dependents in the same act (ADR 0027).
+
+    This is also what makes a `wontfix` written by `triage` advance the Run
+    rather than park it: the ticket the pass just closed is walked past, and
+    the scan reaches the next one (ADR 0034)."""
+    prompt = delivered(workflow, state_name)
 
     assert "resolved or wontfix" in prompt
     assert "an edge is satisfied when the ticket it names is closed" in prompt
+
+
+def test_the_two_scanning_states_route_identically(workflow):
+    """The one cost ADR 0034 accepted. The routing table is written into two
+    Prompts, so the two can drift, and a ticket they read differently produces
+    a different Announcement from each for a reason nobody chose. The rules
+    above are asserted of each Prompt; this asserts the two are the same text —
+    the whole block from its lead sentence down, not the routing rows alone,
+    since the frontier and closed-ticket definitions above them drift just as
+    quietly."""
+    lead = "Then choose what comes next."
+    blocks = {}
+    for name in SCANNING:
+        prompt = delivered(workflow, name)
+        assert lead in prompt, f"{name} carries no scan"
+        blocks[name] = prompt[prompt.index(lead) :].strip()
+
+    assert blocks["implement"] == blocks["triage"]
+    assert len([line for line in blocks["implement"].split("\n") if line.startswith("- ")]) == 4
 
 
 def test_the_handover_gate_delivers_nothing(workflow):
@@ -719,8 +785,14 @@ def test_the_handover_gate_delivers_nothing(workflow):
 def test_the_handover_gate_returns_to_the_loop_or_ends_it(workflow):
     """After the human does the ticket, either tickets remain or they do not.
     Both are declared, because the implicit successor would be the pull request
-    alone and a Run handing over its first ticket would never implement any."""
-    assert workflow.state("handover").next_candidates == ("implement", "pull-request")
+    alone and a Run handing over its first ticket would never implement any.
+
+    `triage` is declared beside them because this gate is where a `needs-info`
+    ticket parks. The human answers the open questions in the live session, and
+    finishing the triage is the natural next act — undeclared, it would be
+    recorded as a Deviation every time, on the path this feature exists to
+    serve (ADR 0034)."""
+    assert workflow.state("handover").next_candidates == ("implement", "triage", "pull-request")
 
 
 def test_an_unattended_run_still_parks_at_the_handover_gate(workflow):
@@ -729,6 +801,88 @@ def test_an_unattended_run_still_parks_at_the_handover_gate(workflow):
     (ADR 0007). `ready-for-human` means the agent cannot proceed, not that a
     review is optional — so `--skip-gates` must not delete this exit."""
     assert "handover" in next_states(workflow, "implement", skip_gates=True)
+
+
+def test_the_triage_state_is_given_its_ticket_rather_than_finding_one(workflow):
+    """Named by the scan that reached it, exactly as the loop's ticket is. One
+    ticket per pass: a pass over the whole tracker would triage tickets the Run
+    may never reach, and one bad judgment would contaminate every ticket after
+    it in the same context (ADR 0034)."""
+    prompt = delivered(workflow, "triage")
+
+    assert SUBJECT in prompt
+    assert "{subject}" not in prompt
+    assert "only that one" in prompt
+
+
+def test_the_triage_state_decides_rather_than_waiting_on_anyone(workflow):
+    """`/triage` is written for a maintainer at the keyboard, and asks for one
+    three ways: it recommends and waits for direction, it can open a grilling
+    session, and it flags unusual transitions to be confirmed. Each stalls an
+    unattended Run, which Naiad then Nudges and parks. The skill is external and
+    not ours to edit, so the Prompt pins what it leaves loose (ADR 0033).
+
+    Each refusal is asserted as the whole instruction rather than as the phrase
+    inside it: `wait for direction` alone passes just as well against a Prompt
+    telling the agent to do exactly that."""
+    prompt = delivered(workflow, "triage")
+
+    for refusal in (
+        "Do not offer a recommendation and wait for direction",
+        "do not open a grilling session",
+        "do not flag anything for a maintainer to confirm",
+    ):
+        assert refusal in prompt
+
+
+def test_the_triage_state_asks_rather_than_guessing_what_the_ticket_omits(workflow):
+    """The Answerer carries its understanding of the repository across the whole
+    Run, so it settles things a Cleared triage context cannot. Asking is the
+    Protocol's, so the Prompt names it rather than restating how — the same
+    construction the pull request State uses for its wait. The `--option`
+    requirement is the Protocol's too (naiad/domain/protocol.py), which is why
+    the Prompt says nothing about it."""
+    prompt = delivered(workflow, "triage")
+
+    assert "as the protocol describes" in only_sentence(prompt, "ask rather than guess")
+
+
+def test_the_triage_state_writes_an_unsettled_question_onto_the_ticket(workflow):
+    """Written against the reply, not against the Escalation. An Escalation
+    resolves to `Notify`, which notifies and sends nothing into the session —
+    only `Respond` types anything in — so the agent never observes one, and a
+    clause conditioned on it would be text nothing could act on. What reaches
+    the agent is a person typing at the parked Run (ADR 0034).
+
+    The Answer log holds the Question either way, but a person reading the
+    tracker next week reads the ticket, and an unwritten one says only 'not yet
+    looked at', which is false."""
+    unsettled = only_sentence(delivered(workflow, "triage"), "does not settle it")
+
+    assert "needs-info" in unsettled
+    assert "write the open questions onto the ticket" in unsettled
+
+
+def test_the_triage_state_never_ends_a_pass_where_it_started(workflow):
+    """The loop this State could otherwise spin: a ticket left at `needs-triage`
+    is still the frontier, so the scan below hands it straight back, forever.
+    Closed by a pin rather than by a guard on the scan, which is how this
+    project answered the same hazard for `/implement` (ADR 0033, ADR 0034).
+
+    Asserted as the whole instruction, because the four statuses it names all
+    appear in the scan table below it — so listing them separately would pass on
+    a Prompt carrying no pin at all."""
+    assert (
+        "End the pass with the Status line reading ready-for-agent, "
+        "ready-for-human, needs-info or wontfix, never needs-triage"
+    ) in delivered(workflow, "triage")
+
+
+def test_the_triage_state_declares_itself_among_its_candidates(workflow):
+    """A second `needs-triage` ticket is a second pass, and the Protocol
+    injected into every Cleared context renders the candidates verbatim. The
+    loop declares itself for the same reason (ADR 0010)."""
+    assert "triage" in workflow.state("triage").next_candidates
 
 
 def test_the_tickets_state_pins_the_triage_label_it_publishes(workflow):
@@ -747,8 +901,16 @@ def test_the_tickets_state_may_hand_over_without_the_loop_running_at_all(workflo
     """A feature whose every ticket is genuinely a person's to implement is a
     real outcome, not a malformed one. Declared rather than left to Deviation,
     which is recorded as a symptom of a confused agent and would be logged as
-    one on every legitimate use."""
+    one on every legitimate use.
+
+    `triage` is deliberately absent. The Prompt above pins what this State
+    publishes to `ready-for-agent` or `ready-for-human`, so it can never hand
+    `triage` a ticket — and naming a candidate would advertise a case the same
+    file forbids (ADR 0034). Its Prompt is asserted silent on `needs-triage`
+    beside the candidates, because the pin is what makes the absent candidate
+    correct rather than an oversight."""
     assert workflow.state("tickets").next_candidates == ("implement", "handover")
+    assert NEEDS_SPECIFYING not in delivered(workflow, "tickets")
 
 
 def test_the_tickets_state_names_the_first_ticket_when_it_starts_the_loop(workflow):
@@ -982,6 +1144,7 @@ MODELS = {
     "spec": ("fable", "medium"),
     "tickets": ("fable", "medium"),
     "implement": ("opus", "high"),
+    "triage": ("fable", "medium"),
     "handover": ("fable", "medium"),
     "pull-request": ("fable", "medium"),
     "review-fix": ("fable", "medium"),
@@ -991,6 +1154,22 @@ MODELS = {
 
 def test_every_state_declares_the_model_and_effort_its_work_earns(workflow):
     assert {state.name: (state.model, state.effort) for state in workflow.states} == MODELS
+
+
+def test_the_triage_state_takes_the_file_default_rather_than_naming_it(workflow):
+    """The table above reads the effective pair, with the default already
+    applied (ADR 0026), so it cannot tell a State that declares `fable` from one
+    that inherits it. This reads the file itself.
+
+    `triage` inherits deliberately. `diagnose` is its closest analogue — one
+    item, read the code, form a judgment, write it down — and it takes the
+    default, as `spec` and `tickets` do. Stepping off it is for sustained volume
+    (docs/workflow-authoring.md), which one ticket's triage is not."""
+    declared = tomllib.loads(WORKFLOW_PATH.read_text())
+    table = next(state for state in declared["states"] if state["name"] == "triage")
+
+    assert "model" not in table
+    assert "effort" not in table
 
 
 def test_the_answerer_declares_its_model_and_effort(workflow):

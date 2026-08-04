@@ -113,13 +113,13 @@ Publish each ticket with a Status: line reading ready-for-agent, which is what m
 When every ticket is published with its blocking edges declared, announce {next_state}, passing the file of the lowest-numbered ticket that is ready-for-agent and blocked by nothing as the subject. If no ticket qualifies, announce handover with the lowest-numbered one as the subject instead, and say which status you found.
 """
 
-# ADR 0009, 0010, 0027, 0033
+# ADR 0009, 0010, 0027, 0033, 0034
 [[states]]
 name = "implement"
 clear = true
 model = "opus"
 effort = "high"
-next = ["implement", "handover", "pull-request"]
+next = ["implement", "triage", "handover", "pull-request"]
 prompt = """
 /implement the ticket at {subject}, and only that one. It has been triaged as ready for you; take that as given rather than re-checking it.
 
@@ -128,14 +128,37 @@ When it is done — the work complete, its tests green and the working tree clea
 Then choose what comes next. A ticket is closed when its Status line reads resolved or wontfix — closed by completion or closed by decision — and open otherwise. Scan the project's issue tracker for the lowest-numbered ticket that is open and whose blocking edges are all satisfied — an edge is satisfied when the ticket it names is closed — and read its Status line:
 
 - ready-for-agent — announce implement, passing that ticket's file as the subject.
-- any other status, including ready-for-human, needs-info, needs-triage, one this repository does not define, or no Status line at all — announce handover, passing that ticket's file as the subject, and say in the session which status you found and why you are stopping.
+- needs-triage — announce triage, passing that ticket's file as the subject.
+- any other status, including ready-for-human, needs-info, one this repository does not define, or no Status line at all — announce handover, passing that ticket's file as the subject, and say in the session which status you found and why you are stopping.
 - no open tickets remain — announce pull-request.
 """
 
-# ADR 0007, 0010
+# ADR 0009, 0010, 0027, 0033, 0034
+[[states]]
+name = "triage"
+clear = true
+next = ["implement", "triage", "handover", "pull-request"]
+prompt = """
+/triage the ticket at {subject}, and only that one. It is the ticket the scan reached, and nobody has specified the work on it yet.
+
+Decide the ticket's category and its status yourself, and apply them. Do not offer a recommendation and wait for direction, do not open a grilling session, and do not flag anything for a maintainer to confirm: nobody is at the keyboard to answer any of the three.
+
+Where the ticket leaves something open, ask rather than guess: raise it as a question, as the protocol describes, and carry on when the answer arrives. If what comes back does not settle it — the question turns out not to be the repository's to answer, and a person says so — set the ticket's Status line to needs-info, write the open questions onto the ticket, and carry on to the choice below.
+
+End the pass with the Status line reading ready-for-agent, ready-for-human, needs-info or wontfix, never needs-triage. A ticket left at needs-triage is still the frontier, so the scan below hands it straight back to this State, for as long as the Run lasts.
+
+Then choose what comes next. A ticket is closed when its Status line reads resolved or wontfix — closed by completion or closed by decision — and open otherwise. Scan the project's issue tracker for the lowest-numbered ticket that is open and whose blocking edges are all satisfied — an edge is satisfied when the ticket it names is closed — and read its Status line:
+
+- ready-for-agent — announce implement, passing that ticket's file as the subject.
+- needs-triage — announce triage, passing that ticket's file as the subject.
+- any other status, including ready-for-human, needs-info, one this repository does not define, or no Status line at all — announce handover, passing that ticket's file as the subject, and say in the session which status you found and why you are stopping.
+- no open tickets remain — announce pull-request.
+"""
+
+# ADR 0007, 0010, 0034
 [[states]]
 name = "handover"
-next = ["implement", "pull-request"]
+next = ["implement", "triage", "pull-request"]
 
 # ADR 0015, 0016, 0017, 0018, 0021
 [[states]]

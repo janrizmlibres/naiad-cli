@@ -34,6 +34,13 @@ A skill's own logic stays in the skill. Logic copied into a Prompt is
 maintained in two places, and the two drift. ADR 0033 covers the one
 exception: a Prompt pins what a skill leaves loose.
 
+One procedure is written out anyway, and it is not a skill's. The scan that
+reads the issue tracker and routes on what it finds belongs to no skill, so
+there is nowhere else for it to live. It ends both the `implement` and the
+`triage` Prompt, in identical words, and a test asserts the two copies stay
+identical. ADR 0010 and ADR 0034 give the reasoning, and 0034 records the
+rejected alternative — a State whose whole job is the scan.
+
 ### A Prompt never restates the Protocol
 
 Naiad injects the Protocol into every fresh context. This includes each
