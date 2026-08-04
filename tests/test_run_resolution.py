@@ -42,10 +42,13 @@ def create(store, repo, run_id):
     )
 
 
-def workflow(repo):
-    """The Workflow every Run in this module names. Written only by the tests
-    that need a Terminal State read back; the rest leave it absent, which is
-    itself a case — a Run whose Workflow cannot be read (ADR 0035)."""
+def write_workflow(repo):
+    """Write the Workflow every Run in this module names.
+
+    Only the tests that need a Terminal State read back call this. The rest
+    leave the file absent, which is itself a case: a Run whose Workflow cannot
+    be read falls back to the log line (ADR 0035).
+    """
     (repo / "w.toml").write_text(WORKFLOW)
 
 
@@ -96,7 +99,7 @@ def test_an_environment_variable_naming_an_unknown_run_falls_back_to_the_session
 
 
 def test_a_run_that_announced_its_terminal_state_resolves_to_nothing(store, repo):
-    workflow(repo)
+    write_workflow(repo)
     run = create(store, repo, "one")
     run.attach_session(tmux_session="a", tmux_pane="%1", claude_session_id="sess-abc")
     Announcements(run.root).announce("done")
@@ -106,7 +109,7 @@ def test_a_run_that_announced_its_terminal_state_resolves_to_nothing(store, repo
 
 
 def test_a_run_standing_in_an_ordinary_state_still_resolves(store, repo):
-    workflow(repo)
+    write_workflow(repo)
     run = create(store, repo, "one")
     run.attach_session(tmux_session="a", tmux_pane="%1")
     Announcements(run.root).announce("work")
@@ -116,7 +119,7 @@ def test_a_run_standing_in_an_ordinary_state_still_resolves(store, repo):
 
 
 def test_a_question_asked_from_the_terminal_state_is_not_an_ending(store, repo):
-    workflow(repo)
+    write_workflow(repo)
     run = create(store, repo, "one")
     run.attach_session(tmux_session="a", tmux_pane="%1")
     Announcements(run.root).ask(Question(text="which?", options=("a", "b")), state="done")
@@ -126,7 +129,7 @@ def test_a_question_asked_from_the_terminal_state_is_not_an_ending(store, repo):
 
 
 def test_the_pane_of_an_ended_run_is_free_for_the_run_that_adopts_it(store, repo):
-    workflow(repo)
+    write_workflow(repo)
     ended = create(store, repo, "one")
     ended.attach_session(tmux_session="a", tmux_pane="%1")
     Announcements(ended.root).announce("done")
@@ -138,7 +141,7 @@ def test_the_pane_of_an_ended_run_is_free_for_the_run_that_adopts_it(store, repo
 
 
 def test_an_environment_variable_naming_an_ended_run_falls_back_to_the_session(store, repo):
-    workflow(repo)
+    write_workflow(repo)
     ended = create(store, repo, "one")
     ended.attach_session(tmux_session="a", tmux_pane="%1")
     Announcements(ended.root).announce("done")

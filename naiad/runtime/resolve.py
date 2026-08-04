@@ -7,11 +7,10 @@ possible. Every caller — hooks, agent-facing commands, the wiring layer — as
 here, and here alone, which Run it belongs to.
 
 And when it belongs to none. A Run that has ended releases its Session
-(ADR 0035): it stops being answered for here, which is the whole of the
-release, because everything reached through this seam already has a
-no-Run-attached path. The hooks print and record nothing, the Protocol verbs
-refuse with 'no run is attached to this session', and the pane is free for the
-Run that adopts the Session next.
+(ADR 0035). Stopping the answer here is the whole of the release: every caller
+that comes through this seam already has a no-Run-attached path. So the hooks
+print and record nothing, the Protocol verbs refuse with 'no run is attached to
+this session', and the Session is free for the Run that adopts it next.
 """
 
 from __future__ import annotations
@@ -48,12 +47,12 @@ class RunResolver:
         there is no Run to act on.
 
         A Run that has ended is one of those Nones. The environment variable
-        falls through to the session rather than short-circuiting on it, for
-        the reason it already falls through when it names a Run that is not
-        there: the variable is a shortcut, and a stale shortcut must not hide
-        the Run this session actually belongs to. That fall-through is what
-        lets an Adoption into a released Session resolve at all, the variable
-        naming the finished Run being unsettable in a live process.
+        falls through to the session rather than stopping on it, for the reason
+        it already falls through when it names a Run that is not there: the
+        variable is a shortcut, and a stale shortcut must not hide the Run this
+        session really belongs to. An Adoption into a released Session needs
+        that fall-through. Naiad cannot unset the variable in a live process,
+        so the finished Run's id is still there when the next Run arrives.
         """
         run_id = self._environ.get(RUN_ID_VARIABLE)
         if run_id:
@@ -91,12 +90,16 @@ def _ended(run: Run) -> bool:
     clause is the whole difference between a Run that ended and a Run standing
     in its last State waiting to be answered, and a second copy would drift.
 
-    A Workflow that cannot be read costs the answer its source, not its
-    answer: which State is Terminal is unknowable, so the log line Naiad wrote
-    when it carried out the Finish answers instead. One question with a
-    degraded source rather than two ways to be true — and the same choice made
-    where the Protocol is rendered (naiad.cli.protocol), which degrades rather
-    than raising for the same file.
+    A Workflow that cannot be read loses the answer its source, not the
+    answer. Which State is Terminal cannot be known, so the log line Naiad
+    wrote when it carried out the Finish answers instead. That is one question
+    with a degraded source, and not two ways to be true. The Protocol degrades
+    over the same unreadable file rather than raising (naiad.cli.protocol).
+
+    Not the reading naiad.runtime.queue._run_status takes, which is the log
+    line alone. The two can disagree over a Run that announced its Terminal
+    State and was never ticked. Taken knowingly (ADR 0035): a Session belongs
+    to the agent working in it, and the Queue records what Naiad did.
     """
     try:
         workflow = load_workflow(run.workflow_path)
