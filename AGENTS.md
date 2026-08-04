@@ -1,5 +1,12 @@
 # naiad-v2
 
+## Workflow files
+
+`workflows/*.toml` is configuration a human hand-edits. Keep it that way: a
+comment is a one-line ADR pointer, never an explanation. Reasoning that needs
+writing down goes to `docs/adr/`. Prompt conventions are in
+`docs/workflow-authoring.md`.
+
 ## Agent skills
 
 ### Issue tracker

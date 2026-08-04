@@ -1,47 +1,9 @@
-# The Matt Pocock feature chain and the bug branch: the only Workflow that ships.
-#
-# A Prompt that runs a skill opens with its slash command: Claude Code reads a
-# slash command only at the start of a message, so prose in front of it would
-# send the skill's name as chat. Opening with it is necessary and not
-# sufficient — the Prompt must also arrive as typed input, which is the
-# adapter's business and ADR 0011's. That is a mechanical constraint on Prompts
-# that invoke a skill, not a requirement that every State run one — the classifying
-# State below runs none and opens with prose. What follows a command is the
-# argument the human would have typed — which work, which input — and never a
-# procedure: a skill's own logic stays in the skill, or it is maintained in two
-# places.
-#
-# The Protocol is not restated in any Prompt. Naiad injects it into every fresh
-# context, including the ones the Clearing States below create.
+# Prompt conventions: docs/workflow-authoring.md
+# Why each State is shaped as it is: the ADRs it points at, under docs/adr/.
 
 name = "matt-pocock"
 
-# Where a Run begins when the operator has said nothing about where to start:
-# they describe the task in their own words and the agent decides which kind of
-# work it is. Classification is a State rather than something Naiad owns (ADR
-# 0005) — choosing a branch is a judgment about the work, and those belong to
-# the agent. Being an ordinary State, it runs in the Run's own interactive
-# session with the repository in front of it, rather than as a headless call
-# made before any session exists.
-#
-# The one Prompt that runs no skill, and so the one that opens with prose. No
-# existing skill fits, and one whose entire body is three sentences would be
-# indirection rather than encapsulation; the criterion below exists nowhere
-# else, so writing it here copies nothing.
-#
-# No Clear — nothing precedes it — and no Artifact: the Announcement is the
-# record, the Run log already holds it, and both branch heads Clear anyway. That
-# Clear is the point rather than an inconvenience. What this State made of the
-# task must not reach the diagnosing State, whose job is to form a hypothesis
-# from evidence rather than to inherit a guess, and the only thing that has to
-# cross the boundary is the task itself, which Naiad holds and interpolates into
-# every delivered Prompt rather than only the first.
-#
-# The escape hatch, and the answer to "the classifier can be wrong": an operator
-# who already knows which kind of work they have starts the Run at the branch
-# head with `--at grill` or `--at diagnose` and skips this State entirely. That
-# needs no code — the start-state option already accepts any declared State
-# name — which is exactly why it is worth writing down here.
+# ADR 0005
 [[states]]
 name = "classify"
 next = ["grill", "diagnose"]
@@ -55,70 +17,7 @@ Read it, and read as much of the codebase as you need to answer that one questio
 Say in a sentence which it is and why, then announce grill or diagnose. Do no other work.
 """
 
-# The bug branch, declared before the feature chain so the file reads in the
-# order a Run moves through it, with the short branch first. One branch has to
-# declare its rejoin explicitly, and this is the one where that declaration sits
-# a line from its own head rather than reaching across the whole file.
-
-# One State for the whole diagnosis discipline — feedback loop, reproduce,
-# minimise, hypothesise, instrument, fix with a regression test, clean up,
-# post-mortem — and no diagnosis Artifact (ADR 0008). The only honest cut is
-# between instrumentation and fix, and the fix phase already writes its failing
-# test before the fix and then re-runs the original loop, while the post-mortem
-# is explicitly better-informed after the fix than before it. Splitting there
-# would sever the discipline mid-stride and then reconstruct by hand, in an
-# Artifact, what not Clearing supplies for free.
-#
-# Clears, and so restates the task. Nothing upstream is wanted here: a
-# classifier's "this looks like a bug because…" is a conclusion this State has
-# no use for and an active hazard for work whose job is to form a hypothesis
-# from evidence rather than inherit a guess.
-#
-# The branch is the skill's own: it says to stop and report when no feedback
-# loop can be built, and not to hypothesise without one. So the criterion for
-# choosing between the two candidates is in the Prompt, because Naiad decides
-# nothing about which branch is right and the criterion exists nowhere else.
-#
-# One of the two heads that put the Run on its Working branch, and the
-# paragraph is written out here and again at the other head rather than being
-# given a State of its own. A State of its own would be skipped by exactly the
-# Entries that pre-classify — a bug Run starts here and a design Run at
-# `grill` — and the classifying State between them writes nothing and needs no
-# branch. Both heads Clear, and a checked-out branch is git state that survives
-# a Clear, so a paragraph at each head covers all three entrances. The cost is
-# one paragraph written twice, which this file already accepts twice over for
-# the same kind of reason.
-#
-# The git knowledge lives here rather than in Naiad, which carries branch names
-# and nothing else (ADR 0015). The test is ancestry rather than merge status:
-# one question with a terminal answer, no API call, and correct for the case
-# that matters most — a Predecessor parked at `handover` has commits and no
-# pull request at all, so "not merged" would send this Run to the base branch
-# and drop that work from underneath it.
-#
-# The base is chosen before the branch is created and the branch is created from
-# it by name, because the working tree is shared: whatever is checked out when a
-# Run arrives is where the last Run left it, so a bare `git checkout -b` would
-# silently branch from another Run's work and look like it had obeyed. The
-# ancestry command is written with its operands in order for the same reason —
-# reversed, it answers every question backwards, and the symptom is a wrong
-# stack read at review time rather than a failure during the Run.
-#
-# When the Entry named no branch, the Working branch line renders empty, and
-# the empty line is the cue (ADR 0022): the agent derives a name from the
-# repository's own conventions, falls back to conventional prefixes where none
-# are discernible, and declares the name with `naiad branch` in the same turn
-# it creates the branch — Naiad carries opaque names it is told and invents
-# none itself (ADR 0015), so a name never declared is a Predecessor the next
-# Entry cannot resolve.
-#
-# This is the one Prompt that writes its successors out rather than
-# interpolating {next_state}, for the same reason the implement loop writes its
-# own name: the placeholder renders every candidate as one joined phrase, which
-# is right where a Prompt says "announce what comes next" and useless where it
-# has to attach a different condition to each exit. The names are still the
-# Workflow's — the test asserts each declared candidate is announced by name, so
-# a candidate renamed here without the Prompt following fails.
+# ADR 0008, 0015, 0022
 [[states]]
 name = "diagnose"
 clear = true
@@ -144,36 +43,12 @@ Run the discipline end to end — through the fix, its regression test, the inst
 If you cannot build a feedback loop at all, do not hypothesise without one: say so in the session, list what you tried and what you need, and announce no-repro. Otherwise, when the fix is in place with its regression test and the working tree is clean, announce pull-request.
 """
 
-# The first Gate State that is a branch candidate rather than a step in the
-# declared order — which is what forced the rule in ADR 0007: it is never
-# skipped, because it is a destination the agent chose rather than a routine
-# checkpoint on the path.
-#
-# No Prompt, so Naiad delivers nothing and the operator types the missing
-# environment, steps or captured artifact into the session directly. No Artifact
-# either, for the reason ADR 0008 gives. The agent then carries on through the
-# remaining phases in the same context, which is why the rejoin is the pull
-# request rather than a return to a State that would Clear what the operator
-# just supplied.
+# ADR 0007, 0008
 [[states]]
 name = "no-repro"
 next = ["pull-request"]
 
-# The head of the feature branch. Told the task in words, as the other branch
-# head is; everything after it reads the Artifacts this conversation and its
-# successors leave behind.
-#
-# Clears, for the same reason the diagnosing State does: what the classifying
-# State made of the task is a conclusion this State has no use for, and an
-# interview that opens by agreeing with it has skipped the question it exists to
-# ask. That costs nothing, because the task is the only thing that must cross
-# the fork and Naiad holds it itself.
-#
-# The other of the two heads that prepare the branch, carrying the same
-# paragraph the diagnosing State does — the reasoning for writing it twice is
-# there, beside the first copy. It is here as well as there because an operator
-# who has already classified their work starts the Run at whichever head fits
-# it, and neither head may assume the other ran.
+# ADR 0015, 0022
 [[states]]
 name = "grill"
 clear = true
@@ -196,31 +71,11 @@ If the task above, or an issue it links to, names an image — a mockup to match
 When the interview is finished and its ADRs and glossary entries are written, announce {next_state}.
 """
 
-# The Gate State: no Prompt, so Naiad delivers nothing and waits. The human
-# reads the ADRs and the glossary the interview produced and types into the
-# session — approving, redirecting, or correcting in the one action.
+# ADR 0007
 [[states]]
 name = "review"
 
-# The spec and the tickets are synthesised from the grilling conversation, so
-# neither Clears. These are the two phases that genuinely need what was said.
-#
-# The seam decision is pinned here for the same reason the triage label below
-# is, and the reason is worth stating twice: the skill is external and not ours
-# to edit, so an instruction added to the skill file is lost the next time the
-# skill is updated. Pinning it in the Prompt is the only place it survives.
-#
-# Left to itself /to-spec sketches its seams and offers them — which in a Run is
-# a question nobody is awake to answer. It is not one the Answerer can settle
-# either: which seam a feature is tested at is a judgment about the work, and
-# ADR 0001 puts those with the agent, which is the party holding the codebase.
-# So the instruction is not "choose well" but "choose, and write down what you
-# chose": recording the seams in the spec is what keeps the decision reviewable,
-# because the human reads it at the review Gate beside everything else instead
-# of being woken to approve it in advance.
-#
-# An input to the skill rather than a copy of its logic — how it chooses seams
-# stays its own, and only where the choice is recorded is added.
+# ADR 0033
 [[states]]
 name = "spec"
 prompt = """
@@ -231,28 +86,7 @@ Decide the seams on your own judgement and carry straight on to writing the spec
 When the spec is published to the tracker, announce {next_state}.
 """
 
-# The triage label is pinned here because nothing else pins it. /to-tickets
-# applies `ready-for-agent` only on its real-issue-tracker branch; for a local
-# markdown tracker it says nothing about a status at all, so the label was
-# improvised each run — `ready-for-agent` in one tracker, the undefined `ready`
-# in another, `ready-for-human` across all eight tickets of the run that failed.
-# The loop below is a filter on that label, and a filter reading noise is worse
-# than none: every Run would park at its first ticket.
-#
-# The skill is external and not ours to edit, and it leaves the hook open
-# itself — "unless instructed otherwise". So this instructs, which is an input
-# to the skill rather than a copy of its logic: how it publishes stays its own.
-#
-# The exception's criterion is the Answerer's, deliberately. What the Answerer
-# must escalate and what an agent cannot implement are the same boundary, and
-# one criterion stated once is worth more than the brevity of leaving the
-# second implicit (ADR 0010).
-#
-# Declares the gate as a candidate beside the loop, because a feature whose
-# every ticket is genuinely a person's to implement is a real outcome rather
-# than a malformed one. Left undeclared it would still work — a Deviation is
-# permitted — but it would be recorded as one on every legitimate use, and a
-# Deviation is read as a symptom of a confused agent.
+# ADR 0010, 0033
 [[states]]
 name = "tickets"
 next = ["implement", "handover"]
@@ -264,42 +98,7 @@ Publish each ticket with a Status: line reading ready-for-agent, which is what m
 When every ticket is published with its blocking edges declared, announce {next_state}, passing the file of the lowest-numbered ticket that is ready-for-agent and blocked by nothing as the subject. If no ticket qualifies, announce handover with the lowest-numbered one as the subject instead, and say which status you found.
 """
 
-# The loop: one State, Cleared and announced once per ticket. Naiad models no
-# iteration and no exhaustion condition — which tickets remain is recorded in
-# the ticket files, and the agent decides when it has run out.
-#
-# The ticket arrives as the Announcement's Subject rather than being looked for
-# here (ADR 0009). The agent that names it is the one finishing the previous
-# ticket, with the whole tracker in front of it; the Clear then wipes that
-# context, and the Prompt names the ticket anyway. Choosing in the Cleared
-# context instead is what produced the failure this loop was rebuilt for.
-#
-# So the selecting is the last thing this Prompt asks for, not the first. It
-# reads the labels because the frontier is what is unblocked *and*
-# implementable, and splitting those across two contexts holds the same
-# knowledge twice (ADR 0010).
-#
-# Every open status other than ready-for-agent goes to the gate, and the agent
-# says which it found: routing an unknown label and routing ready-for-human are
-# the same action needing opposite responses — fix the label, or do the work.
-# wontfix does not go to the gate: it is closed by decision as resolved is by
-# completion, and both are walked past — the drop was deliberate and whoever
-# made it tended the dependents in the same act, which is what lets the scan
-# trust every surviving edge (ADR 0027).
-#
-# The finished ticket is marked resolved here, in the Prompt, rather than left
-# to /implement: the skill did it unreliably — sometimes marking a ticket done,
-# sometimes not — and the Status line is the only record the loop and a reader
-# have. Marking it is also what shrinks the frontier: the scan reads open
-# tickets only, so a ticket left unmarked is one this loop picks again. resolved
-# is issue-tracker.md's own completion status — the wayfinding axis already uses
-# it, and an edge is unblocked when its ticket is resolved — reused here rather
-# than added as a sixth triage role, which the triage table is not (ADR 0010).
-#
-# The successors are written out rather than interpolated, as the diagnosing
-# State's are and for both of that pattern's reasons: {next_state} renders every
-# candidate as one joined phrase, which attaches no condition to each exit and
-# would name the gate in the line about having run out of tickets.
+# ADR 0009, 0010, 0027, 0033
 [[states]]
 name = "implement"
 clear = true
@@ -316,86 +115,12 @@ Then choose what comes next. A ticket is closed when its Status line reads resol
 - no open tickets remain — announce pull-request.
 """
 
-# Where the loop puts a ticket it will not do. A Gate State: no Prompt, so Naiad
-# delivers nothing and the human implements the ticket by typing into the still
-# live session, then says to carry on. The Subject rides along even though no
-# Prompt substitutes it — the Run log records it, and it is what tells whoever
-# arrives which ticket they have been handed (ADR 0009).
-#
-# The second Gate State that is a branch candidate rather than a step in the
-# declared order, so ADR 0007 already covers it: never skipped, because it is a
-# destination the agent chose. An unattended Run parks here, which is the point
-# — ready-for-human means the agent cannot proceed, not that a review is
-# optional.
-#
-# Both exits are declared because both happen: the ticket just handed over may
-# or may not have been the last one. The implicit successor would be the pull
-# request alone, and a Run that handed over its first ticket would then open one
-# having implemented nothing.
+# ADR 0007, 0010
 [[states]]
 name = "handover"
 next = ["implement", "pull-request"]
 
-# Clears, though a PR flow prefers the session's context. What the loop leaves
-# behind is one ticket's context rather than the branch's, so carrying it would
-# describe the last ticket as though it were the whole pull request; Cleared,
-# the branch is compared against its base and all of them are seen.
-#
-# Reads how the tail ends from the project rather than fixing one ending (ADR
-# 0018). It asks first, before opening anything: a repository with no remote to
-# open against, or one whose naiad.toml opts out, has nowhere for the work to
-# land — the agent announces done, and the branch, the open and the ten-minute
-# wait are all skipped, so a local-first Run pays for none of them. done is
-# already a declared successor (ADR 0017), so the third ending needed no new
-# wiring, only the Prompt asking the question in the right order.
-#
-# Opens the pull request generically, and names no project (ADR 0016). The
-# Prompt says "open a pull request"; the agent, in the repository with its
-# remote in front of it, finds the MCP server for that repository's host —
-# GitHub or Gitea — and opens it. The host-neutral open is ADR 0018 extending
-# 0016: Gitea has pull requests and a server of its own, so "the GitHub MCP
-# server" was one host's world written into the file, the same fault 0016 named.
-# The HCGPS monorepo is the one exception the Prompt names, and it names the
-# skill rather than inlining the reviewers, base and build the skill holds — so
-# even the one project mentioned is a reference and not a description. That is
-# why this Prompt opens with prose, as the classifier does: the no-pull-request
-# check leads, and /hcgps-pr is named mid-sentence rather than at the start, so
-# it is not read as a slash command.
-#
-# This State waits, which no other one does. The review the next State fixes is
-# produced after the pull request opens, so announcing as soon as it is open
-# would hand /fix-review an empty pull request. The wait is declared rather
-# than blocked on inside the turn (ADR 0021, superseding ADR 0006): the agent
-# says what it is waiting on and ends its turn, silence under a declared Wait
-# is left alone, and the reminder that follows expiry is the re-check — look,
-# then announce or declare a fresh wait. The wait names no particular
-# integration — whatever automated review the host runs, if any — for the same
-# reason the open does (ADR 0016).
-#
-# Branches on whether a review ran, not on what it said (ADR 0017). A review
-# completed: announce review-fix, which fetches the raw output and forms the
-# whole verdict on what to fix. No review — the host runs none, or none finished
-# in the budget: announce done, because there is nothing to fix. The two
-# successors are written out rather than interpolated as {next_state}, as the
-# diagnosing and implement States' are and for the same reason: the placeholder
-# renders both as one joined phrase, useless where each exit carries a different
-# condition.
-#
-# The ancestry question is asked again here rather than carried down from the
-# branch head. The Predecessor may have landed during the Run — a stack of
-# Entries is exactly the case where that happens — and this State Clears, so it
-# could not have inherited the earlier answer even if that answer were still
-# worth trusting. The result is passed as the base and nothing more: /hcgps-pr
-# accepts an explicit base for stacked work and a direct open takes one too, so
-# each needs telling rather than teaching (ADR 0015).
-#
-# The bounds are Naiad's rather than this Prompt's (ADR 0021): a declared Wait
-# defaults to ten minutes — a review itself takes about three — and the chain
-# of waits draws on one budget per Announcement, past which a further wait is
-# refused toward announcing. So the Prompt states no numbers; it only keeps
-# the wait honest. The wait names the review check alone: a repository's build
-# checks run far longer, so waiting on all of them would spend the budget for
-# a reason that has nothing to do with the review.
+# ADR 0015, 0016, 0017, 0018, 0021
 [[states]]
 name = "pull-request"
 clear = true
@@ -414,15 +139,7 @@ Once the pull request is open, wait for the automated review this host runs, if 
 On that reminder, check whether the review has completed. Completed: announce review-fix. Still running: declare a fresh wait and end your turn again. If no review is coming — this host runs none, or a further wait is refused because the budget is spent — say so in the session and announce done: there is then simply nothing to fix.
 """
 
-# Names the pull request by its branch rather than as the one just opened: this
-# Prompt arrives in a Cleared context, which remembers opening nothing.
-#
-# The empty case is kept though the branch above only routes here when a review
-# completed (ADR 0017): a review can complete and still validate down to
-# nothing, or come back all praise. The guard is where that resolves to done,
-# and without it the State is told to fetch findings that are not there —
-# /fix-review, whose contract is that its findings are handed to it, is the
-# State most likely to stop and ask a human nobody is awake to be.
+# ADR 0016, 0017
 [[states]]
 name = "review-fix"
 clear = true
@@ -434,8 +151,6 @@ If the pull request carries no review findings, there is nothing to fix: say so 
 When the review is addressed and pushed, announce {next_state}.
 """
 
-# Terminal, and with no Prompt: the Run ends here rather than holding for a
-# human, so it is not a Gate State.
 [[states]]
 name = "done"
 terminal = true
