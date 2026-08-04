@@ -9,6 +9,10 @@ in every directory.
 A name resolves to a path here, at the entrance, and nowhere else: the Entry
 stores what came out exactly as it stores a path typed explicitly, and
 everything downstream is untouched.
+
+What the library holds is addresses rather than content (ADR 0037), which is
+why this module both reads and writes it: an entry is a symlink to the file its
+author maintains, and install makes the one for the Workflow that ships.
 """
 
 from __future__ import annotations
@@ -16,6 +20,11 @@ from __future__ import annotations
 from pathlib import Path
 
 from naiad.domain.workflow import load_workflow
+
+# Where the shipped Workflow files are: beside the package, in the checkout.
+# pyproject packages `naiad*` alone, so a distribution carries none of them and
+# this directory is absent there rather than empty (ADR 0037).
+SHIPPED_WORKFLOWS = Path(__file__).resolve().parents[2] / "workflows"
 
 
 class LibraryError(Exception):
@@ -62,6 +71,61 @@ def workflows_in(library: Path) -> tuple[Path, ...]:
     return tuple(sorted((file for file in library.glob("*.toml") if file.is_file()), key=_stem))
 
 
+def shipped_workflows(root: Path | None = None) -> tuple[Path, ...]:
+    """The Workflow files Naiad ships, as they stand in the checkout.
+
+    Empty where no such directory exists, which is every installed
+    distribution: `workflows/` sits outside the package, so a wheel carries no
+    Workflow to link and the caller says so rather than failing (ADR 0037).
+    """
+    return workflows_in(SHIPPED_WORKFLOWS if root is None else root)
+
+
+def link_shipped_workflows(*, library: Path, shipped: Path | None = None) -> tuple[Path, ...]:
+    """Address each shipped Workflow from the library, and say which (ADR 0037).
+
+    Idempotent, because installing is something an operator will do again
+    without thinking, and re-running it is how a library that drifted is
+    repaired: a link is replaced whatever it points at, since an address is
+    cheap to rewrite and a wrong one is the fault this exists to prevent.
+
+    A regular file of the same name is refused rather than replaced. It is a
+    copy, which is the thing that fell four days behind the Workflow it copied
+    — and deleting what a human put there, to install what they can reinstall
+    at any time, trades their work for ours. The refusal is also the report
+    that was missing while the copy rotted.
+
+    Every entry is refused before any is written, so a refusal leaves the
+    library as it found it. The caller reports what landed, and a call that
+    wrote some of its entries and returned none of them would be read against
+    a library the operator cannot see.
+    """
+    files = shipped_workflows(shipped)
+    if not files:
+        return ()
+
+    entries = [Path(library) / file.name for file in files]
+    for entry in entries:
+        _refuse_a_copy(entry)
+
+    Path(library).mkdir(parents=True, exist_ok=True)
+    for entry, file in zip(entries, files):
+        if entry.is_symlink():
+            entry.unlink()
+        entry.symlink_to(file)
+    return tuple(entries)
+
+
+def _refuse_a_copy(entry: Path) -> None:
+    if entry.is_symlink() or not entry.exists():
+        return
+    raise ValueError(
+        f"{entry} is a file rather than a link to the workflow it names; "
+        "a copy can fall behind the file it copies, so naiad will not replace "
+        "it. Move it aside to have naiad address the shipped workflow instead."
+    )
+
+
 def _stem(file: Path) -> str:
     return file.stem
 
@@ -89,3 +153,14 @@ def _unknown(name: str, library: Path) -> str:
 def _is_name(argument: str) -> bool:
     """Shape alone: a separator or the suffix makes it a path."""
     return "/" not in argument and not argument.endswith(".toml")
+
+
+__all__ = [
+    "SHIPPED_WORKFLOWS",
+    "LibraryError",
+    "empty_library_message",
+    "link_shipped_workflows",
+    "resolve_workflow",
+    "shipped_workflows",
+    "workflows_in",
+]

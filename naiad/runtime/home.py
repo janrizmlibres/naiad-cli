@@ -44,9 +44,13 @@ def default_queue_root() -> Path:
 
 
 def default_library_root() -> Path:
-    """Where the Workflow library lives: the one thing under the home a human
-    writes and Naiad only reads, kept here so that moving the home still moves
-    everything (ADR 0023)."""
+    """Where the Workflow library lives, kept here so that moving the home still
+    moves everything (ADR 0023).
+
+    The one thing under the home a human writes as well as Naiad: `naiad
+    install` addresses the shipped Workflow from here, and refuses to replace
+    anything a human put here by hand (ADR 0037).
+    """
     return naiad_home() / "workflows"
 
 

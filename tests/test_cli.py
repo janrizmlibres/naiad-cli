@@ -99,6 +99,39 @@ def test_installing_ships_the_adopt_skill_beside_the_hooks(tmp_path, capsys):
     assert str(skill) in capsys.readouterr().out
 
 
+def test_installing_addresses_the_shipped_workflow_from_the_library(
+    monkeypatch, tmp_path, capsys
+):
+    """The third thing one install sets up (ADR 0037): a library entry is an
+    address, and making it by hand is the act that let a copy rot."""
+    monkeypatch.setenv("NAIAD_HOME", str(tmp_path / "naiad"))
+    entry = tmp_path / "naiad" / "workflows" / "matt-pocock.toml"
+
+    assert main(_install(tmp_path)) == 0
+
+    assert entry.is_symlink()
+    assert entry.readlink() == Path(__file__).resolve().parents[1] / "workflows" / "matt-pocock.toml"
+    assert str(entry) in capsys.readouterr().out
+
+
+def test_installing_over_a_workflow_copy_in_the_library_is_reported_not_a_traceback(
+    monkeypatch, tmp_path, capsys
+):
+    """The refusal that was missing while a copy sat four days behind the
+    Workflow it copied."""
+    monkeypatch.setenv("NAIAD_HOME", str(tmp_path / "naiad"))
+    theirs = tmp_path / "naiad" / "workflows" / "matt-pocock.toml"
+    theirs.parent.mkdir(parents=True)
+    theirs.write_text("a copy taken months ago\n")
+
+    assert main(_install(tmp_path)) == 2
+
+    printed = capsys.readouterr()
+    assert "copy" in printed.err
+    assert "hooks" in printed.out
+    assert theirs.read_text() == "a copy taken months ago\n"
+
+
 def test_installing_over_an_unreadable_settings_file_is_reported_not_a_traceback(
     tmp_path, capsys
 ):

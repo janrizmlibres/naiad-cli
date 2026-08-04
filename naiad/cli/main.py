@@ -39,6 +39,7 @@ from naiad.cli.hold import HoldError, declare_hold
 from naiad.cli.library import (
     LibraryError,
     empty_library_message,
+    link_shipped_workflows,
     resolve_workflow,
     workflows_in,
 )
@@ -483,9 +484,9 @@ def _hook_source() -> str | None:
 
 
 def _install(arguments: argparse.Namespace) -> int:
-    """Everything Naiad puts into the operator's Claude configuration: the two
-    hooks, and the skill that turns the operator's stated intent into `naiad adopt`
-    (ADR 0028).
+    """Everything one machine needs set up: the two hooks, the skill that turns
+    the operator's stated intent into `naiad adopt` (ADR 0028), and the library
+    entry addressing the Workflow that ships (ADR 0037).
 
     Installed once for the machine rather than per Run: the hooks do nothing
     when no Run is attached to the session that fired them, and the skill is
@@ -493,19 +494,43 @@ def _install(arguments: argparse.Namespace) -> int:
 
     One command rather than one per surface, because a machine with the hooks
     and not the skill is a machine where the intent phrase reaches nothing —
-    and each is reported as it lands, so that a refusal on the second is read
-    against what the first already did.
+    and each is reported as it lands, so that a refusal on the third is read
+    against what the first two already did.
+
+    The library takes no option of its own. It moves with `NAIAD_HOME` as
+    everything under the home does, where the hooks and the skill live in a
+    configuration that is Claude Code's and needs naming.
     """
     try:
         settings = install_hooks(settings_path=arguments.settings)
         print(f"installed naiad's hooks into {settings}")
         skill = install_adopt_skill(skills_root=arguments.skills)
         print(f"installed the adopt skill into {skill}")
+        _link_workflows(default_library_root())
     except (OSError, ValueError) as error:
         print(f"naiad: {error}", file=sys.stderr)
         return 2
 
     return 0
+
+
+def _link_workflows(library: Path) -> None:
+    """Address each shipped Workflow from the library, or say why none was.
+
+    A distribution carries no Workflow — `workflows/` sits outside the package
+    — so nothing to link is the ordinary case away from a checkout rather than
+    a fault. Said in one sentence and carried on from: the hooks and the skill
+    have landed, and silence is the failure this decision is about (ADR 0037).
+    """
+    linked = link_shipped_workflows(library=library)
+    if not linked:
+        print(
+            f"no workflows directory beside this naiad, so {library} gained nothing; "
+            "link your own workflow files into it by hand"
+        )
+        return
+    for entry in linked:
+        print(f"linked {entry} to the workflow it names")
 
 
 def _watch(arguments: argparse.Namespace) -> int:
