@@ -13,6 +13,7 @@ from naiad.cli.watch import watch
 from naiad.domain.decide import Finish, Notify
 from naiad.domain.workflow import parse_workflow
 from naiad.runtime.announcements import Announcements
+from naiad.runtime.log import RunLog
 from naiad.runtime.records import Turns
 from naiad.runtime.run import RunStore
 
@@ -171,3 +172,16 @@ def test_nothing_the_agent_says_after_the_end_starts_the_run_again(run):
     drive(run, session=session)
 
     assert session.sent == []
+
+
+def test_watching_a_cancelled_run_does_not_start_ticking(run):
+    """A Run the operator called off is over by the other ending (ADR 0036),
+    and it stops a watch for the same reason a Finish does: nothing is coming,
+    so a watch that ticked it would spin over it forever."""
+    announce(run, "implement")
+    RunLog(run.root).record_cancellation(state="implement")
+
+    action, slept = drive(run)
+
+    assert action is None
+    assert slept == []

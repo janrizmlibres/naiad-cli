@@ -16,6 +16,7 @@ from naiad.domain.entry import Entry
 from naiad.runtime.announcements import Announcements
 from naiad.runtime.log import RunLog
 from naiad.runtime.queue import Queue
+from naiad.runtime.resolve import RunResolver
 from naiad.runtime.run import RunStore
 
 WORKFLOW = """
@@ -379,9 +380,9 @@ def test_removing_an_entry_takes_it_out_of_the_queue(home, repo, capsys):
     assert first.id in capsys.readouterr().out
 
 
-def test_removing_an_entry_leaves_the_run_it_produced_untouched(home, repo):
-    """Removal is a Queue operation rather than a destructive one: the Run and
-    the session it is in are somebody else's record."""
+def queued_run(home, repo, *, pane="%7", state="implement"):
+    """An Entry that has become a Run, standing in a State with a session of
+    its own — which is the case removal has to release (ADR 0036)."""
     run = RunStore(home / "runs").create(
         run_id="a-run",
         workflow_path=repo / "workflow.toml",
@@ -389,6 +390,8 @@ def test_removing_an_entry_leaves_the_run_it_produced_untouched(home, repo):
         target_repo=repo,
         created_at="2026-07-22T12:00:00Z",
     )
+    run.attach_session(tmux_session="naiad-a-run", tmux_pane=pane)
+    Announcements(run.root).announce(state)
     queue_of(home).add(
         Entry(
             id="an-entry",
@@ -400,11 +403,73 @@ def test_removing_an_entry_leaves_the_run_it_produced_untouched(home, repo):
             run_id="a-run",
         )
     )
+    return run
+
+
+def test_removing_an_entry_keeps_the_run_it_produced(home, repo):
+    """Nothing is deleted: the Run log is the diagnostic, and only a Prune ever
+    removes a Run."""
+    run = queued_run(home, repo)
 
     assert main(["queue", "rm", "an-entry"]) == 0
 
     assert queue_of(home).all() == []
     assert json.loads(run.metadata_path.read_text())["task"] == "add dark mode"
+
+
+def test_removing_an_entry_cancels_the_run_and_releases_its_session(home, repo):
+    """The Session is released by the Run ending, and the seam every hook and
+    Protocol verb asks is what stops answering (ADR 0036)."""
+    run = queued_run(home, repo)
+
+    assert main(["queue", "rm", "an-entry"]) == 0
+
+    assert RunLog(run.root).ended() is True
+    resolver = RunResolver(RunStore(home / "runs"), environ={})
+    assert resolver.resolve(tmux_pane="%7") is None
+
+
+def test_removing_an_entry_names_the_session_the_operator_now_has(home, repo, capsys):
+    """Nothing is typed into that session — the agent learns at its next verb,
+    from the refusal. So the one thing said out loud is said to the operator,
+    who can go and read what the agent was doing."""
+    queued_run(home, repo)
+
+    assert main(["queue", "rm", "an-entry"]) == 0
+
+    printed = capsys.readouterr().out
+    assert "a-run" in printed
+    assert "%7" in printed
+
+
+def test_removing_a_waiting_entry_says_nothing_about_a_session(home, repo, capsys):
+    """There is no Run and so no Session, and a line about one would send the
+    operator looking for a session that was never opened."""
+    add(repo, "--branch", "MC-AGENT-8546")
+    (waiting,) = queue_of(home).all()
+
+    assert main(["queue", "rm", waiting.id]) == 0
+
+    assert "session" not in capsys.readouterr().out
+
+
+def test_an_entry_whose_run_will_not_take_the_ending_stays_in_the_queue(
+    home, repo, capsys, monkeypatch
+):
+    """The refusal question 5 settles: the ending goes first, so a Run that
+    cannot take it leaves the Entry where the operator can see it and try
+    again — rather than an orphan still driving its Session."""
+    queued_run(home, repo)
+
+    def refuse(_self, *, state):
+        raise OSError("read-only file system")
+
+    monkeypatch.setattr(RunLog, "record_cancellation", refuse)
+
+    assert main(["queue", "rm", "an-entry"]) == 2
+
+    assert [held.id for held in queue_of(home).all()] == ["an-entry"]
+    assert "a-run" in capsys.readouterr().err
 
 
 def test_removing_an_entry_that_is_not_there_is_reported(home, repo, capsys):
@@ -771,3 +836,48 @@ def test_pruning_a_queue_holding_a_damaged_entry_reports_it_and_takes_nothing(
 
     assert "damaged.json" in capsys.readouterr().err
     assert run.root.is_dir()
+
+
+def test_removing_a_done_entry_claims_no_cancellation(home, repo, capsys):
+    """Its Run ended on its own and released its Session then. Saying it was
+    cancelled would hand the operator a session that was never theirs to take,
+    and would claim an act this removal did not make."""
+    run = queued_run(home, repo)
+    RunLog(run.root).record(Finish(state="done"), seq=2)
+
+    assert main(["queue", "rm", "an-entry"]) == 0
+
+    printed = capsys.readouterr().out
+    assert "cancelled" not in printed
+    assert [line.kind for line in RunLog(run.root).entries()] == ["finished"]
+
+
+def test_a_run_cancelled_before_its_session_was_recorded_offers_no_pane(home, repo, capsys):
+    """The window between a Run's directory being made and its session being
+    attached. Offering a session here would send the operator looking for one
+    that was never opened."""
+    run = RunStore(home / "runs").create(
+        run_id="a-run",
+        workflow_path=repo / "workflow.toml",
+        task="add dark mode",
+        target_repo=repo,
+        created_at="2026-07-22T12:00:00Z",
+    )
+    queue_of(home).add(
+        Entry(
+            id="an-entry",
+            workflow_path=repo / "workflow.toml",
+            task="add dark mode",
+            target_repo=repo,
+            working_branch="MC-AGENT-8546",
+            created_at="2026-07-22T12:00:00Z",
+            run_id="a-run",
+        )
+    )
+
+    assert main(["queue", "rm", "an-entry"]) == 0
+
+    printed = capsys.readouterr().out
+    assert "cancelled run a-run" in printed
+    assert "pane" not in printed
+    assert RunLog(run.root).ended() is True

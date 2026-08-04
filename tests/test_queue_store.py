@@ -16,7 +16,16 @@ from naiad.domain.question import Question
 from naiad.runtime.announcements import Announcements
 from naiad.runtime.home import StorageError
 from naiad.runtime.log import RunLog
-from naiad.runtime.queue import DONE, PARKED, RUNNING, WAITING, Queue, prune, status_of
+from naiad.runtime.queue import (
+    DONE,
+    PARKED,
+    RUNNING,
+    WAITING,
+    Queue,
+    cancel,
+    prune,
+    status_of,
+)
 from naiad.runtime.records import Notices, Waits
 from naiad.runtime.run import RunStore
 
@@ -512,8 +521,8 @@ def test_an_orphan_that_would_not_go_is_a_failure_naming_its_path(queue, runs, r
 def test_an_entry_that_was_already_gone_is_not_claimed_as_taken(queue, runs, repo, monkeypatch):
     """Removal answers False when there was no such Entry, and a Prune has to
     believe it. Counting one anyway would print a line for a removal this Prune
-    did not make — and would take a Run that whoever removed the Entry by name
-    had deliberately left alone.
+    did not make — and would delete a Run whoever removed the Entry by name has
+    only cancelled, which is theirs to keep reading until the next Prune.
     """
     run = finished(runs, repo)
     queue.add(entry(repo, id="done-entry", run_id=run.id))
@@ -524,3 +533,116 @@ def test_an_entry_that_was_already_gone_is_not_claimed_as_taken(queue, runs, rep
     assert pruned.removed == []
     assert pruned.failures == []
     assert run.root.is_dir()
+
+
+# Cancelling. Removing an Entry by name ends the Run it became, which releases
+# that Run's Session (ADR 0036). The Run directory stays: it is the diagnostic,
+# and only a Prune ever deletes one.
+
+
+def test_cancelling_takes_the_entry_out_and_ends_its_run(queue, runs, repo):
+    run = started(runs, repo)
+    run.attach_session(tmux_session="naiad-a-run", tmux_pane="%7")
+    Announcements(run.root).announce("implement")
+    queue.add(entry(repo, id="an-entry", run_id=run.id))
+
+    cancelled = cancel(queue, runs, "an-entry")
+
+    assert cancelled.entry.id == "an-entry"
+    assert cancelled.run.tmux_pane == "%7"
+    assert queue.all() == []
+    assert run.root.is_dir()
+    assert RunLog(run.root).ended() is True
+
+
+def test_a_cancelled_run_reads_done_so_the_next_prune_takes_the_orphan(queue, runs, repo):
+    """The whole point of recording the ending rather than deriving it: one
+    reading answers the Session release and the Prune alike, so a cancelled Run
+    does not sit in the 'reads as running, yours to judge' limbo for ever."""
+    run = started(runs, repo)
+    Announcements(run.root).announce("implement")
+    queue.add(entry(repo, id="an-entry", run_id=run.id))
+    cancel(queue, runs, "an-entry")
+
+    pruned = prune(queue, runs)
+
+    assert pruned.orphans == [run.id]
+    assert not run.root.exists()
+
+
+def test_the_cancellation_says_where_the_run_stood(queue, runs, repo):
+    run = started(runs, repo)
+    Announcements(run.root).announce("implement")
+    queue.add(entry(repo, id="an-entry", run_id=run.id))
+
+    cancel(queue, runs, "an-entry")
+
+    (line,) = [entry for entry in RunLog(run.root).entries() if entry.kind == "cancelled"]
+    assert line.state == "implement"
+
+
+def test_cancelling_an_entry_that_never_started_takes_the_entry_alone(queue, runs, repo):
+    """Waiting is an Entry with no Run. There is nothing to end and no Session
+    to release, so removal is what it always was."""
+    queue.add(entry(repo, id="waiting-entry"))
+
+    cancelled = cancel(queue, runs, "waiting-entry")
+
+    assert cancelled.entry.id == "waiting-entry"
+    assert cancelled.run is None
+    assert queue.all() == []
+
+
+def test_cancelling_an_entry_whose_run_directory_has_gone_still_takes_the_entry(
+    queue, runs, repo
+):
+    """A Run nobody can find holds no Session to release, so its absence must
+    not trap the Entry naming it in the Queue."""
+    queue.add(entry(repo, id="an-entry", run_id="a-run-that-was-deleted"))
+
+    cancelled = cancel(queue, runs, "an-entry")
+
+    assert cancelled.run is None
+    assert queue.all() == []
+
+
+def test_cancelling_a_run_that_had_already_ended_writes_no_second_ending(queue, runs, repo):
+    """Its Session was released when it finished. A second line would say the
+    operator called off work that was already over."""
+    run = finished(runs, repo)
+    queue.add(entry(repo, id="done-entry", run_id=run.id))
+
+    cancelled = cancel(queue, runs, "done-entry")
+
+    assert [line.kind for line in RunLog(run.root).entries()] == ["finished"]
+    assert queue.all() == []
+    # No line was written, so no Run comes back: a caller reporting this field
+    # must not claim a cancellation this act did not make.
+    assert cancelled.run is None
+
+
+def test_a_cancellation_that_cannot_be_written_leaves_the_entry_where_it_is(
+    queue, runs, repo, monkeypatch
+):
+    """The order this turns on, seen from the failure it is chosen for: the
+    ending goes first, so a refusal cannot leave a Run orphaned and still
+    driving its Session — which is the whole failure being removed here."""
+    run = started(runs, repo)
+    Announcements(run.root).announce("implement")
+    queue.add(entry(repo, id="an-entry", run_id=run.id))
+
+    def refuse(_self, *, state):
+        raise OSError("read-only file system")
+
+    monkeypatch.setattr(RunLog, "record_cancellation", refuse)
+
+    with pytest.raises(StorageError):
+        cancel(queue, runs, "an-entry")
+
+    assert [held.id for held in queue.all()] == ["an-entry"]
+
+
+def test_cancelling_an_entry_that_is_not_there_answers_nothing(queue, runs, repo):
+    """False from `remove` in a different shape: the caller says so rather than
+    guessing, and no Run is touched on the way."""
+    assert cancel(queue, runs, "no-such-entry") is None

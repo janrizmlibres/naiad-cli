@@ -29,7 +29,7 @@ from naiad.runtime.atomic import write_atomically
 from naiad.runtime.home import StorageError, refuse_inside_repository
 from naiad.runtime.log import RunLog
 from naiad.runtime.records import Notices, Waits
-from naiad.runtime.run import RunStore
+from naiad.runtime.run import Run, RunStore
 
 ENTRY_SUFFIX = ".json"
 
@@ -89,12 +89,22 @@ class Queue:
         self._write(attached)
         return attached
 
+    def find(self, entry_id: str) -> Entry | None:
+        """One Entry by its id, or nothing when the Queue holds no such Entry.
+
+        Read through `all` rather than from the file directly, so that a
+        damaged Entry is refused by one reader (`_read`) however it is reached.
+        """
+        return next((entry for entry in self.all() if entry.id == entry_id), None)
+
     def remove(self, entry_id: str) -> bool:
         """Take an Entry out of the Queue, and touch nothing else.
 
-        Removal is a Queue operation: any Run the Entry produced, and the
-        session that Run is in, are left exactly as they were. False when there
-        was no such Entry, so that the caller can say so rather than guess.
+        The primitive rather than the whole act: what becomes of the Run the
+        Entry produced is decided by the caller, because a Prune deletes that
+        Run (ADR 0029) and a removal by name cancels it (ADR 0036). False when
+        there was no such Entry, so that the caller can say so rather than
+        guess.
         """
         try:
             self._path(entry_id).unlink()
@@ -185,13 +195,97 @@ def _run_status(root: Path) -> Status:
     """What a Run's directory records, never waiting: a directory exists, so the
     Run does too. One reading shared by an Entry's status and a Prune's judgment
     of an orphan (ADR 0030), so the two cannot come apart."""
-    if RunLog(root).finished():
+    if RunLog(root).ended():
         return DONE
     # Read with the same Wait key the loop wrote it under (ADR 0021), or a Run
     # parked after its Waits ran out would show as running.
     latest = Announcements(root).latest()
     notified, _nudges = Notices(root).of(latest, wait_count=Waits(root).count(latest))
     return PARKED if notified else RUNNING
+
+
+@dataclass(frozen=True)
+class Cancelled:
+    """What a cancellation took: the Entry that left the Queue, and the Run it
+    ended.
+
+    The Run is None when this act ended none — the Entry had never started one,
+    or the Run it started was already over. Both are removals that release no
+    Session, so a caller reporting one from this field cannot claim a
+    cancellation that did not happen.
+
+    The Run comes back rather than only its id, because the one thing the
+    operator needs afterwards is which Session is now theirs, and the pane is
+    on the Run (ADR 0036).
+    """
+
+    entry: Entry
+    run: Run | None
+
+
+def cancel(queue: Queue, runs: RunStore, entry_id: str) -> Cancelled | None:
+    """Remove an Entry by name, and end the Run it became (ADR 0036).
+
+    Ending the Run is what releases its Session: `naiad.runtime.resolve` stops
+    answering for it, so the Protocol is injected into no fresh context there
+    and the Protocol verbs refuse. Without it the Run is orphaned and still
+    resolves, and the agent goes on being told to announce into a Run the
+    Supervisor has already dropped.
+
+    The ending is written before the Entry is removed, which inverts the order
+    a Prune takes (ADR 0029). The two are chosen against opposite failures: a
+    Prune's Run must not outlive its Entry as a lie in the listing, while here
+    an Entry must not outlive its release. So a cancellation that cannot be
+    written refuses the whole act and leaves the Entry in the Queue, where the
+    operator can see it and try again.
+
+    Nothing is deleted. The Run directory is the diagnostic, and only a Prune
+    ever removes one — which the next Prune does, since a cancelled Run now
+    reads done.
+
+    None when the Queue holds no such Entry, as `Queue.remove` answers False.
+    """
+    entry = queue.find(entry_id)
+    if entry is None:
+        return None
+
+    found = None if entry.run_id is None else runs.load(entry.run_id)
+    cancelled = _cancel_run(found) if found is not None else None
+
+    # The answer is not read: the Entry was there a moment ago, and one somebody
+    # else removed in between is gone either way, which is what was asked for.
+    # A Prune has to read it because a deletion follows; nothing follows here.
+    queue.remove(entry.id)
+    return Cancelled(entry=entry, run=cancelled)
+
+
+def _cancel_run(run: Run) -> Run | None:
+    """Write the cancellation onto the Run, and answer with the Run it ended.
+
+    Nothing, and no line written, for a Run that was already over: its Session
+    was released by the ending it has, and a second line would say the operator
+    called off work that had finished. Answering with the Run anyway would have
+    the command claim a cancellation it did not make.
+
+    The State is the one the Run was standing in, which is what a reader of the
+    log wants to know about a Run that was called off.
+
+    A write that fails is raised as a StorageError like every other refusal the
+    commands report, so that a read-only disk reaches the operator as a message
+    rather than as a traceback.
+    """
+    log = RunLog(run.root)
+    if log.ended():
+        return None
+
+    announcement = Announcements(run.root).latest()
+    try:
+        log.record_cancellation(state=announcement.state if announcement else None)
+    except OSError as error:
+        raise StorageError(
+            f"run '{run.id}' at {run.root} cannot be cancelled ({error})"
+        ) from error
+    return run
 
 
 @dataclass(frozen=True)
@@ -360,9 +454,11 @@ __all__ = [
     "PARKED",
     "RUNNING",
     "WAITING",
+    "Cancelled",
     "Pruned",
     "Queue",
     "branch_of",
+    "cancel",
     "prune",
     "status_of",
 ]

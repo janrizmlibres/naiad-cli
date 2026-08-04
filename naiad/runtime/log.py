@@ -35,6 +35,12 @@ LOG_FILENAME = "log.json"
 # deviated — while the individual kinds are only ever written and read back.
 ANNOUNCEMENT_KINDS = ("announced", "asked")
 
+# The kinds that end a Run: the Finish Naiad carried out, and the cancellation
+# the operator's removal of the Entry wrote (ADR 0036). Two kinds rather than
+# one because the log is a narrative a human reads, and a Run called off must
+# not read back as one that completed.
+ENDING_KINDS = ("finished", "cancelled")
+
 
 @dataclass(frozen=True)
 class LogLine:
@@ -105,15 +111,20 @@ class RunLog:
         it should not mean scanning the whole narrative for one field."""
         return [entry for entry in self.entries() if entry.expected is not None]
 
-    def finished(self) -> bool:
-        """Whether this Run has reached a Terminal State.
+    def ended(self) -> bool:
+        """Whether this Run is over, by either of the endings the log records.
+
+        Named for the ending rather than for the Finish, because a Run ends two
+        ways: Naiad carried out its Finish, or the operator removed its Entry
+        and cancelled it (ADR 0036). Every caller asks the one question, so the
+        second ending needed no second reader.
 
         Read back from the log rather than kept as a flag of its own, because
         the ending is already written here and one fact deserves one home. It
-        is what makes finishing final: a watch started again over a Run that
+        is what makes an ending final: a watch started again over a Run that
         ended must find nothing to do, however much the agent says afterwards.
         """
-        return any(entry.kind == "finished" for entry in self.entries())
+        return any(entry.kind in ENDING_KINDS for entry in self.entries())
 
     def previous_state(self, announcement: Announcement | None) -> str | None:
         """Where the agent stood before this Announcement, which is what a
@@ -150,7 +161,7 @@ class RunLog:
         A delivery with no Announcement to tie it to is that one and no other:
         every delivery after it answers something the agent said and carries
         that Announcement's seq. Read back from the log rather than kept as a
-        flag of its own, for the reason `finished` is — the fact is already
+        flag of its own, for the reason `ended` is — the fact is already
         written here, and one fact deserves one home.
         """
         return any(entry.kind == "delivered" and entry.seq is None for entry in self.entries())
@@ -228,6 +239,25 @@ class RunLog:
         narrative rather than inferring it from run.json's silence.
         """
         self._append(LogLine(kind="declared", detail=f"working branch: {name}"))
+
+    def record_cancellation(self, *, state: str | None) -> None:
+        """That the operator removed this Run's Entry, which ends the Run and
+        releases its Session (ADR 0036).
+
+        Written here rather than as an Action, like `record_adoption` and
+        `record_branch`, because no tick decided it: it is the operator's own
+        act, arriving from a command rather than from the decision core.
+
+        The State is where the Run stood when it was called off, and is None
+        for a Run cancelled before its agent announced anything.
+        """
+        self._append(
+            LogLine(
+                kind="cancelled",
+                state=state,
+                detail="its entry was removed from the queue",
+            )
+        )
 
     def record(self, action: Action, *, seq: int | None = None) -> None:
         """What Naiad did about it. Nothing is not written down."""
@@ -318,4 +348,4 @@ def _document(entry: LogLine) -> dict[str, object]:
     }
 
 
-__all__ = ["ANNOUNCEMENT_KINDS", "LOG_FILENAME", "LogLine", "RunLog"]
+__all__ = ["ANNOUNCEMENT_KINDS", "ENDING_KINDS", "LOG_FILENAME", "LogLine", "RunLog"]

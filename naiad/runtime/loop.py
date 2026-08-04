@@ -121,7 +121,7 @@ def tick(
             nudges=nudges,
             idle_for=idle_seconds(run.root, now=moment),
             consultation=consultations.of(announcement),
-            finished=log.finished(),
+            finished=log.ended(),
             cleared=clearing.confirmed(announcement, clears),
             clear_attempts=clearing.attempts(announcement),
             waiting=waits.waiting(announcement, now=moment),

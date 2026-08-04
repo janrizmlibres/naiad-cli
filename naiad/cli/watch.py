@@ -49,8 +49,8 @@ def watch(
     waiting on a clock or printing to the operator's terminal; the loop is the
     same one either way.
     """
-    if RunLog(run.root).finished():
-        report(f"{run.id} has already finished")
+    if RunLog(run.root).ended():
+        report(f"{run.id} has already ended")
         return None
 
     while True:

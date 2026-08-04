@@ -45,9 +45,9 @@ class Signals:
     them — it is id order, and an id is a sortable timestamp — so the rule reads
     the sequence it was handed and sorts nothing itself.
 
-    finished holds the ids of the Runs that have reached a Terminal State. It
-    is handed in rather than asked of each Run here, so that every rule below is
-    testable as data in, Action out. There is no matching signal for parked or
+    finished holds the ids of the Runs that are over, by either ending (ADR
+    0036). It is handed in rather than asked of each Run here, so that every
+    rule below is testable as data in, Action out. There is no matching signal for parked or
     running, and deliberately: the scan needs to know only whether an Entry is
     done, and asking for more would have the Queue keeping a status of its own
     (ADR 0013).

@@ -99,9 +99,12 @@ class Signals:
     idle_for is elapsed seconds since the last signal of any kind. It is handed
     in rather than read, so every rule below is testable as data in, Action out.
 
-    finished says the Run has already reached a Terminal State. It is a fact
-    about the Run rather than about an Announcement, and the only one: nothing
-    re-arms it, because nothing that arrives afterwards is Naiad's business.
+    finished says the Run is already over — because it reached a Terminal
+    State, or because the operator removed its Entry and cancelled it (ADR
+    0036). Which of the two is not the core's business: both mean the same
+    thing here, that nothing further is to be decided. It is a fact about the
+    Run rather than about an Announcement, and the only one: nothing re-arms
+    it, because nothing that arrives afterwards is Naiad's business.
 
     consultation is what the Answerer has said about the Question currently
     announced, or None if it has not been asked yet. It is a signal rather than

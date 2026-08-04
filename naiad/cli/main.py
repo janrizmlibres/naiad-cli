@@ -60,7 +60,7 @@ from naiad.runtime.home import (
     default_queue_root,
     default_runs_root,
 )
-from naiad.runtime.queue import Queue, prune, status_of
+from naiad.runtime.queue import Queue, cancel, prune, status_of
 from naiad.runtime.records import Clears, Turns
 from naiad.runtime.resolve import NoRunError, RunResolver
 from naiad.runtime.run import Run, RunStore
@@ -126,7 +126,7 @@ def main(argv: list[str] | None = None) -> int:
     queue_watch.set_defaults(handler=_queue_watch)
 
     queue_rm = queue_commands.add_parser(
-        "rm", help="remove an Entry, leaving any Run it started alone"
+        "rm", help="remove an Entry, cancelling any Run it started and freeing that session"
     )
     queue_rm.add_argument("entry_id", help="which Entry, as `naiad queue list` names it")
     queue_rm.set_defaults(handler=_queue_rm)
@@ -1001,10 +1001,25 @@ def _start_entry(entry: Entry, predecessor: str | None) -> Run:
 
 
 def _queue_rm(arguments: argparse.Namespace) -> int:
-    """Removes an Entry and nothing else. Any Run it produced, and the session
-    that Run is in, are left exactly as they were: removal is a Queue operation
-    rather than a destructive one."""
-    if not Queue(default_queue_root()).remove(arguments.entry_id):
+    """Removes an Entry and cancels the Run it became (ADR 0036).
+
+    Which Runs are ended and in what order is naiad.runtime.queue's to say;
+    this reports what came back. The Session is named because nothing is typed
+    into it: the agent there learns at its next Protocol verb, from the
+    refusal, and the operator is the one who can go and read what it was doing.
+    """
+    try:
+        cancelled = cancel(
+            Queue(default_queue_root()), RunStore(default_runs_root()), arguments.entry_id
+        )
+    except FAILURES as error:
+        # The ending goes first, so a Run that would not take it leaves the
+        # Entry in the Queue rather than orphaning a Run that still drives its
+        # session.
+        print(f"naiad: {error}", file=sys.stderr)
+        return 2
+
+    if cancelled is None:
         print(
             f"naiad: no entry '{arguments.entry_id}' in the queue at {default_queue_root()}",
             file=sys.stderr,
@@ -1012,7 +1027,24 @@ def _queue_rm(arguments: argparse.Namespace) -> int:
         return 2
 
     print(f"removed {arguments.entry_id}")
+    # Only a Run this act actually ended. An Entry that never started one, and
+    # one whose Run was already over, release no Session — and a line offering
+    # the operator a session in either case would be a claim, not a report.
+    if cancelled.run is not None:
+        print(_cancellation_line(cancelled.run))
     return 0
+
+
+def _cancellation_line(run: Run) -> str:
+    """What was cancelled, and where to go and read what the agent was doing.
+
+    A Run cancelled between its directory being made and its session being
+    recorded has no pane. Offering its session anyway would send the operator
+    looking for one that was never opened.
+    """
+    if run.tmux_pane is None:
+        return f"cancelled run {run.id}; it had no session yet"
+    return f"cancelled run {run.id}; its session at pane {run.tmux_pane} is yours"
 
 
 def _queue_prune(arguments: argparse.Namespace) -> int:

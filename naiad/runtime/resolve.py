@@ -109,7 +109,7 @@ def _ended(run: Run) -> bool:
     State and was never ticked. Taken knowingly (ADR 0035): a Session belongs
     to the agent working in it, and the Queue records what Naiad did.
     """
-    if RunLog(run.root).finished():
+    if RunLog(run.root).ended():
         return True
     try:
         workflow = load_workflow(run.workflow_path)

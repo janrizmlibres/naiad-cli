@@ -206,18 +206,50 @@ def test_an_announcement_that_is_never_delivered_can_still_deviate(log):
     assert [entry.expected for entry in log.deviations()] == ["implement"]
 
 
-def test_a_run_that_has_not_ended_is_not_finished(log):
+def test_a_run_still_under_way_has_not_ended(log):
     log.record_announcement(announcement(seq=1, state="grill"))
 
-    assert log.finished() is False
+    assert log.ended() is False
 
 
-def test_a_run_whose_log_holds_its_ending_is_finished(log):
+def test_a_run_whose_log_holds_its_finish_has_ended(log):
     """What makes finishing final: it is read back rather than remembered, so
     a watch started again over a Run that ended finds nothing to do."""
     log.record(Finish(state="done"), seq=6)
 
-    assert log.finished() is True
+    assert log.ended() is True
+
+
+def test_a_cancelled_run_has_ended(log):
+    """The third witness of an ending, beside the Terminal Announcement and the
+    Finish (ADR 0036). Every reader asks the one question — has this Run ended
+    — so the Session releases and the next Prune takes the orphan."""
+    log.record_cancellation(state="implement")
+
+    assert log.ended() is True
+
+
+def test_a_cancellation_is_its_own_line_saying_where_the_run_stood(log):
+    """Not a 'finished' line: the log must not claim a Finish Naiad never
+    carried out, and a reader six weeks later must be able to tell a Run that
+    completed from one the operator called off."""
+    log.record_announcement(announcement(seq=1, state="implement"))
+    log.record_cancellation(state="implement")
+
+    (_announced, cancelled) = log.entries()
+    assert kinds(log) == ["announced", "cancelled"]
+    assert cancelled.state == "implement"
+    assert "entry" in cancelled.detail
+
+
+def test_a_run_cancelled_before_it_announced_anything_names_no_state(log):
+    """An Entry removed between the session opening and the first Announcement.
+    None rather than a guess, as `previous_state` answers None."""
+    log.record_cancellation(state=None)
+
+    (cancelled,) = log.entries()
+    assert cancelled.state is None
+    assert log.ended() is True
 
 
 def test_where_the_agent_stood_before_an_announcement_is_the_one_before_it(log):
