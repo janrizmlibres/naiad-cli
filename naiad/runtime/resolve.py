@@ -90,19 +90,29 @@ def _ended(run: Run) -> bool:
     clause is the whole difference between a Run that ended and a Run standing
     in its last State waiting to be answered, and a second copy would drift.
 
-    A Workflow that cannot be read loses the answer its source, not the
-    answer. Which State is Terminal cannot be known, so the log line Naiad
-    wrote when it carried out the Finish answers instead. That is one question
-    with a degraded source, and not two ways to be true. The Protocol degrades
-    over the same unreadable file rather than raising (naiad.cli.protocol).
+    The Finish Naiad carried out ends the Run too, and it is asked first
+    because an ending is final "however much the agent says afterwards"
+    (RunLog.finished). The latest Announcement is the only one kept, so an
+    agent that went on announcing past its own ending overwrites the Terminal
+    State that released the Session and takes the Session back. The log line
+    cannot be overwritten. Neither witness is the ending on its own: the
+    Announcement is the earlier one, arriving before any tick and arriving at
+    all when nothing watched the Run; the log line is the durable one.
+
+    A Workflow that cannot be read loses the Announcement its source, not the
+    answer. Which State is Terminal cannot be known, so the log line answers
+    alone. The Protocol degrades over the same unreadable file rather than
+    raising (naiad.cli.protocol).
 
     Not the reading naiad.runtime.queue._run_status takes, which is the log
-    line alone. The two can disagree over a Run that announced its Terminal
+    line alone. The two still part over a Run that announced its Terminal
     State and was never ticked. Taken knowingly (ADR 0035): a Session belongs
     to the agent working in it, and the Queue records what Naiad did.
     """
+    if RunLog(run.root).finished():
+        return True
     try:
         workflow = load_workflow(run.workflow_path)
     except WorkflowError:
-        return RunLog(run.root).finished()
+        return False
     return terminal_state(workflow, Announcements(run.root).latest()) is not None

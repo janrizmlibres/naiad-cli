@@ -152,6 +152,18 @@ def test_an_environment_variable_naming_an_ended_run_falls_back_to_the_session(s
     assert resolver.resolve(tmux_pane="%1").id == "two"
 
 
+def test_a_finished_run_stays_ended_however_much_the_agent_announces_after(store, repo):
+    write_workflow(repo)
+    run = create(store, repo, "one")
+    run.attach_session(tmux_session="a", tmux_pane="%1")
+    Announcements(run.root).announce("done")
+    RunLog(run.root).record(Finish(state="done"), seq=1)
+    Announcements(run.root).ask(Question(text="which?", options=("a", "b")), state="work")
+    resolver = RunResolver(store, environ={})
+
+    assert resolver.resolve(tmux_pane="%1") is None
+
+
 def test_a_workflow_that_cannot_be_read_leaves_the_run_resolving(store, repo):
     run = create(store, repo, "one")
     run.attach_session(tmux_session="a", tmux_pane="%1")
