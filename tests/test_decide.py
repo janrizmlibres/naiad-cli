@@ -123,6 +123,8 @@ def signals(
     cleared=False,
     clear_attempts=0,
     switches=0,
+    belief=None,
+    handed_over=False,
     waiting=False,
     wait_reason=None,
     holding=False,
@@ -147,6 +149,8 @@ def signals(
         cleared=cleared,
         clear_attempts=clear_attempts,
         switches=switches,
+        belief=belief or {},
+        handed_over=handed_over,
         waiting=waiting,
         wait_reason=wait_reason,
         holding=holding,
@@ -187,6 +191,72 @@ def test_the_prompt_follows_once_every_switch_has_been_typed(switched):
         prompt="/grill-with-docs {task}",
         next_states=("spec",),
     )
+
+
+def test_a_state_the_session_already_holds_types_no_switch(switched):
+    """A Switch carries what the Session does not already hold (ADR 0039). The
+    settings are sticky, so re-typing what is there buys nothing and costs the
+    State two Ticks."""
+    action = decide(switched, signals("grill", belief={"model": "opus", "effort": "medium"}))
+
+    assert action == Deliver(
+        state="grill",
+        prompt="/grill-with-docs {task}",
+        next_states=("spec",),
+    )
+
+
+def test_only_the_setting_that_changed_is_typed(switched):
+    """The comparison is per setting rather than over the pair, so a State that
+    moves the Model and keeps the Effort spends one Tick and not two."""
+    held = {"model": "opus", "effort": "medium"}
+
+    assert decide(switched, signals("spec", belief=held)) == Switch(
+        state="spec", setting="model", value="sonnet"
+    )
+    assert decide(switched, signals("spec", switches=1, belief=held)) == Deliver(
+        state="spec",
+        prompt="/to-spec {task}",
+        next_states=("done",),
+    )
+
+
+def test_a_hand_off_to_a_human_types_every_setting_again(switched):
+    """The belief is discarded where a human has had the keyboard, and every
+    setting the State declares goes in again though none of them changed (ADR
+    0039). It is what the narrowing gives up and this gives back: past a Notify
+    is the one moment Naiad knows its belief may be wrong."""
+    held = {"model": "opus", "effort": "medium"}
+
+    assert decide(switched, signals("grill", belief=held, handed_over=True)) == Switch(
+        state="grill", setting="model", value="opus"
+    )
+    assert decide(
+        switched, signals("grill", switches=1, belief=held, handed_over=True)
+    ) == Switch(state="grill", setting="effort", value="medium")
+    assert decide(
+        switched, signals("grill", switches=2, belief=held, handed_over=True)
+    ) == Deliver(
+        state="grill",
+        prompt="/grill-with-docs {task}",
+        next_states=("spec",),
+    )
+
+
+def test_a_hand_off_types_nothing_for_a_state_that_declares_nothing(workflow):
+    """The hand-off discards the belief; it does not invent settings. A file
+    mentioning neither key still leaves the session alone."""
+    action = decide(workflow, signals("grill", handed_over=True))
+
+    assert isinstance(action, Deliver)
+
+
+def test_a_belief_of_the_wrong_value_is_typed_over(switched):
+    """Held is not the same as held correctly: a Session believed to be on one
+    Model still gets the Switch for another."""
+    action = decide(switched, signals("grill", belief={"model": "sonnet", "effort": "medium"}))
+
+    assert action == Switch(state="grill", setting="model", value="opus")
 
 
 def test_a_workflow_without_the_keys_delivers_on_the_first_tick(workflow):

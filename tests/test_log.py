@@ -84,11 +84,113 @@ def test_each_switch_is_its_own_line_before_the_delivery(log):
     log.record(Switch(state="grill", setting="effort", value="high"), seq=1)
     log.record(Deliver(state="grill", prompt="/grill", next_states=("spec",)), seq=1)
 
-    assert [(e.kind, e.detail) for e in log.entries()] == [
-        ("switched", "model: opus"),
-        ("switched", "effort: high"),
-        ("delivered", "next: spec"),
+    assert [(e.kind, e.setting, e.detail) for e in log.entries()] == [
+        ("switched", "model", "opus"),
+        ("switched", "effort", "high"),
+        ("delivered", None, "next: spec"),
     ]
+
+
+def test_the_belief_read_back_is_the_last_settings_typed(log):
+    """What Naiad believes the Session holds is what Naiad last typed into it,
+    and the log is where that is already written down (ADR 0039)."""
+    log.record(Switch(state="grill", setting="model", value="opus"), seq=1)
+    log.record(Switch(state="grill", setting="effort", value="high"), seq=1)
+
+    assert log.belief(announcement(seq=2)) == ({"model": "opus", "effort": "high"}, False)
+
+
+def test_a_later_switch_replaces_an_earlier_one(log):
+    """The belief is the last value typed for a setting, not every value it has
+    ever held."""
+    log.record(Switch(state="grill", setting="model", value="opus"), seq=1)
+    log.record(Switch(state="spec", setting="model", value="sonnet"), seq=2)
+
+    settings, _ = log.belief(announcement(seq=3))
+    assert settings == {"model": "sonnet"}
+
+
+def test_a_notification_reads_as_a_hand_off_to_a_human(log):
+    """A Notify is Naiad telling a human it needs them, and a human at the
+    keyboard may type a /model of their own. What Naiad typed is then evidence
+    of nothing, which is the fact reported here (ADR 0039)."""
+    log.record(Switch(state="grill", setting="model", value="opus"), seq=1)
+    log.record(Notify(reason="state 'review' is a Gate State"), seq=2)
+
+    assert log.belief(announcement(seq=3)) == ({"model": "opus"}, True)
+
+
+def test_a_switch_after_a_notification_answers_the_hand_off(log):
+    """The hand-off is answered by the next Switch typed, not carried for the
+    rest of the Run: what went in after the human had the keyboard is evidence
+    again."""
+    log.record(Notify(reason="state 'review' is a Gate State"), seq=1)
+    log.record(Switch(state="spec", setting="model", value="sonnet"), seq=2)
+
+    assert log.belief(announcement(seq=3)) == ({"model": "sonnet"}, False)
+
+
+def test_an_announcement_between_the_notification_and_the_delivery_keeps_it(log):
+    """Measured from the last Switch rather than from the previous
+    Announcement. Were it the latter, an Announcement arriving between the
+    Notify and the delivery would swallow the hand-off, and the settings a
+    human may have changed would stand for the rest of the Run."""
+    log.record(Switch(state="grill", setting="model", value="opus"), seq=1)
+    log.record(Notify(reason="state 'review' is a Gate State"), seq=2)
+    log.record_announcement(announcement(seq=3, state="spec"))
+
+    _, handed_over = log.belief(announcement(seq=4))
+    assert handed_over is True
+
+
+def test_a_hand_off_within_this_announcement_still_counts(log):
+    """A Notify and a delivery share an Announcement when a Clear looks dropped
+    and the human clears by hand: Naiad notifies at that seq and delivers at it
+    too. Only this Announcement's Switches are excluded, never its Notify, so
+    the delivery that follows still types the settings again."""
+    log.record(Switch(state="grill", setting="model", value="opus"), seq=4)
+    log.record_announcement(announcement(seq=5))
+    log.record(Notify(reason="the clear was not confirmed after 3 tries"), seq=5)
+
+    assert log.belief(announcement(seq=5)) == ({"model": "opus"}, True)
+
+
+def test_this_announcements_own_switches_are_not_read_back(log):
+    """The belief is what the Session held when the Announcement arrived. Were
+    a Switch just typed to count, the sequence would cut itself short — the
+    second setting would read as already held, and never be typed."""
+    log.record(Switch(state="grill", setting="model", value="opus"), seq=2)
+
+    assert log.belief(announcement(seq=2)) == ({}, False)
+
+
+def test_an_adopted_runs_first_delivery_believes_nothing(log):
+    """It answers no Announcement and so is kept against no seq, like its Clear
+    (ADR 0028). Its own Switches are its own to exclude, and there are none
+    before them: Naiad did not open this Session and knows nothing of it."""
+    log.record(Switch(state="spec", setting="model", value="sonnet"), seq=None)
+
+    assert log.belief(None) == ({}, False)
+
+
+def test_the_launch_flags_are_recorded_as_the_switches_they_are(log):
+    """A flag read as the process starts sets the Session as surely as a
+    /model typed into a running one (ADR 0039). How that is spelled in the
+    narrative is this module's business, not the kickoff's."""
+    log.record_launch(state="grill", model="opus", effort="high")
+
+    assert [(e.kind, e.state, e.setting, e.detail) for e in log.entries()] == [
+        ("switched", "grill", "model", "opus"),
+        ("switched", "grill", "effort", "high"),
+    ]
+
+
+def test_a_launch_that_carried_no_flags_records_nothing(log):
+    """A Gate State first delivers nothing, so it launches with neither flag
+    and is believed to hold neither."""
+    log.record_launch(state="review", model=None, effort=None)
+
+    assert log.entries() == []
 
 
 def test_a_retyped_clear_reads_apart_from_the_first_in_the_log(log):

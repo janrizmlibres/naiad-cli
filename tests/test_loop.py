@@ -178,9 +178,32 @@ def test_each_switch_is_typed_on_its_own_tick_ahead_of_the_prompt(run, session):
     assert session.sent[-1] == ("send", "%42", "work, then announce done")
 
 
-def test_the_next_announcement_types_the_switches_again(run, session):
-    """Typed on every delivery, not only on change (ADR 0026): a Switch is
-    still unconfirmed, and re-typing it is the only self-healing there is."""
+# The same States with a Gate among them, so a Notify can be driven rather than
+# written into the log by hand: a Gate State is the hand-off Naiad plans for.
+SWITCHED_WITH_GATE = """
+name = "feature"
+model = "sonnet"
+effort = "medium"
+
+[[states]]
+name = "grill"
+prompt = "work, then announce done"
+model = "opus"
+effort = "high"
+
+[[states]]
+name = "review"
+
+[[states]]
+name = "done"
+terminal = true
+"""
+
+
+def test_the_next_announcement_reuses_what_the_session_holds(run, session):
+    """A Switch carries what the Session does not already hold (ADR 0039). The
+    settings are sticky, so a State asking for the ones already there goes
+    straight to its Prompt rather than spending two Ticks saying so again."""
     keyed = parse_workflow(SWITCHED)
     announce(run, "grill")
     for _ in range(3):
@@ -188,6 +211,26 @@ def test_the_next_announcement_types_the_switches_again(run, session):
 
     announce(run, "grill")
     action = drive(run, keyed, session)
+
+    assert isinstance(action, Deliver)
+    assert session.sent[-1] == ("send", "%42", "work, then announce done")
+
+
+def test_a_notification_makes_the_next_delivery_switch_again(run, session):
+    """A Notify is Naiad telling a human it needs them, and a human at the
+    keyboard may type a /model of their own. Past one the belief is worthless,
+    so the settings go in again whether or not they changed (ADR 0039). It is
+    the only heal left now that a Switch is not typed on every delivery."""
+    gated = parse_workflow(SWITCHED_WITH_GATE)
+    announce(run, "grill")
+    for _ in range(3):
+        drive(run, gated, session)
+
+    announce(run, "review")
+    assert isinstance(drive(run, gated, session), Notify)
+
+    announce(run, "grill")
+    action = drive(run, gated, session)
 
     assert isinstance(action, Switch)
     assert session.sent[-1] == ("send", "%42", "/model opus")

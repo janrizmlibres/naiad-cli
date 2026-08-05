@@ -1,6 +1,7 @@
 import pytest
 
 from naiad.cli.kickoff import attach_run, start_entry, start_run
+from naiad.domain.announcement import Announcement
 from naiad.cli.refusals import MissingSubject
 from naiad.domain.entry import Attachment, Entry
 from naiad.domain.transitions import UnknownState
@@ -41,6 +42,42 @@ def repo(tmp_path):
 @pytest.fixture
 def store(tmp_path):
     return RunStore(tmp_path / "naiad" / "runs")
+
+
+def announcement(seq=1, state="grill"):
+    return Announcement(seq=seq, state=state)
+
+
+# A Workflow whose first State carries both settings — one of its own and one
+# off the file-level default — so what the spawn carried can be told from what
+# the State declares.
+SWITCHED = """
+name = "feature"
+model = "sonnet"
+effort = "medium"
+
+[[states]]
+name = "grill"
+prompt = "/grill-with-docs {task}"
+model = "opus"
+
+[[states]]
+name = "done"
+terminal = true
+"""
+
+# The same, entered at a Gate State: it delivers nothing, so nothing rides.
+GATE_FIRST = """
+name = "feature"
+model = "sonnet"
+
+[[states]]
+name = "review"
+
+[[states]]
+name = "done"
+terminal = true
+"""
 
 
 def start(repo, store, sessions, **overrides):
@@ -142,6 +179,44 @@ def test_the_first_states_model_and_effort_reach_the_spawn(repo, store, sessions
     (spawn,) = sessions.spawned
     assert spawn.model == "opus"
     assert spawn.effort == "medium"
+
+
+def test_the_flags_the_spawn_carried_are_written_to_the_log(repo, store, sessions):
+    """A launch flag sets the Session as surely as a Switch typed into it, so
+    it is written down as one (ADR 0039). Without the lines the belief starts
+    empty, and the Run's second State would type settings the launch had
+    already set."""
+    (repo / "workflow.toml").write_text(SWITCHED)
+
+    run = start(repo, store, sessions)
+
+    assert [(e.kind, e.state, e.setting, e.detail) for e in RunLog(run.root).entries()] == [
+        ("switched", "grill", "model", "opus"),
+        ("switched", "grill", "effort", "medium"),
+    ]
+
+
+def test_a_spawned_runs_second_state_reuses_what_the_launch_set(repo, store, sessions):
+    """What the seeding buys, read the way the tick loop reads it: the flags
+    are the belief every later State is compared against."""
+    (repo / "workflow.toml").write_text(SWITCHED)
+
+    run = start(repo, store, sessions)
+
+    assert RunLog(run.root).belief(announcement(seq=1)) == (
+        {"model": "opus", "effort": "medium"},
+        False,
+    )
+
+
+def test_a_gate_state_first_writes_no_settings_to_the_log(repo, store, sessions):
+    """Nothing rode the spawn, so nothing is believed of the Session: what is
+    recorded is what was set, not what the State declares."""
+    (repo / "workflow.toml").write_text(GATE_FIRST)
+
+    run = start(repo, store, sessions)
+
+    assert RunLog(run.root).entries() == []
 
 
 def test_a_gate_state_first_spawns_without_model_or_effort_flags(repo, store, sessions):

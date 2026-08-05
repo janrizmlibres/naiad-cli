@@ -226,8 +226,10 @@ class Switches:
 
     Kept against the Announcement it belongs to and read as nothing for any
     other, like ClearAttempts and Notices: the next Announcement re-arms it, so
-    every delivery types the State's settings again rather than trusting what an
-    earlier one left in the session.
+    a delivery counts its own Switches from zero however far the delivery before
+    it got. How many it owes at all is another question, and not this one — a
+    Switch carries only what the Session is not believed to hold (ADR 0039),
+    and that belief is read from the Run log.
 
     A count and nothing else. There is no baseline to hold and no landing to
     compare against, because a Switch is never confirmed (ADR 0026) — what the

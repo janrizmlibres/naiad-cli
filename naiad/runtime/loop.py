@@ -96,6 +96,11 @@ def tick(
     waits = Waits(run.root)
     holds = Holds(run.root)
     moment = now if now is not None else time.time()
+    # Read out of the log rather than out of a record of its own, for the reason
+    # `finished` is: every Switch and every Notify is already written there, and
+    # one fact deserves one home (ADR 0039). Both come back from one pass, and
+    # what they mean for a State's Switches is the decision's to say.
+    belief, handed_over = log.belief(announcement)
     # The Wait and Hold counts key the Notices record: a fresh Wait re-arms
     # the nudge allowance the way a fresh Announcement does (ADR 0021), and a
     # fresh Hold re-arms the notification an earlier alarm would otherwise
@@ -128,6 +133,8 @@ def tick(
             cleared=clearing.confirmed(announcement, clears),
             clear_attempts=clearing.attempts(announcement),
             switches=switching.typed(announcement),
+            belief=belief,
+            handed_over=handed_over,
             waiting=waits.waiting(announcement, now=moment),
             wait_reason=waits.reason(announcement),
             holding=holds.holding(announcement),

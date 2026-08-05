@@ -32,6 +32,7 @@ from naiad.domain.decide import (
     Notify,
     Nudge,
     Respond,
+    Setting,
     Switch,
 )
 from naiad.domain.prompt import render_candidates
@@ -71,12 +72,19 @@ class LogLine:
     entry needs to explain itself — the reason for a notification, the Question
     put to the Answerer, the answer sent back.
 
+    setting is set only on a Switch, and names which of the Session's settings
+    was typed; the value it was set to is the detail beside it. A field of its
+    own because it is the one part of the narrative that is read back rather
+    than only read — what a State compares its own settings against — and the
+    rest of this module treats detail as prose for a human and nothing that
+    anything queries. Splitting a value back out of a sentence would make that
+    sentence a format, and one an old Run log could not be trusted to hold.
+
     expected is set only on a Deviation, and names the State the Workflow
     expected instead of the one in state — or, at a fork, every candidate it
     expected, joined into that one string. Deliberately inconsistent with the
-    domain, which is plural throughout: this is a human-readable diagnostic,
-    deviations() only tests whether it is present, and widening the persisted
-    shape would strand existing Run logs for no gain.
+    domain, which is plural throughout: this is a human-readable diagnostic and
+    deviations() only tests whether it is present.
 
     It belongs to an Announcement rather than to the Action taken about it,
     because an Announcement that is never delivered — a jump to a Gate State,
@@ -87,6 +95,7 @@ class LogLine:
     seq: int | None = None
     state: str | None = None
     detail: str | None = None
+    setting: str | None = None
     expected: str | None = None
 
 
@@ -110,6 +119,7 @@ class RunLog:
                 seq=entry.get("seq"),
                 state=entry.get("state"),
                 detail=entry.get("detail"),
+                setting=entry.get("setting"),
                 expected=entry.get("expected"),
             )
             for entry in document
@@ -176,6 +186,53 @@ class RunLog:
         """
         return any(entry.kind == "delivered" and entry.seq is None for entry in self.entries())
 
+    def belief(self, announcement: Announcement | None) -> tuple[dict[str, str], bool]:
+        """What Naiad last typed into the Session, by setting, and whether a
+        human has been handed the keyboard since (ADR 0039).
+
+        The two facts a Switch is decided over, read together in one pass for
+        the reason `Notices.of` returns its pair that way. Both are reports and
+        neither is a rule: what they mean for a State's Switches is
+        naiad.domain.decide's to say (ADR 0004).
+
+        The settings are what Naiad typed rather than what the Session holds,
+        and the gap between those is the point. Claude Code fires no hook on a
+        Switch and reading the session's state back is what ADR 0002 forbids,
+        so what Naiad put there is the only evidence there is. Read back from
+        the log rather than kept as a record of its own, for the reason `ended`
+        and `opened` are: every Switch is already written here, and one fact
+        deserves one home.
+
+        The second is true when a `notified` line follows the last Switch. Every
+        Notify is Naiad telling a human it needs them, and a human at the
+        keyboard may type a `/model` of their own, so past one the settings above
+        are evidence of nothing. Measured from the last Switch rather than from
+        the previous Announcement, so that a second Announcement arriving
+        between the Notify and the delivery cannot swallow it.
+
+        This Announcement's own Switches count for neither, which is what holds
+        both still while they are typed one to a Tick (ADR 0038). Were they
+        counted, the settings would fill in as the sequence ran and the second
+        setting would read as already typed — the Prompt would go out with it
+        never sent — and the hand-off would read as answered by the first
+        Switch of the very delivery it is there to arm. An adopted Run's first
+        delivery answers no Announcement and is kept against no seq, like its
+        Clear (ADR 0028); it can never confuse its own Switches with the
+        seq-less pair `record_launch` writes, because a Run either joins a
+        Session or opens one, and never both.
+        """
+        seq = announcement.seq if announcement is not None else None
+        settings: dict[str, str] = {}
+        handed_over = False
+        for entry in self.entries():
+            if entry.kind == "notified":
+                handed_over = True
+            elif entry.kind == "switched" and entry.seq != seq:
+                if entry.setting is not None and entry.detail is not None:
+                    settings[entry.setting] = entry.detail
+                    handed_over = False
+        return settings, handed_over
+
     def delivered_states(self) -> list[str]:
         """Every State whose Prompt was sent into the session, in order.
 
@@ -184,10 +241,12 @@ class RunLog:
         carrying the branch placeholder has gone out (ADR 0022) — should not
         have to know how a delivery is spelled.
 
-        Kickoff's delivery of the first Prompt is not among them: it happens
-        before the log exists, and the State the Run began at is the Run's own
-        fact to answer with. An adopted Run's first Prompt is among them, since
-        it goes out from the tick loop like every other delivery (ADR 0028).
+        Kickoff's delivery of the first Prompt is not among them: it rides the
+        spawn rather than going out as a delivery, and the State the Run began
+        at is the Run's own fact to answer with. What kickoff does write is the
+        pair of Switches its flags stood for, which are not deliveries either.
+        An adopted Run's first Prompt is among them, since it goes out from the
+        tick loop like every other delivery (ADR 0028).
         """
         return [
             entry.state
@@ -234,12 +293,40 @@ class RunLog:
         """That this Run joined a Session that was already running, rather than
         opening one of its own (ADR 0028).
 
-        The first line of an adopted Run's narrative, written where a spawned
-        Run's log simply begins at its first Announcement: nothing else in the
+        The first line of an adopted Run's narrative, where a spawned Run's
+        begins with the Switches its launch flags stood for: nothing else in the
         Run's record says the session came from somewhere else, and which pane
         it was is what a human reads to find the conversation it landed in.
         """
         self._append(LogLine(kind="adopted", detail=f"attached to pane {pane}"))
+
+    def record_launch(self, *, state: str, model: str | None, effort: str | None) -> None:
+        """What the flags on a spawn set the Session to, written down as the
+        Switches they are (ADR 0039).
+
+        A flag read as the process starts sets the Session as surely as a
+        `/model` typed into a running one, and what every later State compares
+        its own settings against is read back out of this log. A kickoff leaving
+        no line here would have the Run's second State type what the launch had
+        already set, and would leave the log silent about a Session Naiad did
+        configure.
+
+        Written here rather than at the kickoff, like `record_adoption` and
+        `record_branch`: how a Switch is spelled in the narrative is this
+        module's business, and a caller building `Switch` Actions to hand back
+        would be a second place that knows.
+
+        Each flag is recorded only where it was actually carried. A Gate State
+        first delivers nothing, so it launches with neither and is believed to
+        hold neither.
+        """
+        launched: tuple[tuple[Setting, str | None], ...] = (
+            ("model", model),
+            ("effort", effort),
+        )
+        for setting, value in launched:
+            if value is not None:
+                self.record(Switch(state=state, setting=setting, value=value))
 
     def record_branch(self, name: str) -> None:
         """The agent's declaration of the Run's Working branch (ADR 0022).
@@ -331,7 +418,8 @@ def _entry_for(action: Action) -> LogLine | None:
         return LogLine(
             kind="switched",
             state=action.state,
-            detail=f"{action.setting}: {action.value}",
+            setting=action.setting,
+            detail=action.value,
         )
     if isinstance(action, Respond):
         return LogLine(kind="answered", detail=f"{_question(action.question)} -> {action.answer}")
@@ -364,8 +452,15 @@ def _document(entry: LogLine) -> dict[str, object]:
         "seq": entry.seq,
         "state": entry.state,
         "detail": entry.detail,
+        "setting": entry.setting,
         "expected": entry.expected,
     }
 
 
-__all__ = ["ANNOUNCEMENT_KINDS", "ENDING_KINDS", "LOG_FILENAME", "LogLine", "RunLog"]
+__all__ = [
+    "ANNOUNCEMENT_KINDS",
+    "ENDING_KINDS",
+    "LOG_FILENAME",
+    "LogLine",
+    "RunLog",
+]

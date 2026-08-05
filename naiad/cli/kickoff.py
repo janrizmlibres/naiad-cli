@@ -181,24 +181,31 @@ def start_run(
     )
 
     name = session_name(run_id)
-    pane = sessions.spawn(
-        SessionSpec(
-            name=name,
-            cwd=target_repo,
-            claude_session_id=claude_session_id,
-            initial_prompt=opening_prompt,
-            # A Switch precedes Prompt delivery, so a Gate State first — which
-            # delivers nothing — launches without them (ADR 0026).
-            model=None if opening_prompt is None else first.model,
-            effort=None if opening_prompt is None else first.effort,
-            environ={RUN_ID_VARIABLE: run_id},
-        )
+    # Named rather than built inline, because what the launch actually carried
+    # is what the log records below — one source for the flags and for the
+    # belief they seed, so the two cannot come to disagree.
+    spec = SessionSpec(
+        name=name,
+        cwd=target_repo,
+        claude_session_id=claude_session_id,
+        initial_prompt=opening_prompt,
+        # A Switch precedes Prompt delivery, so a Gate State first — which
+        # delivers nothing — launches without them (ADR 0026).
+        model=None if opening_prompt is None else first.model,
+        effort=None if opening_prompt is None else first.effort,
+        environ={RUN_ID_VARIABLE: run_id},
     )
+    pane = sessions.spawn(spec)
     run.attach_session(
         tmux_session=name,
         tmux_pane=pane,
         claude_session_id=claude_session_id,
     )
+    # Read off the spawn rather than off the State, so that what is written down
+    # is what the launch actually carried (ADR 0039). An adopted Run has no
+    # counterpart and needs none: Naiad did not open that Session and knows
+    # nothing of its settings, so its belief starts empty (ADR 0028).
+    RunLog(run.root).record_launch(state=first.name, model=spec.model, effort=spec.effort)
     return run
 
 

@@ -8,7 +8,8 @@ so even the timeouts are decided over a number handed in.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from collections.abc import Mapping
+from dataclasses import dataclass, field
 from typing import Literal
 
 from naiad.domain.announcement import Announcement
@@ -145,8 +146,25 @@ class Signals:
     switches is how many of this State's Switches have been typed, one per tick
     ahead of its Prompt (ADR 0038). A count rather than a flag each, because
     what the rule asks is how far along the sequence is; and per Announcement
-    like the Clear, so every delivery types the State's settings again rather
-    than trusting what an earlier one left.
+    like the Clear, so the next Announcement counts from zero again.
+
+    belief and handed_over are the two facts a Switch is decided over (ADR
+    0039). belief is what Naiad last typed into the Session, by setting, and is
+    what a State's own settings are compared against — so a State asking for
+    what is already there spends no Tick on it. handed_over says a human has
+    been given the keyboard since that was typed.
+
+    A belief and not a reading: Claude Code fires no hook on a Switch, and
+    reading the session back is what ADR 0002 forbids, so what Naiad put there
+    is the only evidence there is. handed_over is when that evidence is worth
+    nothing — past a Notify a human may have typed a `/model` of their own, and
+    Naiad cannot know — which is why it is carried beside the belief rather
+    than folded into it: emptying the belief where it is read would put the
+    rule in the reader (ADR 0004).
+
+    Both are facts about the Run rather than the current Announcement, and
+    nothing re-arms them: what the Session holds does not change because the
+    agent spoke again.
     """
 
     announcement: Announcement | None
@@ -162,6 +180,8 @@ class Signals:
     cleared: bool = False
     clear_attempts: int = 0
     switches: int = 0
+    belief: Mapping[str, str] = field(default_factory=dict)
+    handed_over: bool = False
     waiting: bool = False
     wait_reason: str | None = None
     holding: bool = False
@@ -500,7 +520,7 @@ def _owed(
         # it waits on a turn ending (ADR 0019).
         return _clear(signals, state.name)
 
-    pending = _switches(state)
+    pending = _switches(state, signals.belief, handed_over=signals.handed_over)
     if signals.switches < len(pending):
         # One Switch a tick, the Prompt behind them. The session drops whatever
         # arrives while it is handling a slash command, so typing the two
@@ -568,12 +588,27 @@ def _clear(signals: Signals, state_name: str) -> Action:
     )
 
 
-def _switches(state: State) -> tuple[Switch, ...]:
+def _switches(
+    state: State, belief: Mapping[str, str], *, handed_over: bool
+) -> tuple[Switch, ...]:
     """The Switches this State owes its session, in the order they are typed.
 
     Built from the settings the State actually has rather than from a fixed
     pair, so a Workflow naming one key does not spend a tick on the other, and
     one naming neither goes straight to its Prompt as it always did.
+
+    Narrowed again to the ones the Session is not believed to hold already
+    (ADR 0039). The settings are sticky, so a State asking for what is there
+    buys nothing by asking twice and pays two Ticks for it. Compared per
+    setting rather than over the pair, so a State moving one of the two spends
+    one Tick and not both.
+
+    A hand-off to a human discards the belief entirely, and every setting the
+    State declares is typed again. That is what the narrowing gives up and this
+    gives back: ADR 0026 bought the healing of a dropped Switch with an
+    every-delivery retype, and past a Notify is the one moment Naiad knows its
+    belief may be wrong — because a human has had the keyboard, and may have
+    set the Model themselves.
 
     The order is the declaration's — Model, then Effort — and carries no
     meaning: neither setting depends on the other, and the sequence exists to
@@ -587,6 +622,7 @@ def _switches(state: State) -> tuple[Switch, ...]:
         Switch(state=state.name, setting=setting, value=value)
         for setting, value in named
         if value is not None
+        if handed_over or belief.get(setting) != value
     )
 
 
@@ -617,6 +653,7 @@ __all__ = [
     "Nudge",
     "Opening",
     "Respond",
+    "Setting",
     "Signals",
     "Switch",
     "decide",
