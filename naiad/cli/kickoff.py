@@ -187,7 +187,7 @@ def start_run(
             cwd=target_repo,
             claude_session_id=claude_session_id,
             initial_prompt=opening_prompt,
-            # The switches ride Prompt delivery, so a Gate State first — which
+            # A Switch precedes Prompt delivery, so a Gate State first — which
             # delivers nothing — launches without them (ADR 0026).
             model=None if opening_prompt is None else first.model,
             effort=None if opening_prompt is None else first.effort,

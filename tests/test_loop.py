@@ -20,6 +20,7 @@ from naiad.domain.decide import (
     Notify,
     Nudge,
     Respond,
+    Switch,
 )
 from naiad.domain.question import Question
 from naiad.domain.workflow import parse_workflow
@@ -143,36 +144,53 @@ def test_an_announcement_with_a_turn_ended_delivers_the_prompt_into_the_pane(
     ]
 
 
-def test_the_states_model_and_effort_are_typed_ahead_of_the_prompt(run, session):
-    """The switches ride Prompt delivery, typed on every delivery (ADR 0026):
-    each is its own send, because the session reads a slash command only at the
-    start of a message."""
-    keyed = parse_workflow(
-        """
-        name = "feature"
-        model = "sonnet"
-        effort = "medium"
+SWITCHED = """
+name = "feature"
+model = "sonnet"
+effort = "medium"
 
-        [[states]]
-        name = "grill"
-        prompt = "work, then announce done"
-        model = "opus"
-        effort = "high"
+[[states]]
+name = "grill"
+prompt = "work, then announce done"
+model = "opus"
+effort = "high"
 
-        [[states]]
-        name = "done"
-        terminal = true
-        """
-    )
+[[states]]
+name = "done"
+terminal = true
+"""
+
+
+def test_each_switch_is_typed_on_its_own_tick_ahead_of_the_prompt(run, session):
+    """One send a tick (ADR 0038). The session discards whatever arrives while
+    it is handling a slash command, so the two Switches and the Prompt are three
+    ticks rather than three sends."""
+    keyed = parse_workflow(SWITCHED)
     announce(run, "grill")
 
     drive(run, keyed, session)
+    assert session.sent == [("send", "%42", "/model opus")]
 
-    assert session.sent == [
-        ("send", "%42", "/model opus"),
-        ("send", "%42", "/effort high"),
-        ("send", "%42", "work, then announce done"),
-    ]
+    drive(run, keyed, session)
+    assert session.sent[-1] == ("send", "%42", "/effort high")
+
+    drive(run, keyed, session)
+    assert session.sent[-1] == ("send", "%42", "work, then announce done")
+
+
+def test_the_next_announcement_types_the_switches_again(run, session):
+    """Typed on every delivery, not only on change (ADR 0026): a Switch is
+    still unconfirmed, and re-typing it is the only self-healing there is."""
+    keyed = parse_workflow(SWITCHED)
+    announce(run, "grill")
+    for _ in range(3):
+        drive(run, keyed, session)
+
+    announce(run, "grill")
+    action = drive(run, keyed, session)
+
+    assert isinstance(action, Switch)
+    assert session.sent[-1] == ("send", "%42", "/model opus")
 
 
 def test_the_subject_reaches_the_pane_in_the_delivered_prompt(run, workflow, session):
@@ -401,34 +419,21 @@ def test_the_prompt_an_adoption_was_owed_is_delivered_once_however_often_it_tick
     assert len(session.sent) == 1
 
 
-def test_the_adopted_states_model_and_effort_are_typed_ahead_of_that_prompt(
-    adopted, session
-):
-    """An adopted Run has no launch for the switches to ride as flags, so the
-    first delivery is where they arrive (ADR 0026)."""
-    keyed = parse_workflow(
-        """
-        name = "feature"
-        model = "sonnet"
-        effort = "medium"
-
-        [[states]]
-        name = "grill"
-        prompt = "work, then announce done"
-        model = "opus"
-
-        [[states]]
-        name = "done"
-        terminal = true
-        """
-    )
+def test_an_adopted_runs_switches_take_a_tick_each_like_any_others(adopted, session):
+    """An adopted Run has no launch for the Switches to ride as flags, so the
+    ticks before its first delivery are where they arrive (ADR 0026, 0038).
+    Their count is kept against no seq, as its Clear is: nothing has been
+    announced yet."""
+    keyed = parse_workflow(SWITCHED)
     end_turn(adopted)
 
+    drive(adopted, keyed, session)
+    drive(adopted, keyed, session)
     drive(adopted, keyed, session)
 
     assert session.sent == [
         ("send", "%7", "/model opus"),
-        ("send", "%7", "/effort medium"),
+        ("send", "%7", "/effort high"),
         ("send", "%7", "work, then announce done"),
     ]
 

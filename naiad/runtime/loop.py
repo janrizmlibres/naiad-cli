@@ -26,6 +26,7 @@ from naiad.domain.decide import (
     Opening,
     Respond,
     Signals,
+    Switch,
     decide,
 )
 from naiad.domain.announcement import Announcement
@@ -44,6 +45,7 @@ from naiad.runtime.records import (
     Handled,
     Holds,
     Notices,
+    Switches,
     Turns,
     Waits,
     idle_seconds,
@@ -89,6 +91,7 @@ def tick(
     consultations = Consultations(run.root)
     clears = Clears(run.root)
     clearing = ClearAttempts(run.root)
+    switching = Switches(run.root)
     answers = AnswerLog(run.root)
     waits = Waits(run.root)
     holds = Holds(run.root)
@@ -124,6 +127,7 @@ def tick(
             finished=log.ended(),
             cleared=clearing.confirmed(announcement, clears),
             clear_attempts=clearing.attempts(announcement),
+            switches=switching.typed(announcement),
             waiting=waits.waiting(announcement, now=moment),
             wait_reason=waits.reason(announcement),
             holding=holds.holding(announcement),
@@ -144,16 +148,18 @@ def tick(
         # (ADR 0028).
         session.clear(_pane(run))
         clearing.record_attempt(announcement, landed=clears.count())
+    elif isinstance(action, Switch):
+        # One of the State's settings, and only one: the Prompt and the other
+        # Switch follow on later ticks, because the session discards whatever
+        # arrives while it is handling a slash command (ADR 0038). Nothing is
+        # waited for here — the tick interval is the pause, which is what keeps
+        # this loop free of a sleep that would stall every other Lane.
+        #
+        # Recorded so the next tick knows how far the sequence got. Kept against
+        # no seq for an adopted Run's first delivery, exactly as its Clear is.
+        session.send(_pane(run), f"/{action.setting} {action.value}")
+        switching.record_typed(announcement)
     elif isinstance(action, Deliver):
-        # The State's model and effort are typed ahead of its Prompt, each switch as its
-        # own send because a slash command is read only at the start of a
-        # message — and on every delivery, not only on change, so a switch the
-        # terminal dropped earlier is healed by the next one. Best-effort:
-        # nothing confirms it, by decision rather than omission (ADR 0026).
-        if action.model is not None:
-            session.send(_pane(run), f"/model {action.model}")
-        if action.effort is not None:
-            session.send(_pane(run), f"/effort {action.effort}")
         session.send(
             _pane(run),
             render_prompt(

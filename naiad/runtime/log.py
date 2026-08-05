@@ -23,7 +23,17 @@ from dataclasses import dataclass, replace
 from pathlib import Path
 
 from naiad.domain.announcement import Announcement
-from naiad.domain.decide import Action, Clear, Consult, Deliver, Finish, Notify, Nudge, Respond
+from naiad.domain.decide import (
+    Action,
+    Clear,
+    Consult,
+    Deliver,
+    Finish,
+    Notify,
+    Nudge,
+    Respond,
+    Switch,
+)
 from naiad.domain.prompt import render_candidates
 from naiad.domain.question import Question
 from naiad.runtime.atomic import write_atomically
@@ -312,6 +322,16 @@ def _entry_for(action: Action) -> LogLine | None:
             kind="cleared",
             state=action.state,
             detail=f"attempt {action.attempt}" if action.attempt > 1 else None,
+        )
+    if isinstance(action, Switch):
+        # What was typed, not what took: a Switch is never confirmed (ADR 0026),
+        # so the line records Naiad's side of it and no more. Worth a line at
+        # all because a State that ran at the wrong price is diagnosed from
+        # here — the log is the only place the sequence is written down.
+        return LogLine(
+            kind="switched",
+            state=action.state,
+            detail=f"{action.setting}: {action.value}",
         )
     if isinstance(action, Respond):
         return LogLine(kind="answered", detail=f"{_question(action.question)} -> {action.answer}")

@@ -8,7 +8,17 @@ into one another, and the Deviation naming both States.
 import pytest
 
 from naiad.domain.announcement import Announcement
-from naiad.domain.decide import NOTHING, Clear, Consult, Deliver, Finish, Notify, Nudge, Respond
+from naiad.domain.decide import (
+    NOTHING,
+    Clear,
+    Consult,
+    Deliver,
+    Finish,
+    Notify,
+    Nudge,
+    Respond,
+    Switch,
+)
 from naiad.domain.question import Question
 from naiad.runtime.log import RunLog
 
@@ -63,6 +73,21 @@ def test_a_clear_is_recorded_as_its_own_line_before_the_delivery(log):
     assert [(e.kind, e.state) for e in log.entries()] == [
         ("cleared", "implement"),
         ("delivered", "implement"),
+    ]
+
+
+def test_each_switch_is_its_own_line_before_the_delivery(log):
+    """A Switch is never confirmed (ADR 0026), so the log is the only record
+    that it was typed at all — and the only place a State that ran at the wrong
+    price can be diagnosed from (ADR 0038)."""
+    log.record(Switch(state="grill", setting="model", value="opus"), seq=1)
+    log.record(Switch(state="grill", setting="effort", value="high"), seq=1)
+    log.record(Deliver(state="grill", prompt="/grill", next_states=("spec",)), seq=1)
+
+    assert [(e.kind, e.detail) for e in log.entries()] == [
+        ("switched", "model: opus"),
+        ("switched", "effort: high"),
+        ("delivered", "next: spec"),
     ]
 
 

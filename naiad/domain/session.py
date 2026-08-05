@@ -31,9 +31,13 @@ class SessionSpec:
     have until the hooks arrive. Handing the Prompt over at spawn needs no such
     signal.
 
-    model and effort are the first State's, riding at launch as flags
-    for the same reason the first Prompt does: the switches ride Prompt
-    delivery, and at spawn delivery happens on the command line (ADR 0026).
+    model and effort are the first State's, riding at launch as flags for the
+    same reason the first Prompt does: a Switch precedes Prompt delivery, and at
+    spawn delivery happens on the command line (ADR 0026). Kickoff is therefore
+    the one entrance that spends no Tick on them and cannot lose one — the flags
+    are read as the process starts, where a session in mid-conversation drops
+    what arrives while it is handling a slash command (ADR 0038).
+
     None when the delivering State has neither key — a Gate State first among
     them, which delivers nothing and so carries nothing.
     """

@@ -20,6 +20,7 @@ from naiad.domain.decide import (
     Opening,
     Respond,
     Signals,
+    Switch,
     decide,
 )
 from naiad.domain.question import Question
@@ -74,6 +75,34 @@ def branching():
     return parse_workflow(BRANCHING)
 
 
+# A Workflow whose States carry both Switches, so the order they are typed in
+# can be read off the ticks.
+SWITCHED = """
+name = "feature"
+
+model = "sonnet"
+effort = "medium"
+
+[[states]]
+name = "grill"
+prompt = "/grill-with-docs {task}"
+model = "opus"
+
+[[states]]
+name = "spec"
+prompt = "/to-spec {task}"
+
+[[states]]
+name = "done"
+terminal = true
+"""
+
+
+@pytest.fixture
+def switched():
+    return parse_workflow(SWITCHED)
+
+
 QUESTION = Question(text="Which module owns retries?", options=("the client", "the caller"))
 
 
@@ -93,6 +122,7 @@ def signals(
     subject=None,
     cleared=False,
     clear_attempts=0,
+    switches=0,
     waiting=False,
     wait_reason=None,
     holding=False,
@@ -116,6 +146,7 @@ def signals(
         finished=finished,
         cleared=cleared,
         clear_attempts=clear_attempts,
+        switches=switches,
         waiting=waiting,
         wait_reason=wait_reason,
         holding=holding,
@@ -133,19 +164,51 @@ def test_an_unhandled_announcement_with_a_turn_ended_delivers_that_states_prompt
     )
 
 
-def test_delivery_carries_the_states_model_and_effort(workflow):
-    """The switches ride Prompt delivery (ADR 0026): the decision hands the
-    loop the State's effective model and effort beside the Prompt itself."""
-    keyed = parse_workflow(
+def test_the_model_is_switched_before_the_prompt(switched):
+    """Each Switch is its own Action on its own tick (ADR 0038). The session
+    discards whatever arrives while it is handling a slash command, so a Switch
+    and the Prompt behind it cannot be typed in one go."""
+    action = decide(switched, signals("grill"))
+
+    assert action == Switch(state="grill", setting="model", value="opus")
+
+
+def test_the_effort_is_switched_on_the_tick_after_the_model(switched):
+    action = decide(switched, signals("grill", switches=1))
+
+    assert action == Switch(state="grill", setting="effort", value="medium")
+
+
+def test_the_prompt_follows_once_every_switch_has_been_typed(switched):
+    action = decide(switched, signals("grill", switches=2))
+
+    assert action == Deliver(
+        state="grill",
+        prompt="/grill-with-docs {task}",
+        next_states=("spec",),
+    )
+
+
+def test_a_workflow_without_the_keys_delivers_on_the_first_tick(workflow):
+    """No Switch to type is no tick spent: a file mentioning neither key leaves
+    the session's settings alone, and its delivery is what it always was."""
+    action = decide(workflow, signals("grill"))
+
+    assert isinstance(action, Deliver)
+
+
+def test_a_state_with_one_switch_spends_one_tick_on_it():
+    """The sequence is built from the Switches a State actually has, so a file
+    naming one key does not spend a tick waiting for the other."""
+    model_only = parse_workflow(
         """
         name = "feature"
+
         model = "sonnet"
-        effort = "medium"
 
         [[states]]
         name = "grill"
         prompt = "/grill-with-docs {task}"
-        model = "opus"
 
         [[states]]
         name = "done"
@@ -153,23 +216,39 @@ def test_delivery_carries_the_states_model_and_effort(workflow):
         """
     )
 
-    action = decide(keyed, signals("grill"))
-
-    assert action == Deliver(
-        state="grill",
-        prompt="/grill-with-docs {task}",
-        next_states=("done",),
-        model="opus",
-        effort="medium",
+    assert decide(model_only, signals("grill")) == Switch(
+        state="grill", setting="model", value="sonnet"
+    )
+    assert decide(model_only, signals("grill", switches=1)) == Deliver(
+        state="grill", prompt="/grill-with-docs {task}", next_states=("done",)
     )
 
 
-def test_delivery_of_a_workflow_without_the_keys_carries_none(workflow):
-    action = decide(workflow, signals("grill"))
+def test_a_clearing_state_clears_before_it_switches():
+    """The Clear keeps its place at the head of delivery (ADR 0019): it is the
+    one step confirmed rather than spaced, and nothing follows it until the
+    SessionStart hook says the context is gone."""
+    clearing = parse_workflow(
+        """
+        name = "feature"
 
-    assert isinstance(action, Deliver)
-    assert action.model is None
-    assert action.effort is None
+        model = "sonnet"
+
+        [[states]]
+        name = "implement"
+        prompt = "/implement"
+        clear = true
+
+        [[states]]
+        name = "done"
+        terminal = true
+        """
+    )
+
+    assert decide(clearing, signals("implement")) == Clear(state="implement", attempt=1)
+    assert decide(clearing, signals("implement", cleared=True)) == Switch(
+        state="implement", setting="model", value="sonnet"
+    )
 
 
 def test_delivery_carries_the_announcements_subject(workflow):
@@ -312,35 +391,22 @@ def test_the_prompt_an_adoption_is_owed_waits_for_a_turn_to_end(workflow):
     assert decide(workflow, owed) is NOTHING
 
 
-def test_the_adopted_states_model_and_effort_ride_that_delivery(workflow):
-    """The switches ride Prompt delivery wherever it happens (ADR 0026). A
-    spawned Run wears them as flags on its launch; an adopted Run has no launch,
-    so the first delivery is where they arrive."""
-    keyed = parse_workflow(
-        """
-        name = "feature"
-        model = "sonnet"
-        effort = "medium"
+def test_an_adoption_types_its_switches_before_that_prompt(switched):
+    """The Switches precede Prompt delivery wherever it happens (ADR 0026, 0038).
+    A spawned Run wears them as flags on its launch; an adopted Run has no
+    launch, so the ticks before its first delivery are where they arrive."""
+    action = decide(switched, signals(None, opening=Opening(state="spec")))
 
-        [[states]]
-        name = "spec"
-        prompt = "/to-spec {task}"
-        model = "opus"
+    assert action == Switch(state="spec", setting="model", value="sonnet")
 
-        [[states]]
-        name = "done"
-        terminal = true
-        """
-    )
 
-    action = decide(keyed, signals(None, opening=Opening(state="spec")))
+def test_an_adoption_delivers_once_its_switches_are_typed(switched):
+    action = decide(switched, signals(None, opening=Opening(state="spec"), switches=2))
 
     assert action == Deliver(
         state="spec",
         prompt="/to-spec {task}",
         next_states=("done",),
-        model="opus",
-        effort="medium",
     )
 
 

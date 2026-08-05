@@ -29,6 +29,7 @@ NOTICES_FILENAME = "notices.json"
 CONSULTATIONS_FILENAME = "consultations.json"
 CLEARS_FILENAME = "clears.json"
 CLEAR_ATTEMPTS_FILENAME = "clearattempts.json"
+SWITCHES_FILENAME = "switches.json"
 WAITS_FILENAME = "waits.json"
 HOLDS_FILENAME = "holds.json"
 
@@ -43,6 +44,7 @@ SIGNAL_FILENAMES = (
     CONSULTATIONS_FILENAME,
     CLEARS_FILENAME,
     CLEAR_ATTEMPTS_FILENAME,
+    SWITCHES_FILENAME,
     WAITS_FILENAME,
     HOLDS_FILENAME,
     METADATA_FILENAME,
@@ -215,6 +217,34 @@ class ClearAttempts:
         _write(
             self.path,
             {"seq": _seq(announcement), "baseline": baseline, "attempts": attempts + 1},
+        )
+
+
+class Switches:
+    """How many of a State's Switches the loop has typed for the current
+    Announcement (ADR 0038).
+
+    Kept against the Announcement it belongs to and read as nothing for any
+    other, like ClearAttempts and Notices: the next Announcement re-arms it, so
+    every delivery types the State's settings again rather than trusting what an
+    earlier one left in the session.
+
+    A count and nothing else. There is no baseline to hold and no landing to
+    compare against, because a Switch is never confirmed (ADR 0026) — what the
+    count buys is a tick between one Switch and the next, which is the whole of
+    what the session needs.
+    """
+
+    def __init__(self, run_root: Path) -> None:
+        self.path = Path(run_root) / SWITCHES_FILENAME
+
+    def typed(self, announcement: Announcement | None) -> int:
+        return int(_current(self.path, announcement).get("typed", 0) or 0)
+
+    def record_typed(self, announcement: Announcement | None) -> None:
+        _write(
+            self.path,
+            {"seq": _seq(announcement), "typed": self.typed(announcement) + 1},
         )
 
 
@@ -498,6 +528,7 @@ __all__ = [
     "Handled",
     "Holds",
     "Notices",
+    "Switches",
     "Turns",
     "Waits",
     "idle_seconds",

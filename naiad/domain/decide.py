@@ -9,6 +9,7 @@ so even the timeouts are decided over a number handed in.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import Literal
 
 from naiad.domain.announcement import Announcement
 from naiad.domain.answerer import Consultation, Escalated
@@ -140,6 +141,12 @@ class Signals:
     are facts about the current Announcement, like nudges, and the next one
     re-arms them, so a State whose Clear was dropped is a fresh handshake from
     the State after it.
+
+    switches is how many of this State's Switches have been typed, one per tick
+    ahead of its Prompt (ADR 0038). A count rather than a flag each, because
+    what the rule asks is how far along the sequence is; and per Announcement
+    like the Clear, so every delivery types the State's settings again rather
+    than trusting what an earlier one left.
     """
 
     announcement: Announcement | None
@@ -154,6 +161,7 @@ class Signals:
     finished: bool = False
     cleared: bool = False
     clear_attempts: int = 0
+    switches: int = 0
     waiting: bool = False
     wait_reason: str | None = None
     holding: bool = False
@@ -173,6 +181,37 @@ class Clear:
 
     state: str
     attempt: int
+
+
+# The settings a Switch can carry, by the name the session's command takes.
+Setting = Literal["model", "effort"]
+
+
+@dataclass(frozen=True)
+class Switch:
+    """Type one of this State's settings into the session, ahead of its Prompt
+    and one to a tick (ADR 0038).
+
+    setting is what the session calls it and value is the State's effective one.
+    The pair is carried rather than two Actions, because the two settings differ
+    in nothing a rule cares about: they are one judgment about the phase's work
+    (ADR 0026), and the session merely takes them as two commands.
+
+    The setting is spelled as a closed set while the value stays an opaque
+    string, and the asymmetry is the point: what the session calls its commands
+    is Naiad's own vocabulary, where what names a model is the session's to
+    judge and any list Naiad kept would rot (ADR 0026).
+
+    A first-class Action for the reason Clear is one: what has been typed and
+    what is left is the decision's business, so the loop keeps no rule of its
+    own (ADR 0004). Unlike a Clear it is never confirmed and never re-typed
+    within one Announcement — it stays the best-effort switch ADR 0026 chose,
+    with the Ticks between doing the work a confirmation would have done.
+    """
+
+    state: str
+    setting: Setting
+    value: str
 
 
 @dataclass(frozen=True)
@@ -198,18 +237,16 @@ class Deliver:
     carried through unread so the Prompt can name it after the Clear has
     discarded the context that chose it (ADR 0009).
 
-    model and effort are the State's effective values, typed as `/model` and
-    `/effort` ahead of the Prompt on every delivery — the switches ride
-    delivery, which is why they live here and not in a separate Action, and
-    why a Gate State never gets one (ADR 0026). None means the Workflow file
-    mentions the key nowhere and the session's settings are left alone."""
+    The State's Model and Effort are not here. Each is typed on its own tick
+    ahead of this one, as a Switch, because the session discards what arrives
+    while it is handling a slash command (ADR 0038). Reaching this Action says
+    both were typed, and no more than that: whether either took is what ADR 0026
+    declines to find out."""
 
     state: str
     prompt: str
     next_states: tuple[str, ...]
     subject: str | None = None
-    model: str | None = None
-    effort: str | None = None
 
 
 @dataclass(frozen=True)
@@ -284,7 +321,7 @@ class Nothing:
 
 NOTHING = Nothing()
 
-Action = Clear | Consult | Deliver | Finish | Notify | Nudge | Respond | Nothing
+Action = Clear | Consult | Deliver | Finish | Notify | Nudge | Respond | Switch | Nothing
 
 
 def decide(workflow: Workflow, signals: Signals, *, skip_gates: bool = False) -> Action:
@@ -463,13 +500,20 @@ def _owed(
         # it waits on a turn ending (ADR 0019).
         return _clear(signals, state.name)
 
+    pending = _switches(state)
+    if signals.switches < len(pending):
+        # One Switch a tick, the Prompt behind them. The session drops whatever
+        # arrives while it is handling a slash command, so typing the two
+        # settings and the Prompt in one go loses one of the three (ADR 0038).
+        # The Ticks between are the whole of the fix: nothing is confirmed, and
+        # nothing needs to be.
+        return pending[signals.switches]
+
     return Deliver(
         state=state.name,
         prompt=state.prompt,
         next_states=resolve_next_states(workflow, state.name, skip_gates=skip_gates),
         subject=subject,
-        model=state.model,
-        effort=state.effort,
     )
 
 
@@ -524,6 +568,28 @@ def _clear(signals: Signals, state_name: str) -> Action:
     )
 
 
+def _switches(state: State) -> tuple[Switch, ...]:
+    """The Switches this State owes its session, in the order they are typed.
+
+    Built from the settings the State actually has rather than from a fixed
+    pair, so a Workflow naming one key does not spend a tick on the other, and
+    one naming neither goes straight to its Prompt as it always did.
+
+    The order is the declaration's — Model, then Effort — and carries no
+    meaning: neither setting depends on the other, and the sequence exists to
+    put a tick between them rather than to sequence the settings themselves.
+    """
+    named: tuple[tuple[Setting, str | None], ...] = (
+        ("model", state.model),
+        ("effort", state.effort),
+    )
+    return tuple(
+        Switch(state=state.name, setting=setting, value=value)
+        for setting, value in named
+        if value is not None
+    )
+
+
 def _notify(signals: Signals, reason: str, *, question: Question | None = None) -> Action:
     """Notification is once per Announcement, not once per tick. Every
     condition reaching here persists with identical signals until a human acts,
@@ -552,6 +618,7 @@ __all__ = [
     "Opening",
     "Respond",
     "Signals",
+    "Switch",
     "decide",
     "terminal_state",
 ]

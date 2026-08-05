@@ -182,8 +182,6 @@ On that reminder, check whether the review has completed. Completed: announce re
 # ADR 0016, 0017
 [[states]]
 name = "review-fix"
-model = "fable"
-effort = "medium"
 clear = true
 prompt = """
 /fix-review the Claude Code Review posted on the open pull request for this branch — fetch its findings from the pull request.
