@@ -1130,25 +1130,23 @@ def test_an_unattended_run_tells_the_two_kinds_of_gate_state_apart(workflow):
     assert next_states(workflow, "diagnose") == ("no-repro", "pull-request")
 
 
-# The effective model and effort each State runs on (ADR 0026): read straight
-# off the file, default already applied, which is the legibility the ADR buys.
-# The file's split: classification and the implement loop step off the default
-# onto opus at high effort, and every other State — Gate States included —
-# reads as the file-level fable/medium default.
+# The effective model and effort each State runs on: read straight off the
+# file, default already applied. This file declares the pair once at the top
+# and on no State, so the whole chain runs at opus and high effort.
 MODELS = {
     "classify": ("opus", "high"),
-    "diagnose": ("fable", "medium"),
-    "no-repro": ("fable", "medium"),
-    "grill": ("fable", "medium"),
-    "review": ("fable", "medium"),
-    "spec": ("fable", "medium"),
-    "tickets": ("fable", "medium"),
+    "diagnose": ("opus", "high"),
+    "no-repro": ("opus", "high"),
+    "grill": ("opus", "high"),
+    "review": ("opus", "high"),
+    "spec": ("opus", "high"),
+    "tickets": ("opus", "high"),
     "implement": ("opus", "high"),
-    "triage": ("fable", "medium"),
-    "handover": ("fable", "medium"),
-    "pull-request": ("fable", "medium"),
-    "review-fix": ("fable", "medium"),
-    "done": ("fable", "medium"),
+    "triage": ("opus", "high"),
+    "handover": ("opus", "high"),
+    "pull-request": ("opus", "high"),
+    "review-fix": ("opus", "high"),
+    "done": ("opus", "high"),
 }
 
 
@@ -1156,20 +1154,23 @@ def test_every_state_declares_the_model_and_effort_its_work_earns(workflow):
     assert {state.name: (state.model, state.effort) for state in workflow.states} == MODELS
 
 
-def test_the_triage_state_takes_the_file_default_rather_than_naming_it(workflow):
-    """The table above reads the effective pair, with the default already
-    applied (ADR 0026), so it cannot tell a State that declares `fable` from one
-    that inherits it. This reads the file itself.
+def test_no_state_restates_the_file_level_pair(workflow):
+    """The table above cannot tell a file-level default from a State's silence:
+    the parser applies the one to the other before a State is built. This reads
+    the file itself.
 
-    `triage` inherits deliberately. `diagnose` is its closest analogue — one
-    item, read the code, form a judgment, write it down — and it takes the
-    default, as `spec` and `tickets` do. Stepping off it is for sustained volume
-    (docs/workflow-authoring.md), which one ticket's triage is not."""
+    Every State takes the default, so none names either key — a State declares
+    a setting only where it changes one (docs/workflow-authoring.md). The
+    default carries the choice rather than the first State, because an Entry
+    may name the State it starts at: `batches/marketing-hub-bugs.toml` enters
+    at `diagnose`, and a pair declared on `classify` would never reach it
+    (ADR 0040)."""
     declared = tomllib.loads(WORKFLOW_PATH.read_text())
-    table = next(state for state in declared["states"] if state["name"] == "triage")
 
-    assert "model" not in table
-    assert "effort" not in table
+    assert (declared["model"], declared["effort"]) == ("opus", "high")
+    assert not [
+        state["name"] for state in declared["states"] if "model" in state or "effort" in state
+    ]
 
 
 def test_the_answerer_declares_its_model_and_effort(workflow):

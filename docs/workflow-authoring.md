@@ -68,21 +68,27 @@ These are tuning rather than decisions. Change them when the work changes.
 
 ### Models and effort
 
-The file sets `fable` at `medium` effort as its file-level default. A
-file-level default is required here, because States in the file declare their
-own (ADR 0026).
+The file declares `opus` at `high` effort as its file-level default, and no
+State names either key. The whole chain runs on that pair.
 
-Most of this chain is the work the top model does well without deep thought.
-Two States step off the default and run `opus` at `high` effort: `classify`
-and the `implement` loop. For those two, sustained volume matters more than
-the top model's edge.
+It is the default that carries the choice, and not the first State, though
+one declaration on `classify` would reach every State a Run walks from there.
+An Entry may name the State it starts at: `batches/marketing-hub-bugs.toml`
+enters at `diagnose`, because the operator has already made the judgement
+`classify` exists to make. A pair declared on `classify` would never reach
+those Runs, and they would take the platform's own setting with nothing in
+this file to say so. A default reaches every State however a Run enters
+(ADR 0040).
 
 ### The Answerer
 
-The `[answerer]` table runs at the same default. The Answerer replies from the
-Run's own record rather than reasoning fresh. Naiad invokes it on every
-Question, so its cost recurs. This file takes that recurring spend at the
-default rather than discounting it.
+The `[answerer]` table declares `fable` at `medium` effort. It has to declare
+something to run on either, because a headless session starts clean each time
+and inherits nothing the States set.
+
+The Answerer replies from the Run's own record rather than reasoning fresh.
+Naiad invokes it on every Question, so its cost recurs. This file discounts
+that recurring spend where it does not discount the States'.
 
 The `fallback` key is the Answerer's alone. ADR 0031 gives the reasoning and
 the syntax.
