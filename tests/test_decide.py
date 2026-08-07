@@ -267,6 +267,41 @@ def test_a_workflow_without_the_keys_delivers_on_the_first_tick(workflow):
     assert isinstance(action, Deliver)
 
 
+def test_a_state_declaring_nothing_types_nothing_and_keeps_what_is_there():
+    """Absence is no opinion (ADR 0040). `spec` declares neither key and no
+    file-level default stands under it, so it types no Switch and runs on the
+    opus/high `grill` left in the Session.
+
+    The second half is the consequence that ADR 0040 accepts: the belief is
+    discarded, and `spec` still types nothing. A Notify re-types what a State
+    declares, so it reaches a State that declares nothing not at all — which is
+    the sticky behaviour asked for, and why a State wanting its own says so."""
+    inherits = parse_workflow(
+        """
+        name = "feature"
+
+        [[states]]
+        name = "grill"
+        prompt = "/grill-with-docs {task}"
+        model = "opus"
+        effort = "high"
+
+        [[states]]
+        name = "spec"
+        prompt = "/to-spec {task}"
+
+        [[states]]
+        name = "done"
+        terminal = true
+        """
+    )
+    held = {"model": "opus", "effort": "high"}
+    delivered = Deliver(state="spec", prompt="/to-spec {task}", next_states=("done",))
+
+    assert decide(inherits, signals("spec", belief=held)) == delivered
+    assert decide(inherits, signals("spec", belief=held, handed_over=True)) == delivered
+
+
 def test_a_state_with_one_switch_spends_one_tick_on_it():
     """The sequence is built from the Switches a State actually has, so a file
     naming one key does not spend a tick waiting for the other."""

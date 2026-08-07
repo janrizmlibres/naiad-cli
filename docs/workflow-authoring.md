@@ -47,6 +47,14 @@ Naiad injects the Protocol into every fresh context. This includes each
 context a Clearing State creates. A Prompt that repeats the Protocol adds a
 second copy to maintain.
 
+### A State declares a setting only where it changes one
+
+The Session keeps its Model and its Effort until something changes them. A
+State that declares neither runs on what the State before it set, and Naiad
+types nothing for it. So declare a setting where a phase needs a different one,
+and nowhere else. A file-level default is optional, and a State's own key
+overrides it. ADR 0040 gives the reasoning.
+
 ### A branching State writes its successors out
 
 `{next_state}` renders every candidate as one joined phrase. Use the

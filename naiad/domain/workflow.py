@@ -31,10 +31,11 @@ class State:
     clear: bool = False
     terminal: bool = False
     next_candidates: tuple[str, ...] = ()
-    # The effective Model and Effort, file-level default already applied — what
-    # a State runs on is readable here with no walk back to the file's top.
-    # None only when the file mentions the key nowhere, which is what lets
-    # delivery leave the session's settings alone (ADR 0026).
+    # The Model and Effort this State asks for, file-level default already
+    # applied. None where neither the State nor the file names the key, which
+    # is what lets delivery leave the session's settings alone (ADR 0026) and
+    # what makes a State's silence an absent opinion rather than a value to
+    # find (ADR 0040).
     model: str | None = None
     effort: str | None = None
 
@@ -48,9 +49,10 @@ class State:
 class Workflow:
     name: str
     states: tuple[State, ...]
-    # The Answerer's model and effort, passed as flags on its headless invocation. No
-    # required-default rule applies: a headless session starts clean every
-    # time, so absence has no stickiness to be ambiguous about (ADR 0026).
+    # The Answerer's model and effort, passed as flags on its headless
+    # invocation. Absence means no opinion here as it does on a State, but
+    # resolves elsewhere: a headless session starts clean every time, so it
+    # inherits nothing and the platform's own default answers (ADR 0040).
     answerer_model: str | None = None
     answerer_effort: str | None = None
     # Models the platform may degrade to when the Answerer's is unavailable,
@@ -183,20 +185,12 @@ def _parse_state(
     if not isinstance(successors, list) or not all(isinstance(s, str) for s in successors):
         raise bad("next must be a list of state names")
 
-    # A State's own key without a file-level default is refused, because a
-    # model set in the session is sticky: the States declaring nothing would
-    # mean "whatever the previous State left behind", an order-dependent
-    # surprise nobody chose (ADR 0026). Effort is refused identically.
+    # A State's own key needs no file-level default beneath it. Absence is no
+    # opinion: the State gets None, delivery types no Switch, and it runs on
+    # what the session holds — the previous State's setting, since a session's
+    # settings are sticky (ADR 0040). Effort behaves identically.
     own_model = _optional_string(raw, "model", bad)
-    if own_model is not None and default_model is None:
-        raise reject(
-            f"state '{name}' declares a model but the workflow has no file-level model default"
-        )
     own_effort = _optional_string(raw, "effort", bad)
-    if own_effort is not None and default_effort is None:
-        raise reject(
-            f"state '{name}' declares an effort but the workflow has no file-level effort default"
-        )
 
     return State(
         name=name,

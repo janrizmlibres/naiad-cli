@@ -114,6 +114,37 @@ def test_a_workflow_mentioning_neither_key_gives_every_state_none():
     assert workflow.state("grill").effort is None
 
 
+def test_a_state_may_declare_a_setting_with_no_file_level_default():
+    """Absence is no opinion rather than an error (ADR 0040). A State declaring
+    nothing gets None, so delivery types no Switch and the State runs on what
+    the Session holds — which stickiness makes the Model the State before it
+    set."""
+    workflow = parse_workflow(
+        """
+        name = "w"
+
+        [[states]]
+        name = "a"
+        prompt = "x"
+        model = "opus"
+        effort = "high"
+
+        [[states]]
+        name = "b"
+        prompt = "y"
+
+        [[states]]
+        name = "done"
+        terminal = true
+        """
+    )
+
+    assert workflow.state("a").model == "opus"
+    assert workflow.state("a").effort == "high"
+    assert workflow.state("b").model is None
+    assert workflow.state("b").effort is None
+
+
 def test_model_and_effort_default_independently():
     workflow = parse_workflow(
         """
@@ -242,16 +273,6 @@ def test_a_workflow_without_an_answerer_table_has_no_answerer_opinion():
             'name = "w"\n[[states]]\nname = "a"\nprompt = 3\n[[states]]\nname = "b"\nterminal = true',
             "state 'a': prompt must be a string",
             id="bad prompt type",
-        ),
-        pytest.param(
-            'name = "w"\n[[states]]\nname = "a"\nmodel = "opus"\n[[states]]\nname = "b"\nterminal = true',
-            "state 'a' declares a model but the workflow has no file-level model default",
-            id="state model without file default",
-        ),
-        pytest.param(
-            'name = "w"\n[[states]]\nname = "a"\neffort = "high"\n[[states]]\nname = "b"\nterminal = true',
-            "state 'a' declares an effort but the workflow has no file-level effort default",
-            id="state effort without file default",
         ),
         pytest.param(
             'name = "w"\nmodel = 3\n[[states]]\nname = "b"\nterminal = true',
