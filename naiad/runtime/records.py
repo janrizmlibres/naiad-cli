@@ -33,6 +33,10 @@ SWITCHES_FILENAME = "switches.json"
 WAITS_FILENAME = "waits.json"
 HOLDS_FILENAME = "holds.json"
 
+# Beside the Entry in the queue directory, under the Entry's id. Not `.json`,
+# which the Queue reads as an Entry file (ADR 0042).
+ENTRY_TURNS_SUFFIX = ".turns"
+
 # Every file whose writing means something happened. The Run's own metadata is
 # among them so that a Run which has produced no signal at all is idle since it
 # started rather than since the epoch.
@@ -146,6 +150,42 @@ class Turns:
             return True
         after = document.get("after_seq")
         return isinstance(after, int) and after >= announcement.seq
+
+
+class EntryTurns:
+    """A Turn end that arrived before an Adoption's Run existed, kept beside
+    the Entry that will become it (ADR 0042).
+
+    Written by the Stop hook alone, in its own file rather than on the Entry,
+    so the hook and the Supervisor's attach never race over one rewrite. The
+    filename deliberately does not end in `.json`: everything so named in the
+    queue directory is read as an Entry.
+    """
+
+    def __init__(self, queue_root: Path, entry_id: str) -> None:
+        self.path = Path(queue_root) / f"{entry_id}{ENTRY_TURNS_SUFFIX}"
+
+    def record_end(self) -> None:
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        _write(self.path, {"count": self.count() + 1})
+
+    def count(self) -> int:
+        count = _read(self.path).get("count")
+        return count if isinstance(count, int) else 0
+
+    def relocate_into(self, run_root: Path) -> None:
+        """Move the record into the Run at attach — a move rather than a copy,
+        so the fact keeps one home (ADR 0013).
+
+        Write-if-absent: a Stop that fired after the Run was created wrote a
+        fresher record there already, and the sidecar is then deleted unread.
+        The opening only ever asks whether the count is above zero, so no merge
+        is owed (ADR 0042)."""
+        count = self.count()
+        turns = Turns(run_root)
+        if count and not turns.path.exists():
+            _write(turns.path, {"after_seq": None, "count": count})
+        self.path.unlink(missing_ok=True)
 
 
 class Clears:
@@ -527,6 +567,7 @@ __all__ = [
     "ClearAttempts",
     "Clears",
     "Consultations",
+    "EntryTurns",
     "Handled",
     "Holds",
     "Notices",

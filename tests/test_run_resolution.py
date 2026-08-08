@@ -1,10 +1,11 @@
 import pytest
 
 from naiad.domain.decide import Finish
+from naiad.domain.entry import Attachment, Entry
 from naiad.domain.question import Question
 from naiad.runtime.announcements import Announcements
 from naiad.runtime.log import RunLog
-from naiad.runtime.resolve import RUN_ID_VARIABLE, RunResolver
+from naiad.runtime.resolve import RUN_ID_VARIABLE, RunResolver, turn_recipient
 from naiad.runtime.run import RunStore
 
 WORKFLOW = """
@@ -181,3 +182,89 @@ def test_a_workflow_that_cannot_be_read_falls_back_to_the_log(store, repo):
     resolver = RunResolver(store, environ={})
 
     assert resolver.resolve(tmux_pane="%1") is None
+
+
+def waiting_entry(entry_id, *, pane=None, claude_session_id=None, run_id=None, repo=None):
+    """An adopted Entry in the gap: queued, claiming a Session, its Run not
+    started yet unless a run_id says otherwise (ADR 0042)."""
+    return Entry(
+        id=entry_id,
+        workflow_path=repo / "w.toml",
+        task="t",
+        target_repo=repo,
+        working_branch=None,
+        created_at="2026-08-08T07:52:54Z",
+        attachment=(
+            Attachment(tmux_pane=pane, claude_session_id=claude_session_id) if pane else None
+        ),
+        run_id=run_id,
+    )
+
+
+def test_a_live_run_receives_the_turn_before_any_entry(store, repo):
+    run = create(store, repo, "one")
+    run.attach_session(tmux_session="a", tmux_pane="%1")
+    entry = waiting_entry("e1", pane="%1", repo=repo)
+
+    recipient = turn_recipient(
+        RunResolver(store, environ={}), [entry], tmux_pane="%1"
+    )
+
+    assert recipient.id == "one"
+
+
+def test_the_entry_awaiting_attachment_receives_the_turn_when_no_run_answers(store, repo):
+    """The adopting turn ends before the Supervisor's pass creates the Run;
+    the ending belongs to the Entry that will become it (ADR 0042)."""
+    entry = waiting_entry("e1", pane="%1", repo=repo)
+
+    recipient = turn_recipient(RunResolver(store, environ={}), [entry], tmux_pane="%1")
+
+    assert recipient.id == "e1"
+
+
+def test_an_entry_whose_run_exists_is_past_its_gap(store, repo):
+    """Once the Run is recorded on the Entry it is resolvable by pane, and an
+    ended one has released the Session (ADR 0035) — either way the Entry no
+    longer stands in for it."""
+    entry = waiting_entry("e1", pane="%1", run_id="one", repo=repo)
+
+    assert turn_recipient(RunResolver(store, environ={}), [entry], tmux_pane="%1") is None
+
+
+def test_an_entry_claiming_another_pane_does_not_receive_the_turn(store, repo):
+    entry = waiting_entry("e1", pane="%1", repo=repo)
+
+    assert turn_recipient(RunResolver(store, environ={}), [entry], tmux_pane="%2") is None
+
+
+def test_a_spawned_entry_never_receives_a_turn(store, repo):
+    entry = waiting_entry("e1", repo=repo)
+
+    assert turn_recipient(RunResolver(store, environ={}), [entry], tmux_pane="%1") is None
+
+
+def test_the_first_waiting_entry_claiming_the_pane_receives_the_turn(store, repo):
+    """Queue order is id order; the earlier Entry is the next Run for the pane."""
+    later = waiting_entry("e2", pane="%1", repo=repo)
+    earlier = waiting_entry("e1", pane="%1", repo=repo)
+
+    recipient = turn_recipient(
+        RunResolver(store, environ={}), [later, earlier], tmux_pane="%1"
+    )
+
+    assert recipient.id == "e1"
+
+
+def test_the_claude_session_id_is_the_entrys_second_key(store, repo):
+    entry = waiting_entry("e1", pane="%1", claude_session_id="sess-abc", repo=repo)
+
+    recipient = turn_recipient(
+        RunResolver(store, environ={}), [entry], claude_session_id="sess-abc"
+    )
+
+    assert recipient.id == "e1"
+
+
+def test_no_run_and_no_entry_leaves_the_turn_unrecorded(store, repo):
+    assert turn_recipient(RunResolver(store, environ={}), [], tmux_pane="%1") is None

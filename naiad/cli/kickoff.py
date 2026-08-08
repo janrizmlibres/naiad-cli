@@ -30,6 +30,7 @@ from naiad.domain.prompt import render_prompt
 from naiad.domain.session import SessionSpec, session_name
 from naiad.domain.transitions import next_states
 from naiad.runtime.log import RunLog
+from naiad.runtime.records import EntryTurns
 from naiad.runtime.resolve import RUN_ID_VARIABLE
 from naiad.runtime.run import Run, RunStore
 
@@ -54,6 +55,9 @@ def start_entry(
     predecessor: str | None,
     store: RunStore,
     sessions: Sessions,
+    # Where the Entry came from, so a Turn end the Stop hook left beside it
+    # through an Adoption's gap moves into the Run being made (ADR 0042).
+    queue_root: Path,
     run_id: str,
     claude_session_id: str,
     created_at: str,
@@ -75,7 +79,7 @@ def start_entry(
     an Entry stands on is resolved when it starts (ADR 0015).
     """
     if entry.attachment is not None:
-        return attach_run(
+        run = attach_run(
             workflow_path=entry.workflow_path,
             task=entry.task,
             target_repo=entry.target_repo,
@@ -90,6 +94,11 @@ def start_entry(
             skip_gates=entry.skip_gates,
             subject=entry.subject,
         )
+        # After the session is joined rather than before the Run exists, so a
+        # Stop firing during this pass finds the Run by its pane and the move
+        # below finds the fresher record already there (ADR 0042).
+        EntryTurns(queue_root, entry.id).relocate_into(run.root)
+        return run
     return start_run(
         workflow_path=entry.workflow_path,
         task=entry.task,

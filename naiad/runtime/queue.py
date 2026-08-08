@@ -28,7 +28,7 @@ from naiad.runtime.announcements import Announcements
 from naiad.runtime.atomic import write_atomically
 from naiad.runtime.home import StorageError, refuse_inside_repository
 from naiad.runtime.log import RunLog
-from naiad.runtime.records import Notices, Waits
+from naiad.runtime.records import EntryTurns, Notices, Waits
 from naiad.runtime.run import Run, RunStore
 
 ENTRY_SUFFIX = ".json"
@@ -105,11 +105,16 @@ class Queue:
         Run (ADR 0029) and a removal by name cancels it (ADR 0036). False when
         there was no such Entry, so that the caller can say so rather than
         guess.
+
+        A Turn end recorded beside the Entry through an Adoption's gap goes
+        with it (ADR 0042): the sidecar is the Entry's, and left behind it
+        would wait for a Run that will never come.
         """
         try:
             self._path(entry_id).unlink()
         except FileNotFoundError:
             return False
+        EntryTurns(self.root, entry_id).path.unlink(missing_ok=True)
         return True
 
     def _path(self, entry_id: str) -> Path:

@@ -15,9 +15,10 @@ this session', and the Session is free for the Run that adopts it next.
 
 from __future__ import annotations
 
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Mapping, Sequence
 
 from naiad.domain.decide import terminal_state
+from naiad.domain.entry import Entry
 from naiad.domain.workflow import WorkflowError, load_workflow
 from naiad.runtime.announcements import Announcements
 from naiad.runtime.log import RunLog
@@ -75,6 +76,38 @@ class RunResolver:
             if predicate(run) and not _ended(run):
                 return run
         return None
+
+
+def turn_recipient(
+    resolver: RunResolver,
+    entries: Sequence[Entry],
+    *,
+    tmux_pane: str | None = None,
+    claude_session_id: str | None = None,
+) -> Run | Entry | None:
+    """Who a Turn end belongs to: the live Run, or the Entry that will become
+    one (ADR 0042).
+
+    The second question the seam answers, and answered here so the order is
+    fixed in one place: a live Run by the session's keys first, and only then
+    a queued Entry awaiting attachment to the same Session. The Entry stands in
+    for its Run only through the gap — once a Run is recorded on it the Run is
+    resolvable by pane, and an ended one has released the Session (ADR 0035) —
+    and only the first such Entry in Queue order, because that is the next Run
+    for the pane. With neither, the Turn end belongs to nobody and is not
+    recorded, which is what keeps the hooks installable machine-wide.
+    """
+    run = resolver.resolve(tmux_pane=tmux_pane, claude_session_id=claude_session_id)
+    if run is not None:
+        return run
+    for entry in sorted(entries, key=lambda entry: entry.id):
+        if entry.run_id is not None or entry.attachment is None:
+            continue
+        if tmux_pane and entry.attachment.tmux_pane == tmux_pane:
+            return entry
+        if claude_session_id and entry.attachment.claude_session_id == claude_session_id:
+            return entry
+    return None
 
 
 def _ended(run: Run) -> bool:

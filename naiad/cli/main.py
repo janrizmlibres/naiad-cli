@@ -62,8 +62,8 @@ from naiad.runtime.home import (
     default_runs_root,
 )
 from naiad.runtime.queue import Queue, cancel, prune, status_of
-from naiad.runtime.records import Clears, Turns
-from naiad.runtime.resolve import NoRunError, RunResolver
+from naiad.runtime.records import Clears, EntryTurns, Turns
+from naiad.runtime.resolve import NoRunError, RunResolver, turn_recipient
 from naiad.runtime.run import Run, RunStore
 from naiad.skills.install import DEFAULT_SKILLS_ROOT, install_adopt_skill
 
@@ -434,13 +434,40 @@ def _branch(arguments: argparse.Namespace) -> int:
 
 def _stopped(arguments: argparse.Namespace) -> int:
     """The Stop hook. Hooks are installed independently of any Run, so finding
-    no Run attached is ordinary and must not be reported as a failure."""
-    run = _attached_run()
-    if run is None:
-        return 0
+    no Run attached is ordinary and must not be reported as a failure.
 
-    latest = Announcements(run.root).latest()
-    Turns(run.root).record_end(latest_seq=latest.seq if latest else None)
+    A Turn ending through an Adoption's gap — the Entry queued, its Run not
+    created yet — lands beside the Entry instead of nowhere, so the opening
+    delivery it gates is not waited on for a signal that already came and went
+    (ADR 0042). Who it belongs to is the resolution seam's one answer, not two
+    checks composed here.
+
+    Guarded rather than left to raise, unlike every command: a queue file the
+    operator damaged is a command's refusal to report, and this hook fires on
+    every turn end in every session on the machine."""
+    resolver = RunResolver(RunStore(default_runs_root()), os.environ)
+    pane = os.environ.get("TMUX_PANE")
+    try:
+        recipient = turn_recipient(resolver, Queue(default_queue_root()).all(), tmux_pane=pane)
+        if recipient is None:
+            return 0
+        if isinstance(recipient, Entry):
+            sidecar = EntryTurns(default_queue_root(), recipient.id)
+            sidecar.record_end()
+            # The attach may have run between the resolution above and this
+            # write, and its relocation found no sidecar to move. Resolving
+            # again closes the interleaving: a Run answering for the pane now
+            # existed before that relocation, so whichever side acted last
+            # performs the same move (ADR 0042).
+            raced = resolver.resolve(tmux_pane=pane)
+            if raced is not None:
+                sidecar.relocate_into(raced.root)
+            return 0
+
+        latest = Announcements(recipient.root).latest()
+        Turns(recipient.root).record_end(latest_seq=latest.seq if latest else None)
+    except FAILURES as error:
+        print(f"naiad: {error}", file=sys.stderr)
     return 0
 
 
@@ -1019,6 +1046,7 @@ def _start_entry(entry: Entry, predecessor: str | None) -> Run:
         predecessor=predecessor,
         store=RunStore(default_runs_root()),
         sessions=TmuxSessions(),
+        queue_root=default_queue_root(),
         run_id=_run_id(started, entry.workflow_path),
         claude_session_id=str(uuid.uuid4()),
         created_at=_timestamp(started),

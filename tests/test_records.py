@@ -7,6 +7,7 @@ from naiad.domain.decide import WAIT_BUDGET_SECONDS, WAIT_DEFAULT_SECONDS
 from naiad.runtime.records import (
     ClearAttempts,
     Clears,
+    EntryTurns,
     Handled,
     Holds,
     Notices,
@@ -316,6 +317,63 @@ def test_a_nudge_counts_as_a_signal_so_the_next_one_is_a_full_period_later(tmp_p
     notices.record_nudge(GRILL)
 
     assert idle_seconds(tmp_path, now=_mtime(notices.path)) == pytest.approx(0, abs=0.01)
+
+
+def test_no_turn_has_ended_while_an_entry_waits_to_become_a_run(tmp_path):
+    assert EntryTurns(tmp_path, "20260808-adopt-1").count() == 0
+
+
+def test_a_turn_ending_in_the_gap_is_counted_against_the_entry(tmp_path):
+    """The adopting turn ends before the Supervisor's pass creates the Run, so
+    the ending is recorded against the Entry that will become it (ADR 0042)."""
+    EntryTurns(tmp_path, "20260808-adopt-1").record_end()
+
+    assert EntryTurns(tmp_path, "20260808-adopt-1").count() == 1
+
+
+def test_relocation_seeds_the_runs_turns_and_takes_the_sidecar(tmp_path):
+    queue_root = tmp_path / "queue"
+    run_root = tmp_path / "runs" / "r1"
+    run_root.mkdir(parents=True)
+    sidecar = EntryTurns(queue_root, "20260808-adopt-1")
+    sidecar.record_end()
+    sidecar.record_end()
+
+    sidecar.relocate_into(run_root)
+
+    assert Turns(run_root).count() == 2
+    assert Turns(run_root).ended_since(None) is True
+    assert not sidecar.path.exists()
+
+
+def test_relocation_never_overwrites_what_the_run_already_heard(tmp_path):
+    """A Stop that fired after the Run was created wrote a fresher record into
+    the run root; the sidecar is then deleted unread (ADR 0042)."""
+    queue_root = tmp_path / "queue"
+    run_root = tmp_path / "runs" / "r1"
+    run_root.mkdir(parents=True)
+    Turns(run_root).record_end(latest_seq=None)
+    sidecar = EntryTurns(queue_root, "20260808-adopt-1")
+    sidecar.record_end()
+    sidecar.record_end()
+    sidecar.record_end()
+
+    sidecar.relocate_into(run_root)
+
+    assert Turns(run_root).count() == 1
+    assert not sidecar.path.exists()
+
+
+def test_relocating_an_absent_sidecar_seeds_nothing(tmp_path):
+    """An ordinary Adoption whose turn had not yet ended: the Run's opening
+    waits for the Stop hook, exactly as before."""
+    queue_root = tmp_path / "queue"
+    run_root = tmp_path / "runs" / "r1"
+    run_root.mkdir(parents=True)
+
+    EntryTurns(queue_root, "20260808-adopt-1").relocate_into(run_root)
+
+    assert Turns(run_root).ended_since(None) is False
 
 
 def test_no_clear_has_landed_before_the_hook_fires(tmp_path):

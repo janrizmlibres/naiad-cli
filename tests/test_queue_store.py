@@ -26,7 +26,7 @@ from naiad.runtime.queue import (
     prune,
     status_of,
 )
-from naiad.runtime.records import Notices, Waits
+from naiad.runtime.records import EntryTurns, Notices, Waits
 from naiad.runtime.run import RunStore
 
 
@@ -646,3 +646,21 @@ def test_cancelling_an_entry_that_is_not_there_answers_nothing(queue, runs, repo
     """False from `remove` in a different shape: the caller says so rather than
     guessing, and no Run is touched on the way."""
     assert cancel(queue, runs, "no-such-entry") is None
+
+
+def test_removing_an_entry_takes_its_turn_sidecar_with_it(queue, repo):
+    """The sidecar is owned by the Entry's lifecycle: an Entry removed before
+    its Run started leaves no record waiting for a Run that will never come
+    (ADR 0042)."""
+    added = queue.add(entry(repo))
+    EntryTurns(queue.root, added.id).record_end()
+
+    assert queue.remove(added.id) is True
+    assert not EntryTurns(queue.root, added.id).path.exists()
+
+
+def test_a_turn_sidecar_beside_an_entry_is_not_read_as_an_entry(queue, repo):
+    added = queue.add(entry(repo))
+    EntryTurns(queue.root, added.id).record_end()
+
+    assert [found.id for found in queue.all()] == [added.id]

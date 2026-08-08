@@ -7,6 +7,7 @@ from naiad.domain.entry import Attachment, Entry
 from naiad.domain.transitions import UnknownState
 from naiad.domain.workflow import WorkflowError
 from naiad.runtime.log import RunLog
+from naiad.runtime.records import EntryTurns, Turns
 from naiad.runtime.resolve import RUN_ID_VARIABLE, RunResolver
 from naiad.runtime.run import RunStore
 
@@ -538,12 +539,13 @@ def test_a_refused_adoption_creates_no_run_and_attaches_nothing(repo, store, ses
 # Run meets its session.
 
 
-def test_an_attach_marked_entry_becomes_a_run_that_joined_its_session(repo, store, sessions):
+def test_an_attach_marked_entry_becomes_a_run_that_joined_its_session(repo, store, sessions, tmp_path):
     run = start_entry(
         _entry(repo, attachment=Attachment(tmux_pane="%7")),
         predecessor=None,
         store=store,
         sessions=sessions,
+        queue_root=tmp_path / "naiad" / "queue",
         run_id="20260719-120000-feature",
         claude_session_id="11111111-1111-1111-1111-111111111111",
         created_at="2026-07-19T12:00:00Z",
@@ -554,12 +556,13 @@ def test_an_attach_marked_entry_becomes_a_run_that_joined_its_session(repo, stor
     assert sessions.spawned == []
 
 
-def test_an_ordinary_entry_becomes_a_run_with_a_session_of_its_own(repo, store, sessions):
+def test_an_ordinary_entry_becomes_a_run_with_a_session_of_its_own(repo, store, sessions, tmp_path):
     run = start_entry(
         _entry(repo),
         predecessor="MC-AGENT-8000",
         store=store,
         sessions=sessions,
+        queue_root=tmp_path / "naiad" / "queue",
         run_id="20260719-120000-feature",
         claude_session_id="11111111-1111-1111-1111-111111111111",
         created_at="2026-07-19T12:00:00Z",
@@ -569,6 +572,47 @@ def test_an_ordinary_entry_becomes_a_run_with_a_session_of_its_own(repo, store, 
     assert run.predecessor == "MC-AGENT-8000"
     assert sessions.attached == []
     assert len(sessions.spawned) == 1
+
+
+def test_a_turn_that_ended_in_the_gap_is_waiting_in_the_run_it_gated(
+    repo, store, sessions, tmp_path
+):
+    """The adopting turn ended before this pass created the Run; the sidecar
+    the Stop hook left beside the Entry is relocated so the opening delivery
+    finds the turn end it waits for (ADR 0042)."""
+    queue_root = tmp_path / "naiad" / "queue"
+    EntryTurns(queue_root, "20260719-115900-feature").record_end()
+
+    run = start_entry(
+        _entry(repo, attachment=Attachment(tmux_pane="%7")),
+        predecessor=None,
+        store=store,
+        sessions=sessions,
+        queue_root=queue_root,
+        run_id="20260719-120000-feature",
+        claude_session_id="11111111-1111-1111-1111-111111111111",
+        created_at="2026-07-19T12:00:00Z",
+    )
+
+    assert Turns(run.root).ended_since(None) is True
+    assert not EntryTurns(queue_root, "20260719-115900-feature").path.exists()
+
+
+def test_an_adoption_whose_turn_has_not_ended_still_waits_for_the_hook(
+    repo, store, sessions, tmp_path
+):
+    run = start_entry(
+        _entry(repo, attachment=Attachment(tmux_pane="%7")),
+        predecessor=None,
+        store=store,
+        sessions=sessions,
+        queue_root=tmp_path / "naiad" / "queue",
+        run_id="20260719-120000-feature",
+        claude_session_id="11111111-1111-1111-1111-111111111111",
+        created_at="2026-07-19T12:00:00Z",
+    )
+
+    assert Turns(run.root).ended_since(None) is False
 
 
 def _entry(repo, **overrides):
