@@ -5,8 +5,6 @@ name = "matt-pocock"
 
 # Every State, however a Run enters this file — an Entry may name the State it
 # starts at, and a batch of known bugs starts at `diagnose` (ADR 0040).
-model = "opus"
-effort = "high"
 
 # ADR 0026, 0031
 [answerer]
@@ -14,23 +12,27 @@ model = "fable"
 effort = "medium"
 fallback = "opus,sonnet"
 
-# ADR 0005
+# ADR 0005, 0041
 [[states]]
 name = "classify"
+model = "opus"
+effort = "high"
 next = ["grill", "diagnose"]
 prompt = """
 Decide what kind of work the following task is, then announce where it starts.
 
 {task}
 
-Read it, and read as much of the codebase as you need to answer that one question — no further, and change nothing. The criterion is what the task asks of the repository. If it asks for behaviour the repository does not have yet, or for behaviour it has to change on purpose, it is a feature: announce grill. If it reports the repository already doing something other than what it intends, it is a bug: announce diagnose. A task that describes a symptom rather than an outcome is a bug.
+Read as much of the codebase as you need to answer that one question. The criterion is what the task asks of the repository. If it asks for behaviour the repository does not have yet, or for behaviour it has to change on purpose, it is a feature: announce grill. If it reports the repository already doing something other than what it intends, it is a bug: announce diagnose. A task that describes a symptom rather than an outcome is a bug.
 
-Say in a sentence which it is and why, then announce grill or diagnose. Do no other work.
+Say in a sentence which it is and why, then announce grill or diagnose.
 """
 
 # ADR 0008, 0015, 0022
 [[states]]
 name = "diagnose"
+model = "fable"
+effort = "medium"
 clear = true
 next = ["no-repro", "pull-request"]
 prompt = """
@@ -49,9 +51,9 @@ If it does not exist, choose what to base it on before you create it, then creat
 
 If the task above, or an issue it links to, names an image — a screenshot of the failure, a stack-trace grab, a broken screen — fetch it with `gh` or this repository's GitHub MCP server and Read it before you form a hypothesis, since a fault you can see is not one to reconstruct from prose.
 
-Run the discipline end to end — through the fix, its regression test, the instrumentation cleanup and the post-mortem — rather than stopping at the diagnosis.
+Do not stop at the diagnosis. Implement the fix immediately.
 
-If you cannot build a feedback loop at all, do not hypothesise without one: say so in the session, list what you tried and what you need, and announce no-repro. Otherwise, when the fix is in place with its regression test and the working tree is clean, announce pull-request.
+If you cannot build a feedback loop at all, do not hypothesise without one: say so in the session, list what you tried and what you need, and announce no-repro. Otherwise, when the fix is in place, announce pull-request.
 """
 
 # ADR 0007, 0008
@@ -62,6 +64,8 @@ next = ["pull-request"]
 # ADR 0015, 0022
 [[states]]
 name = "grill"
+model = "fable"
+effort = "medium"
 clear = true
 prompt = """
 /grill-with-docs {task}
@@ -86,66 +90,64 @@ When the interview is finished and its ADRs and glossary entries are written, an
 [[states]]
 name = "review"
 
-# ADR 0033
+# ADR 0033, 0041
 [[states]]
 name = "spec"
 prompt = """
 /to-spec
 
-Decide the seams on your own judgement and carry straight on to writing the spec. Do not stop to have them confirmed and do not raise them as a question. Record the seams you chose, and any you rejected, in the spec's Testing Decisions section, so that the choice is reviewed where the rest of the spec is reviewed.
-
-When the spec is published to the tracker, announce {next_state}.
+After writing the spec, announce {next_state}.
 """
 
-# ADR 0010, 0033
+# ADR 0010, 0033, 0041
 [[states]]
 name = "tickets"
 next = ["implement", "handover"]
 prompt = """
 /to-tickets
 
-Publish each ticket with a Status: line reading ready-for-agent, which is what marks it implementable unattended. Mark a ticket ready-for-human only where the work genuinely cannot be done by an agent — credentials, external spend, or a business judgment the repository cannot settle — and say in that ticket why.
-
-When every ticket is published with its blocking edges declared, announce {next_state}, passing the file of the lowest-numbered ticket that is ready-for-agent and blocked by nothing as the subject. If no ticket qualifies, announce handover with the lowest-numbered one as the subject instead, and say which status you found.
+After writing the tickets, announce {next_state}, passing the lowest-numbered ticket that is ready-for-agent and blocked by nothing as the subject. If no ticket qualifies, announce handover instead, and say which status you found.
 """
 
-# ADR 0009, 0010, 0027, 0033, 0034
+# ADR 0009, 0010, 0027, 0033, 0034, 0041
 [[states]]
 name = "implement"
+model = "opus"
+effort = "high"
 clear = true
 next = ["implement", "triage", "handover", "pull-request"]
 prompt = """
-/implement the ticket at {subject}, and only that one. It has been triaged as ready for you; take that as given rather than re-checking it.
+/implement {subject}
 
-When it is done — the work complete, its tests green and the working tree clean — set that ticket's Status line to resolved and save it, before you do anything else. That line is the only record the ticket is finished: left unmarked, it is a ticket this loop's scan picks again and one a reader cannot tell from outstanding work.
+When it is done, set that ticket's Status line to resolved.
 
-Then choose what comes next. A ticket is closed when its Status line reads resolved or wontfix — closed by completion or closed by decision — and open otherwise. Scan the project's issue tracker for the lowest-numbered ticket that is open and whose blocking edges are all satisfied — an edge is satisfied when the ticket it names is closed — and read its Status line:
+Then choose what comes next. A ticket is closed when its Status line reads resolved or wontfix, and open otherwise. Scan for the next lowest-numbered ticket in the set that is open and whose blocking edges are all satisfied and read its Status line:
 
 - ready-for-agent — announce implement, passing that ticket's file as the subject.
 - needs-triage — announce triage, passing that ticket's file as the subject.
-- any other status, including ready-for-human, needs-info, one this repository does not define, or no Status line at all — announce handover, passing that ticket's file as the subject, and say in the session which status you found and why you are stopping.
+- any other status, including ready-for-human, needs-info, one this repository does not define, or no Status line at all — announce handover, and say in the session which status you found and why you are stopping.
 - no open tickets remain — announce pull-request.
 """
 
-# ADR 0009, 0010, 0027, 0033, 0034
+# ADR 0009, 0010, 0027, 0033, 0034, 0041
 [[states]]
 name = "triage"
+model = "fable"
+effort = "medium"
 clear = true
 next = ["implement", "triage", "handover", "pull-request"]
 prompt = """
-/triage the ticket at {subject}, and only that one. It is the ticket the scan reached, and nobody has specified the work on it yet.
+/triage {subject}
 
-Decide the ticket's category and its status yourself, and apply them. Do not offer a recommendation and wait for direction, do not open a grilling session, and do not flag anything for a maintainer to confirm: nobody is at the keyboard to answer any of the three.
+Only set that ticket's Status line to needs-info if there are questions that turn out not to be the repository's to answer, and a person says so.
 
-Where the ticket leaves something open, ask rather than guess: raise it as a question, as the protocol describes, and carry on when the answer arrives. If what comes back does not settle it — the question turns out not to be the repository's to answer, and a person says so — set the ticket's Status line to needs-info, write the open questions onto the ticket, and carry on to the choice below.
+End the pass with the ticket's Status line reading ready-for-agent, ready-for-human, needs-info or wontfix.
 
-End the pass with the Status line reading ready-for-agent, ready-for-human, needs-info or wontfix, never needs-triage. A ticket left at needs-triage is still the frontier, so the scan below hands it straight back to this State, for as long as the Run lasts.
-
-Then choose what comes next. A ticket is closed when its Status line reads resolved or wontfix — closed by completion or closed by decision — and open otherwise. Scan the project's issue tracker for the lowest-numbered ticket that is open and whose blocking edges are all satisfied — an edge is satisfied when the ticket it names is closed — and read its Status line:
+Then choose what comes next. A ticket is closed when its Status line reads resolved or wontfix, and open otherwise. Scan for the next lowest-numbered ticket in the set that is open and whose blocking edges are all satisfied and read its Status line:
 
 - ready-for-agent — announce implement, passing that ticket's file as the subject.
 - needs-triage — announce triage, passing that ticket's file as the subject.
-- any other status, including ready-for-human, needs-info, one this repository does not define, or no Status line at all — announce handover, passing that ticket's file as the subject, and say in the session which status you found and why you are stopping.
+- any other status, including ready-for-human, needs-info, one this repository does not define, or no Status line at all — announce handover, and say in the session which status you found and why you are stopping.
 - no open tickets remain — announce pull-request.
 """
 
@@ -157,9 +159,11 @@ next = ["implement", "triage", "pull-request"]
 # ADR 0015, 0016, 0018
 [[states]]
 name = "pull-request"
+model = "opus"
+effort = "high"
 clear = true
 prompt = """
-Before anything else, decide whether this repository opens a pull request at all. It does not if it has no remote to open one against, or if a naiad.toml at its root says not to open one — a local-first project lands its work locally, and once the work is committed there is nothing left to do. In either case announce {next_state}, and do not open a pull request or choose a base: {next_state} is where this State ends when it opens nothing.
+Before anything else, decide whether this repository opens a pull request at all. It does not if it has no remote to open one against, or if a naiad.toml at its root says not to open one. In either case announce {next_state}.
 
 Otherwise, open a pull request directly through the MCP server for this repository's host — GitHub, Gitea — taking the description from the branch compared against its base.
 
