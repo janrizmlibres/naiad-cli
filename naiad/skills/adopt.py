@@ -97,8 +97,8 @@ Settle both from the listing:
 - **The workflow.** Take the one named. Named none and the library holds one,
   take that one. Named none and the library holds several, ask the human which.
 - **The state.** Take the state whose name or slash command answers the human's
-  words. More than one answers them — "review this" fits both `review` and
-  `review-fix` — so ask the human which. The words name no phase, so ask.
+  words. More than one answers them — "plan this" fits both `spec` and
+  `tickets` — so ask the human which. The words name no phase, so ask.
 
 Settle the state rather than defaulting it. The start state is the phase after
 the last one the human did by hand, and the workflow's first state re-runs work

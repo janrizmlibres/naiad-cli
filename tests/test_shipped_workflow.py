@@ -37,7 +37,6 @@ STATES = [
     "triage",
     "handover",
     "pull-request",
-    "review-fix",
     "done",
 ]
 
@@ -53,7 +52,6 @@ SKILLS = {
     "tickets": "/to-tickets",
     "implement": "/implement",
     "triage": "/triage",
-    "review-fix": "/fix-review",
 }
 
 # The two States that scan the tracker and route on what they find. The table
@@ -75,7 +73,6 @@ CANDIDATES = {
     "implement": ("implement", "triage", "handover", "pull-request"),
     "triage": ("implement", "triage", "handover", "pull-request"),
     "handover": ("implement", "triage", "pull-request"),
-    "pull-request": ("review-fix", "done"),
 }
 
 # The feature chain as it stands today, asserted rather than assumed. `done`
@@ -83,8 +80,8 @@ CANDIDATES = {
 #
 # Three edges have moved since this table was first written, all deliberately.
 # `implement` gained a third exit for a ticket it must decline (ADR 0010).
-# `pull-request` gained `done` beside `review-fix`, so a Run whose host runs no
-# automated review ends rather than passing through an empty fix (ADR 0017).
+# `pull-request` once branched on whether an automated review completed
+# (ADR 0017); the fixing State it fed is gone, so it ends at `done` alone.
 # `implement` and `handover` then gained `triage`, the exit for a ticket nobody
 # has specified yet — work the agent can do rather than work it must decline
 # (ADR 0034). Everything else is untouched, which is what this table is for.
@@ -96,8 +93,7 @@ FEATURE_CHAIN = {
     "implement": ("implement", "triage", "handover", "pull-request"),
     "triage": ("implement", "triage", "handover", "pull-request"),
     "handover": ("implement", "triage", "pull-request"),
-    "pull-request": ("review-fix", "done"),
-    "review-fix": ("done",),
+    "pull-request": ("done",),
     "done": (),
 }
 
@@ -311,7 +307,7 @@ def test_the_branch_heads_and_the_implement_loop_clear_and_the_design_phases_do_
     before the Announcement, because the Clear discards the session."""
     clearing = [state.name for state in workflow.states if state.clear]
 
-    assert clearing == ["diagnose", "grill", "implement", "triage", "pull-request", "review-fix"]
+    assert clearing == ["diagnose", "grill", "implement", "triage", "pull-request"]
 
 
 @pytest.mark.parametrize("head", BRANCH_HEADS)
@@ -586,7 +582,7 @@ def test_the_diagnosing_state_runs_the_whole_discipline_in_one_state(workflow):
     fixing State to announce and no diagnosis Artifact to write: the only
     honest cut is mid-discipline, and the review it would enable is not wanted
     on the path where the hypothesis is confirmed (ADR 0008)."""
-    assert [state.name for state in workflow.states if "fix" in state.name] == ["review-fix"]
+    assert [state.name for state in workflow.states if "fix" in state.name] == []
     assert "end to end" in delivered(workflow, "diagnose")
 
 
@@ -962,44 +958,17 @@ def test_the_pull_request_state_settles_an_absent_predecessor_before_running_any
     assert prompt.index("When no Predecessor is named above") < prompt.index(ANCESTRY_TEST)
 
 
-def test_the_pull_request_state_waits_for_the_review_before_announcing(workflow):
-    """The review-fix State has nothing to work from until the host's automated
-    review has posted its findings, so the wait belongs before the Announcement
-    rather than after it — announcing early delivers /fix-review an empty pull
-    request. The wait names no particular integration, because the tail is
-    project-neutral and the review a host runs is its own (ADR 0016).
-    """
+def test_the_pull_request_state_waits_on_nothing_once_the_pull_request_is_open(workflow):
+    """The tail once waited for the host's automated review and branched on
+    whether it completed, because a fixing State stood behind it (ADR 0017).
+    That State is gone, and a wait with nothing behind it would only hold the
+    Run at a State with no work left: the pull request is open, and the Run
+    ends there."""
     prompt = delivered(workflow, "pull-request")
 
-    assert "automated review" in prompt
-    assert "declare a wait" in prompt
-
-
-def test_the_pull_request_state_declares_its_wait_rather_than_blocking(workflow):
-    """The blocking wait ADR 0006 prescribed is superseded: a declared Wait
-    ends the turn, and its expiry is the re-check (ADR 0021). Blocking would
-    burn a session slot polling, and a Prompt still saying so would have the
-    agent doing both."""
-    prompt = delivered(workflow, "pull-request")
-
-    assert "end your turn" in prompt
-    assert "single long-running command" not in prompt
-    assert "ten-minute timeout" not in prompt
-
-
-def test_the_pull_request_state_waits_only_on_the_review_check(workflow):
-    """Waiting on every check would overrun the budget for a reason that has
-    nothing to do with the review: a repository's build checks run far longer
-    than a review does, so the wait names the review check alone."""
-    prompt = delivered(workflow, "pull-request")
-
-    assert "not every check" in prompt
-
-
-def test_the_pull_request_state_announces_even_if_no_review_arrives(workflow):
-    """A repository that runs no review would otherwise hold the Run at a State
-    waiting for something that is never coming."""
-    assert "if no review" in delivered(workflow, "pull-request").lower()
+    assert "declare a wait" not in prompt
+    assert "automated review" not in prompt
+    assert "announce" in prompt
 
 
 def test_the_pull_request_state_opens_on_whatever_host_can_open_one(workflow):
@@ -1017,23 +986,13 @@ def test_the_pull_request_state_ends_at_done_when_it_opens_nothing(workflow):
     """How the tail ends is read from the project (ADR 0018): a repository that
     opts out with a naiad.toml marker, or one with no remote to open against,
     has nowhere for the work to land and announces done — already a declared
-    successor of this State (ADR 0017). The check comes before the review wait,
-    so a local-first Run neither opens a pull request nor waits its ten minutes
-    for a review that is never coming."""
+    successor of this State. The check comes before the open, so a local-first
+    Run opens nothing."""
     prompt = delivered(workflow, "pull-request")
 
     assert "naiad.toml" in prompt
     assert "no remote" in prompt
-    assert prompt.index("naiad.toml") < prompt.index("automated review")
-
-
-def test_the_review_fix_state_tolerates_a_pull_request_with_no_findings(workflow):
-    """The timeout path announces review-fix anyway, and Clearing means the
-    Prompt arrives in a context that never heard the timeout announced. Without
-    this the State is told to fetch findings that are not there, and /fix-review
-    — whose contract is that its findings are handed to it — is the State most
-    likely to stop and ask a human nobody is awake to be."""
-    assert "no review findings" in delivered(workflow, "review-fix")
+    assert prompt.index("naiad.toml") < prompt.index("Otherwise, open")
 
 
 def test_no_prompt_after_a_clearing_state_refers_back_to_the_cleared_context(workflow):
@@ -1145,7 +1104,6 @@ MODELS = {
     "triage": ("opus", "high"),
     "handover": ("opus", "high"),
     "pull-request": ("opus", "high"),
-    "review-fix": ("opus", "high"),
     "done": ("opus", "high"),
 }
 

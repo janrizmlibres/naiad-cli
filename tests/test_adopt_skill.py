@@ -102,8 +102,8 @@ def test_it_settles_a_workflow_the_human_never_named(skill):
 
 
 def test_it_asks_when_more_than_one_state_matches_the_words(skill):
-    """`review` and `review-fix` both answer to "review this", and an agent
-    that picked one silently would start the Run a phase from where it should."""
+    """`spec` and `tickets` both answer to "plan this", and an agent that
+    picked one silently would start the Run a phase from where it should."""
     assert "more than one" in skill.lower() or "two or more" in skill.lower()
 
 
