@@ -54,12 +54,12 @@ def test_a_bare_name_resolves_to_the_library_file_of_that_stem(library):
 
 def test_a_name_the_library_does_not_hold_is_refused_with_what_it_does(library):
     (library / "matt-pocock.toml").write_text(WORKFLOW)
-    (library / "hcgps-hotfix.toml").write_text(WORKFLOW.replace("matt-pocock", "hcgps-hotfix"))
+    (library / "acme-hotfix.toml").write_text(WORKFLOW.replace("matt-pocock", "acme-hotfix"))
     with pytest.raises(LibraryError) as refused:
         resolve_workflow("matt-pocok", library=library)
     message = str(refused.value)
     assert "matt-pocok" in message
-    assert "hcgps-hotfix, matt-pocock" in message
+    assert "acme-hotfix, matt-pocock" in message
     assert str(library) in message
 
 

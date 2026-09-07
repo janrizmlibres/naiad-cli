@@ -42,9 +42,9 @@ STATES = [
 
 # Every State whose Prompt runs a skill of its own, and the skill it must
 # invoke. Two States are deliberately absent: the classifying State runs none,
-# and the pull-request State opens a pull request generically — naming /hcgps-pr
-# only for the HCGPS monorepo, mid-Prompt rather than at the start (ADR 0016).
-# So neither opens with a slash command.
+# and the pull-request State opens a pull request generically, through the
+# host's MCP server rather than a skill (ADR 0016). So neither opens with a
+# slash command.
 SKILLS = {
     "diagnose": "/diagnosing-bugs",
     "grill": "/grill-with-docs",
@@ -936,9 +936,8 @@ def test_the_pull_request_state_asks_the_ancestry_question_again(workflow):
 
 def test_the_pull_request_state_passes_the_answer_as_the_base(workflow):
     """An input to whatever opens the pull request rather than a copy of its
-    logic: /hcgps-pr accepts an explicit base for stacked work, and a direct
-    open through the GitHub MCP takes one too, so each needs telling and nothing
-    more (ADR 0016).
+    logic: a direct open through the host's MCP server takes an explicit base
+    for stacked work, so it needs telling and nothing more (ADR 0016).
 
     Each outcome is pinned to its own sentence, as the branch heads' are:
     inverted, this opens every stacked pull request against the base branch and
@@ -974,12 +973,13 @@ def test_the_pull_request_state_waits_on_nothing_once_the_pull_request_is_open(w
 def test_the_pull_request_state_opens_on_whatever_host_can_open_one(workflow):
     """No longer GitHub-only: a Gitea repository has pull requests and an MCP
     server of its own, so the open path names the host generically rather than
-    GitHub alone (ADR 0018). The one named exception stays HCGPS, whose
-    conventions are rich enough to earn a skill (ADR 0016)."""
+    GitHub alone (ADR 0018). No project is named: the Workflow file is the
+    other place one repository's conventions could hide, and it holds none
+    (ADR 0016)."""
     prompt = delivered(workflow, "pull-request")
 
     assert "Gitea" in prompt
-    assert "/hcgps-pr" in prompt
+    assert not [word for word in prompt.split() if word.startswith("/")]
 
 
 def test_the_pull_request_state_ends_at_done_when_it_opens_nothing(workflow):
@@ -1120,8 +1120,8 @@ def test_no_state_restates_the_file_level_pair(workflow):
     Every State takes the default, so none names either key — a State declares
     a setting only where it changes one (docs/workflow-authoring.md). The
     default carries the choice rather than the first State, because an Entry
-    may name the State it starts at: `batches/marketing-hub-bugs.toml` enters
-    at `diagnose`, and a pair declared on `classify` would never reach it
+    may name the State it starts at — a batch of known bugs enters at
+    `diagnose` — and a pair declared on `classify` would never reach it
     (ADR 0040)."""
     declared = tomllib.loads(WORKFLOW_PATH.read_text())
 

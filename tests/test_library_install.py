@@ -125,24 +125,24 @@ def test_a_refusal_links_nothing_at_all(library, shipped):
     """All of them or none: a refusal that had already written some entries
     would report none of what it did, and the operator reads the refusal
     against a library it cannot see."""
-    (shipped / "hcgps-hotfix.toml").write_text(WORKFLOW.replace("matt-pocock", "hcgps-hotfix"))
+    (shipped / "acme-hotfix.toml").write_text(WORKFLOW.replace("matt-pocock", "acme-hotfix"))
     library.mkdir(parents=True)
     (library / "matt-pocock.toml").write_text("their own copy\n")
 
     with pytest.raises(ValueError):
         link_shipped_workflows(library=library, shipped=shipped)
 
-    assert not (library / "hcgps-hotfix.toml").exists()
+    assert not (library / "acme-hotfix.toml").exists()
 
 
 def test_leaves_the_operators_other_library_files_alone(library, shipped):
     library.mkdir(parents=True)
-    theirs = library / "hcgps-hotfix.toml"
-    theirs.write_text(WORKFLOW.replace("matt-pocock", "hcgps-hotfix"))
+    theirs = library / "acme-hotfix.toml"
+    theirs.write_text(WORKFLOW.replace("matt-pocock", "acme-hotfix"))
 
     link_shipped_workflows(library=library, shipped=shipped)
 
-    assert theirs.read_text() == WORKFLOW.replace("matt-pocock", "hcgps-hotfix")
+    assert theirs.read_text() == WORKFLOW.replace("matt-pocock", "acme-hotfix")
 
 
 def test_a_package_with_no_workflows_beside_it_links_nothing(library, tmp_path):

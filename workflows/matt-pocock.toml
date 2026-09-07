@@ -4,7 +4,7 @@
 name = "matt-pocock"
 
 # Every State, however a Run enters this file — an Entry may name the State it
-# starts at, and batches/marketing-hub-bugs.toml starts at `diagnose` (ADR 0040).
+# starts at, and a batch of known bugs starts at `diagnose` (ADR 0040).
 model = "opus"
 effort = "high"
 
@@ -161,7 +161,7 @@ clear = true
 prompt = """
 Before anything else, decide whether this repository opens a pull request at all. It does not if it has no remote to open one against, or if a naiad.toml at its root says not to open one — a local-first project lands its work locally, and once the work is committed there is nothing left to do. In either case announce {next_state}, and do not open a pull request or choose a base: {next_state} is where this State ends when it opens nothing.
 
-Otherwise, open a pull request. For the HCGPS monorepo, use /hcgps-pr; for any other repository open it directly through the MCP server for that repository's host — GitHub, Gitea — taking the description from the branch compared against its base.
+Otherwise, open a pull request directly through the MCP server for this repository's host — GitHub, Gitea — taking the description from the branch compared against its base.
 
 Predecessor: {predecessor}
 

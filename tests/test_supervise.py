@@ -12,7 +12,7 @@ from naiad.domain.entry import Entry
 from naiad.domain.supervise import DRAINED, IDLE, Resume, Signals, Start, supervise
 
 REPO = Path("/repos/naiad")
-ANOTHER_REPO = Path("/repos/hcgps")
+ANOTHER_REPO = Path("/repos/acme")
 
 
 def entry(identifier, **overrides):
@@ -127,7 +127,7 @@ def test_entries_for_two_repositories_are_both_started():
 
 
 def test_a_run_in_one_repository_does_not_stop_another_repository_starting():
-    """The screenshot that motivated ADR 0020: hcgps running, guestpulse-admin
+    """The screenshot that motivated ADR 0020: one repository running, another
     waiting behind it for no reason the working tree can name."""
     running = entry("one", run_id="a-run")
     waiting = entry("two", target_repo=ANOTHER_REPO)
@@ -164,8 +164,8 @@ def test_two_worktrees_of_one_repository_are_two_lanes():
     """Not a loophole but the rule meaning what it says (ADR 0020): the
     exclusion unit is the working tree, named by the target path, and two
     worktrees of one repository are two working trees."""
-    main_tree = entry("one", target_repo=Path("/repos/hcgps"))
-    worktree = entry("two", target_repo=Path("/repos/hcgps-orion"))
+    main_tree = entry("one", target_repo=Path("/repos/acme"))
+    worktree = entry("two", target_repo=Path("/repos/acme-orion"))
 
     assert supervise(draining(main_tree, worktree)) == [
         Start(entry=main_tree, predecessor=None),
@@ -179,7 +179,7 @@ def test_a_queue_parked_in_one_lane_still_works_in_the_others():
     other two."""
     parked = entry("one", run_id="a-run")
     other_repo = entry("two", target_repo=ANOTHER_REPO)
-    third_repo = entry("three", target_repo=Path("/repos/guestpulse-admin"))
+    third_repo = entry("three", target_repo=Path("/repos/third"))
 
     assert supervise(draining(parked, other_repo, third_repo)) == [
         Resume(entry=parked),

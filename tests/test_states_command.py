@@ -24,7 +24,7 @@ terminal = true
 """
 
 OTHER = """
-name = "hcgps-hotfix"
+name = "acme-hotfix"
 
 [[states]]
 name = "diagnose"
@@ -70,13 +70,13 @@ def test_no_workflow_lists_every_one_the_library_holds(library, capsys):
     """What the agent runs when the operator named no Workflow: one call
     answers both which Workflows exist and what each declares (ADR 0032)."""
     (library / "matt-pocock.toml").write_text(WORKFLOW)
-    (library / "hcgps-hotfix.toml").write_text(OTHER)
+    (library / "acme-hotfix.toml").write_text(OTHER)
 
     assert main(["states"]) == 0
 
     printed = capsys.readouterr().out
     assert "matt-pocock" in printed
-    assert "hcgps-hotfix" in printed
+    assert "acme-hotfix" in printed
     assert "/to-spec" in printed
     assert "/diagnosing-bugs" in printed
 

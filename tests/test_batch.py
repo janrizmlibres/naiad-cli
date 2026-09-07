@@ -17,7 +17,7 @@ from naiad.cli.batch import BatchError, parse_batch
 
 BATCH = """
 workflow = "workflows/matt-pocock.toml"
-repo = "/repos/hcgps"
+repo = "/repos/acme"
 
 [[entries]]
 task = "the login redirect loops"
@@ -99,7 +99,7 @@ def test_a_top_level_key_is_the_default_for_every_entry():
 
     assert first.workflow_path == Path("workflows/matt-pocock.toml").resolve()
     assert second.workflow_path == first.workflow_path
-    assert first.target_repo == Path("/repos/hcgps")
+    assert first.target_repo == Path("/repos/acme")
     assert second.target_repo == first.target_repo
 
 
@@ -107,7 +107,7 @@ def test_a_key_on_an_entry_overrides_the_default_above_it():
     first, second = parse(
         """
         workflow = "shared.toml"
-        repo = "/repos/hcgps"
+        repo = "/repos/acme"
         at = "grill"
 
         [[entries]]
@@ -124,7 +124,7 @@ def test_a_key_on_an_entry_overrides_the_default_above_it():
     )
 
     assert first.workflow_path == Path("shared.toml").resolve()
-    assert first.target_repo == Path("/repos/hcgps")
+    assert first.target_repo == Path("/repos/acme")
     assert first.start_state == "grill"
     assert second.workflow_path == Path("other.toml").resolve()
     assert second.target_repo == Path("/repos/naiad")

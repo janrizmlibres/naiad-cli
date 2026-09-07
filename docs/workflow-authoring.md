@@ -23,7 +23,7 @@ decision.
 This is a rule about Prompts that invoke a skill. It is not a rule that each
 State must invoke one. A State that runs no skill opens with prose instead.
 The `classify` State is one example. The `pull-request` State is a second: it
-names `/hcgps-pr` in mid-sentence, where the name does not read as a command.
+opens the pull request through the host's MCP server and runs no skill.
 
 ### What follows the command is an argument, never a procedure
 
@@ -73,9 +73,9 @@ State names either key. The whole chain runs on that pair.
 
 It is the default that carries the choice, and not the first State, though
 one declaration on `classify` would reach every State a Run walks from there.
-An Entry may name the State it starts at: `batches/marketing-hub-bugs.toml`
-enters at `diagnose`, because the operator has already made the judgement
-`classify` exists to make. A pair declared on `classify` would never reach
+An Entry may name the State it starts at: a batch of known bugs enters at
+`diagnose`, because the operator has already made the judgement `classify`
+exists to make. A pair declared on `classify` would never reach
 those Runs, and they would take the platform's own setting with nothing in
 this file to say so. A default reaches every State however a Run enters
 (ADR 0040).
