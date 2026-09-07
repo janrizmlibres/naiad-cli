@@ -27,7 +27,7 @@ from typing import Any
 from naiad.adapters.answerer import HeadlessAnswerer
 from naiad.adapters.executable import naiad_command
 from naiad.adapters.lock import SupervisorLock
-from naiad.adapters.notify import DesktopNotifications
+from naiad.adapters.notify import configured_notifier
 from naiad.adapters.tmux import TmuxError, TmuxSessions
 from naiad.cli.adopt import NotInTmux, attachment_in, teaching_for
 from naiad.cli.announce import AnnounceError, announce_state
@@ -90,12 +90,39 @@ FAILURES = (
 )
 
 
+# Named where an operator looks when they have forgotten the name: on the
+# commands that drive Runs, which are the only ones that ever notify. The
+# terminal and the desktop banner need no configuring and are not listed.
+NOTIFICATIONS_HELP = """\
+notifications:
+  Naiad tells you in the terminal and, on macOS, with a desktop banner. To be
+  told on your phone as well, set NAIAD_NTFY_URL to a full ntfy topic URL
+  (https://ntfy.sh/some-hard-to-guess-name) and subscribe to that topic in the
+  ntfy app. Set NAIAD_NTFY_TOKEN too where the topic is access-controlled.
+  Unset, nothing is pushed and nothing else changes."""
+
+
+def _driving_parser(
+    subcommands: "argparse._SubParsersAction[argparse.ArgumentParser]", name: str, *, help: str
+) -> argparse.ArgumentParser:
+    """A command that drives Runs, and so is one an operator reads to find out
+    how they will be told about them."""
+    return subcommands.add_parser(
+        name,
+        help=help,
+        epilog=NOTIFICATIONS_HELP,
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="naiad")
     subcommands = parser.add_subparsers(dest="command", required=True)
 
-    run = subcommands.add_parser(
-        "run", help="queue a Workflow against a task, and supervise if nothing else is"
+    run = _driving_parser(
+        subcommands,
+        "run",
+        help="queue a Workflow against a task, and supervise if nothing else is",
     )
     _describe_the_work(run)
     run.set_defaults(handler=_run)
@@ -121,8 +148,8 @@ def main(argv: list[str] | None = None) -> int:
     )
     queue_list.set_defaults(handler=_queue_list)
 
-    queue_watch = queue_commands.add_parser(
-        "watch", help="take the Queue in order, and keep following it for more"
+    queue_watch = _driving_parser(
+        queue_commands, "watch", help="take the Queue in order, and keep following it for more"
     )
     queue_watch.set_defaults(handler=_queue_watch)
 
@@ -245,8 +272,8 @@ def main(argv: list[str] | None = None) -> int:
     )
     install.set_defaults(handler=_install)
 
-    watch_parser = subcommands.add_parser(
-        "watch", help="drive a Run until it ends or is interrupted"
+    watch_parser = _driving_parser(
+        subcommands, "watch", help="drive a Run until it ends or is interrupted"
     )
     watch_parser.add_argument(
         "run_id", nargs="?", default=None, help="which Run (default: this session)"
@@ -601,7 +628,7 @@ def _drive(run: Run) -> None:
         run=run,
         workflow=load_workflow(run.workflow_path),
         session=TmuxSessions(),
-        notifier=DesktopNotifications(),
+        notifier=configured_notifier(),
         answerer=HeadlessAnswerer(),
         # The naiad driving this Run, so a nudged agent is told to type the
         # command that exists rather than whatever the session's PATH holds.
@@ -619,7 +646,7 @@ def _ticker() -> Callable[[Run], None]:
     prints it too: where the Run is driven rather than where it was queued.
     """
     session = TmuxSessions()
-    notifier = DesktopNotifications()
+    notifier = configured_notifier()
     answerer = HeadlessAnswerer()
     naiad = naiad_command()
     watching: set[str] = set()

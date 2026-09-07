@@ -30,6 +30,7 @@ from naiad.domain.decide import (
     decide,
 )
 from naiad.domain.announcement import Announcement
+from naiad.domain.notification import Notification
 from naiad.domain.prompt import render_prompt
 from naiad.domain.protocol import DEFAULT_NAIAD, render_answer, render_nudge
 from naiad.domain.question import Question
@@ -63,7 +64,16 @@ class Session(Protocol):
 
 
 class Notifier(Protocol):
-    def notify(self, title: str, message: str) -> None: ...
+    """Where a telling goes, and what kind of telling it is.
+
+    The kind is service-neutral (naiad.domain.notification): the loop says
+    whether a human is needed or the work is done, and an adapter maps that
+    onto whatever scale of urgency its service understands. Deciding here
+    which push priority a Gate State deserves would put a service's vocabulary
+    in the tick.
+    """
+
+    def notify(self, title: str, message: str, kind: Notification) -> None: ...
 
 
 class Answerer(Protocol):
@@ -206,9 +216,15 @@ def tick(
         # it is not killed, because it holds the evidence of what the Run did.
         # Nothing is recorded here either — the log entry written below is what
         # makes the ending final, so the fact has one home rather than two.
-        notifier.notify(title=f"naiad: {run.id}", message=f"finished at {action.state}")
+        notifier.notify(
+            title=f"naiad: {run.id}",
+            message=f"finished at {action.state}",
+            kind=Notification.FINISH,
+        )
     elif isinstance(action, Notify):
-        notifier.notify(title=f"naiad: {run.id}", message=action.reason)
+        notifier.notify(
+            title=f"naiad: {run.id}", message=action.reason, kind=Notification.NOTIFY
+        )
         notices.record_notified(announcement, wait_count=wait_count, hold_count=hold_count)
         if action.question is not None:
             # An Escalated Question. Recorded here rather than at the

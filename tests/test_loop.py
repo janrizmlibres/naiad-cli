@@ -17,11 +17,13 @@ from naiad.domain.decide import (
     Clear,
     Consult,
     Deliver,
+    Finish,
     Notify,
     Nudge,
     Respond,
     Switch,
 )
+from naiad.domain.notification import Notification
 from naiad.domain.question import Question
 from naiad.domain.workflow import parse_workflow
 from naiad.runtime.announcements import Announcements
@@ -67,8 +69,8 @@ class RecordingNotifier:
     def __init__(self):
         self.notified = []
 
-    def notify(self, title, message):
-        self.notified.append((title, message))
+    def notify(self, title, message, kind):
+        self.notified.append((title, message, kind))
 
 
 @pytest.fixture
@@ -1353,3 +1355,29 @@ def test_a_finished_run_is_not_driven_by_anything_the_agent_says_afterwards(
 
     assert drive(run, workflow, session) is NOTHING
     assert session.sent == []
+
+
+def test_a_human_who_is_needed_is_told_so_as_a_notify(run, workflow, session):
+    """The kind rides with the telling because a phone grades its pushes and
+    the loop must not learn any service's scale to say which telling it is
+    making."""
+    notifier = RecordingNotifier()
+    announce(run, "review")
+
+    action = drive(run, workflow, session, notifier=notifier)
+
+    assert isinstance(action, Notify)
+    assert notifier.notified[0][2] is Notification.NOTIFY
+
+
+def test_a_run_that_reached_its_terminal_state_is_told_as_a_finish(run, workflow, session):
+    """Good news and a Run standing still are not equally urgent, and it is
+    the loop that knows which of the two this is."""
+    notifier = RecordingNotifier()
+    announce(run, "done")
+
+    action = drive(run, workflow, session, notifier=notifier)
+
+    assert isinstance(action, Finish)
+    assert notifier.notified[0][2] is Notification.FINISH
+    assert "done" in notifier.notified[0][1]

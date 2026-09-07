@@ -53,8 +53,8 @@ class RecordingNotifier:
     def __init__(self):
         self.notified = []
 
-    def notify(self, title, message):
-        self.notified.append((title, message))
+    def notify(self, title, message, kind):
+        self.notified.append((title, message, kind))
 
 
 class UnusedAnswerer:
@@ -133,7 +133,7 @@ def test_finishing_notifies_the_operator_that_the_run_is_done(run):
     drive(run, notifier=notifier)
 
     assert notifier.notified
-    title, message = notifier.notified[-1]
+    title, message, _kind = notifier.notified[-1]
     assert run.id in title
     assert "done" in message
 
