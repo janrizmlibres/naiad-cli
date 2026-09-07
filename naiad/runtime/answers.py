@@ -30,13 +30,16 @@ class Answer:
 
     answer carries the Escalation's reason when escalated is set: the operator
     reads one column for 'what happened', rather than having to look in two
-    places to find out that nothing did.
+    places to find out that nothing did. An abandonment — the agent announcing
+    onward over its own unanswered Question — carries what it walked away to,
+    in the same column for the same reason.
     """
 
     question: str
     options: tuple[str, ...]
     answer: str
     escalated: bool = False
+    abandoned: bool = False
 
 
 class AnswerLog:
@@ -59,11 +62,14 @@ class AnswerLog:
                 options=tuple(entry["options"]),
                 answer=entry["answer"],
                 escalated=entry.get("escalated", False),
+                abandoned=entry.get("abandoned", False),
             )
             for entry in document
         ]
 
-    def record(self, *, question: Question, answer: str, escalated: bool = False) -> None:
+    def record(
+        self, *, question: Question, answer: str, escalated: bool = False, abandoned: bool = False
+    ) -> None:
         entries = self.entries()
         entries.append(
             Answer(
@@ -71,6 +77,7 @@ class AnswerLog:
                 options=question.options,
                 answer=answer,
                 escalated=escalated,
+                abandoned=abandoned,
             )
         )
         write_atomically(self.path, json.dumps([_document(e) for e in entries], indent=2) + "\n")
@@ -82,6 +89,7 @@ def _document(entry: Answer) -> dict[str, object]:
         "options": list(entry.options),
         "answer": entry.answer,
         "escalated": entry.escalated,
+        "abandoned": entry.abandoned,
     }
 
 

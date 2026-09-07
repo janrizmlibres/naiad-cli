@@ -6,7 +6,7 @@ than on exact wording, which is prose and will be tuned.
 """
 
 from naiad.domain.decide import NUDGE_LIMIT
-from naiad.domain.protocol import render_adoption, render_nudge, render_protocol
+from naiad.domain.protocol import render_adoption, render_answer, render_nudge, render_protocol
 
 
 def test_names_the_command_that_announces_a_state():
@@ -28,6 +28,24 @@ def test_names_the_subject_flag_and_says_when_it_is_needed():
 
     assert "--subject" in protocol
     assert "series" in protocol
+
+
+def test_teaches_one_question_at_a_time():
+    """A second Question would replace the first unanswered — only the latest
+    Announcement is kept — so the rule is taught up front, not only in the
+    refusal that enforces it."""
+    protocol = render_protocol(next_states=("spec",))
+
+    assert "one question at a time" in protocol
+
+
+def test_an_answer_invites_the_next_question():
+    """The serial-ask protocol's memory-free half: an agent whose later
+    questions were refused re-asks on the answer's arrival, not from memory."""
+    answer = render_answer("use the client")
+
+    assert "Answer: use the client" in answer
+    assert "ask the next one now" in answer
 
 
 def test_names_the_command_that_declares_a_wait():

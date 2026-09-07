@@ -45,7 +45,9 @@ never decides that a phase is finished — you do, and you say so. Four rules:
    decision you cannot make alone, run
    `{ask} "<your question>" --option "<one>" --option "<another>"`,
    giving every option you were weighing. The answer comes back into this
-   session. Do not use AskUserQuestion, and do not stop to ask in prose.
+   session. Ask one question at a time: a second question while one is
+   unanswered is refused — hold it, and ask it when the answer arrives.
+   Do not use AskUserQuestion, and do not stop to ask in prose.
 
 3. **Declare your waits.** If you must wait for something before you can
    announce — background agents you launched, an external check completing —
@@ -151,7 +153,9 @@ def render_nudge(
 
 
 _ANSWER = """\
-Answer: {answer}"""
+Answer: {answer}
+
+If you were holding further questions, ask the next one now."""
 
 
 def render_answer(answer: str) -> str:
@@ -160,10 +164,15 @@ def render_answer(answer: str) -> str:
     Labelled rather than sent bare, because it lands as a message in a session
     that has been working on other things: an unattributed sentence reads as a
     new instruction, and the agent would act on it instead of resuming what it
-    asked about. One word carries that, so it is a label and not a preamble —
-    a sentence announcing the answer and another telling the agent to carry on
-    say nothing the agent does not already know, having asked the question and
-    being mid-State when the reply arrives.
+    asked about. One word carries that — a sentence telling the agent to carry
+    on would say nothing it does not already know, being mid-State when the
+    reply arrives.
+
+    The closing line is the serial-ask protocol's memory-free half (ADR 0044):
+    questions are asked one at a time, so an agent whose later questions were
+    refused re-asks on each answer's arrival, triggered rather than remembered.
+    Sent whether or not any were held back, because Naiad cannot know — it is
+    conditional in its own words instead.
     """
     return _ANSWER.format(answer=answer)
 

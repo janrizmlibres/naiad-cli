@@ -12,7 +12,9 @@ import pytest
 
 from naiad.domain.decide import Deliver
 from naiad.runtime.announcements import STATE_FILENAME
+from naiad.runtime.answers import AnswerLog
 from naiad.runtime.log import RunLog
+from naiad.runtime.records import Handled
 from naiad.runtime.run import RunStore
 from naiad_command import NAIAD, naiad_environment, requires_installed_naiad
 
@@ -200,6 +202,41 @@ def test_a_rejected_first_state_writes_no_state_file(run):
 
     assert finished.returncode != 0
     assert not (run.root / STATE_FILENAME).exists()
+
+
+def ask(run, question, option, run_id="a-run"):
+    return subprocess.run(
+        [NAIAD, "ask", question, "--option", option],
+        capture_output=True,
+        text=True,
+        env=naiad_environment(run, run_id=run_id),
+        cwd=str(run.target_repo),
+    )
+
+
+def test_announcing_over_an_unanswered_question_records_it_abandoned(run):
+    """The agent abandoning its own Question is its judgment (ADR 0001), but a
+    log holding only the Questions that were settled would show an unattended
+    Run as tidier than it was — the Answer log's own founding argument."""
+    ask(run, "Which module owns retries?", "the client")
+
+    finished = announce(run, "done")
+
+    assert finished.returncode == 0, finished.stderr
+    entry = AnswerLog(run.root).entries()[0]
+    assert entry.question == "Which module owns retries?"
+    assert entry.options == ("the client",)
+    assert entry.abandoned is True
+    assert "done" in entry.answer
+
+
+def test_announcing_over_an_answered_question_records_no_abandonment(run):
+    ask(run, "Which module owns retries?", "the client")
+    Handled(run.root).record(state_file(run)["seq"])
+
+    announce(run, "done")
+
+    assert AnswerLog(run.root).entries() == []
 
 
 def test_announcing_outside_a_run_is_rejected_rather_than_silently_ignored(run):

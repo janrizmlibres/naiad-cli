@@ -51,6 +51,20 @@ def test_an_escalation_is_recorded_beside_the_questions_that_were_answered(tmp_p
     assert entry.options == ("Twilio", "Vonage")
 
 
+def test_an_abandonment_is_recorded_beside_the_questions_that_were_answered(tmp_path):
+    """A Question the agent wrote over unanswered is what became of that
+    Question, exactly as an Escalation is."""
+    log = AnswerLog(tmp_path)
+
+    log.record(question=RETRIES, answer="the client")
+    log.record(question=VENDOR, answer="abandoned unanswered", abandoned=True)
+
+    first, second = log.entries()
+    assert first.abandoned is False
+    assert second.abandoned is True
+    assert second.answer == "abandoned unanswered"
+
+
 def test_a_second_answer_does_not_replace_the_first(tmp_path):
     """The log is the audit trail; an overwrite would lose the Run's history."""
     log = AnswerLog(tmp_path)

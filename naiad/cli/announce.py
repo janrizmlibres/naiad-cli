@@ -10,11 +10,13 @@ stalling.
 
 from __future__ import annotations
 
+from naiad.cli.ask import unanswered_question
 from naiad.domain.announcement import Announcement
 from naiad.domain.prompt import BRANCH_PLACEHOLDER, SUBJECT_PLACEHOLDER
 from naiad.domain.transitions import UnknownState, start_state as resolve_start_state
 from naiad.domain.workflow import Workflow, load_workflow
 from naiad.runtime.announcements import Announcements
+from naiad.runtime.answers import AnswerLog
 from naiad.runtime.log import RunLog
 from naiad.runtime.run import Run
 
@@ -62,7 +64,20 @@ def announce_state(state: str, *, run: Run, subject: str | None = None) -> Annou
             "(`git branch --show-current` names the checked-out one) as: "
             "naiad branch <name>, then announce again"
         )
-    return Announcements(run.root).announce(state, subject=subject)
+    # Announcing over an unanswered Question abandons it — permitted, because
+    # the agent owns workflow progress (ADR 0001), but recorded: a log holding
+    # only the Questions that were settled would show an unattended Run as
+    # tidier than it was. Read before the announce that writes over it, logged
+    # after, so a refused Announcement abandons nothing.
+    abandoning = unanswered_question(run)
+    announcement = Announcements(run.root).announce(state, subject=subject)
+    if abandoning is not None and abandoning.question is not None:
+        AnswerLog(run.root).record(
+            question=abandoning.question,
+            answer=f"abandoned unanswered; the agent announced '{state}' and moved on",
+            abandoned=True,
+        )
+    return announcement
 
 
 def _branch_prompt_delivered(run: Run, workflow: Workflow) -> bool:

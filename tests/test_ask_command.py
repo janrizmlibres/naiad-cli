@@ -10,7 +10,9 @@ import subprocess
 
 import pytest
 
-from naiad.runtime.announcements import STATE_FILENAME
+from naiad.domain.answerer import Escalated
+from naiad.runtime.announcements import Announcements, STATE_FILENAME
+from naiad.runtime.records import Consultations, Handled
 from naiad.runtime.run import RunStore
 from naiad_command import NAIAD, naiad_environment, requires_installed_naiad
 
@@ -153,3 +155,53 @@ def test_asking_outside_a_run_is_rejected_rather_than_silently_ignored(run):
 
     assert finished.returncode != 0
     assert finished.stderr.strip() != ""
+
+
+def test_a_second_question_while_one_is_unanswered_is_refused(run):
+    """Only the latest Announcement is kept, so a second Question would replace
+    the first unanswered — the agent told 'the answer will arrive' four times
+    would wait on three answers that can never come. Refused with the protocol
+    in the refusal: hold the rest, re-ask as each answer arrives."""
+    ask(run, "Which module owns retries?", "the client", "the caller")
+
+    refused = ask(run, "Which store owns sessions?", "the run", "the queue")
+
+    assert refused.returncode != 0
+    assert "still being answered" in refused.stderr
+    assert "one question at a time" in refused.stderr
+    assert "ask it again" in refused.stderr
+
+
+def test_a_refused_question_does_not_alter_the_state_file(run):
+    ask(run, "Which module owns retries?", "the client")
+    before = state_file(run)
+
+    ask(run, "Which store owns sessions?", "the run")
+
+    assert state_file(run) == before
+
+
+def test_a_question_may_follow_one_that_was_answered(run):
+    """Answered means Naiad acted on it: the Respond that sent the answer
+    recorded the Question's seq as handled."""
+    ask(run, "Which module owns retries?", "the client")
+    Handled(run.root).record(state_file(run)["seq"])
+
+    second = ask(run, "Which store owns sessions?", "the run")
+
+    assert second.returncode == 0, second.stderr
+    assert state_file(run)["question"]["text"] == "Which store owns sessions?"
+
+
+def test_a_question_may_follow_one_that_was_escalated(run):
+    """An Escalation is what became of the Question — the human was called and
+    the agent may have been redirected — so it blocks nothing further."""
+    ask(run, "Which cloud account pays for this?", "mine", "the client's")
+    Consultations(run.root).record(
+        Announcements(run.root).latest(), Escalated(reason="not the repo's to settle")
+    )
+
+    second = ask(run, "Which store owns sessions?", "the run")
+
+    assert second.returncode == 0, second.stderr
+    assert state_file(run)["question"]["text"] == "Which store owns sessions?"
