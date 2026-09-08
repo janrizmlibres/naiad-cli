@@ -86,9 +86,10 @@ If the task above, or an issue it links to, names an image — a mockup to match
 When the interview is finished and its ADRs and glossary entries are written, announce {next_state}.
 """
 
-# ADR 0007
+# ADR 0007, 0045
 [[states]]
 name = "review"
+next = ["spec", "map-spec"]
 
 # ADR 0033, 0041
 [[states]]
@@ -177,3 +178,46 @@ Once the pull request is open, announce {next_state}.
 [[states]]
 name = "done"
 terminal = true
+
+# The Wayfinder loop. Entered only by name — `--at wayfind --subject <ticket>`
+# or an Adoption — so it sits after the Terminal State, out of the declared
+# order, and every State of it names its exits (ADR 0045).
+
+# ADR 0009, 0045
+[[states]]
+name = "wayfind"
+model = "opus"
+effort = "high"
+clear = true
+next = ["wayfind", "chart", "review"]
+prompt = """
+/wayfinder {subject}
+
+Resolve that one ticket and no other in this pass, research included.
+
+Never ask a Question while resolving it: a decision ticket is answered by a person, not the Answerer. If the ticket cannot be resolved without one, leave it claimed, write what you need on the ticket and in the session, and announce chart, passing that ticket's file as the subject. When the person has replied, finish the ticket, then choose what comes next as below.
+
+Then choose what comes next. A ticket is closed when its Status line reads resolved or wontfix, claimed when it reads claimed, and open otherwise. Scan the map's tickets for the lowest-numbered one that is open, unclaimed, and whose blocking edges are all satisfied, and read its Mode line:
+
+- AFK — announce wayfind, passing that ticket's file as the subject.
+- anything else, including HITL or no Mode line at all — announce chart, and say in the session which ticket and which Mode you found.
+- no open tickets remain — announce review, passing the map file as the subject.
+"""
+
+# ADR 0045
+[[states]]
+name = "chart"
+next = ["wayfind", "map-spec"]
+
+# ADR 0045
+[[states]]
+name = "map-spec"
+model = "fable"
+effort = "medium"
+clear = true
+next = ["tickets"]
+prompt = """
+/to-spec {subject}
+
+After writing the spec, announce {next_state}.
+"""
