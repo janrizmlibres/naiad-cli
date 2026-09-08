@@ -187,6 +187,33 @@ def test_an_empty_state_key_is_kept_rather_than_read_as_absent():
     assert workflow.state("a").model == ""
 
 
+def test_a_state_may_reserve_its_questions_for_the_human():
+    """A State declaring `questions = "human"` is one whose Questions are never
+    the Answerer's to settle (ADR 0046). Absence is the Answerer, which is what
+    every State meant before the key existed."""
+    workflow = parse_workflow(
+        """
+        name = "w"
+
+        [[states]]
+        name = "a"
+        prompt = "x"
+        questions = "human"
+
+        [[states]]
+        name = "b"
+        prompt = "y"
+
+        [[states]]
+        name = "done"
+        terminal = true
+        """
+    )
+
+    assert workflow.state("a").questions == "human"
+    assert workflow.state("b").questions == "answerer"
+
+
 def test_the_answerer_table_is_parsed_with_both_keys_optional():
     workflow = parse_workflow(
         """
@@ -293,6 +320,16 @@ def test_a_workflow_without_an_answerer_table_has_no_answerer_opinion():
             'name = "w"\n[answerer]\nmodel = 3\n[[states]]\nname = "b"\nterminal = true',
             "answerer model must be a string",
             id="bad answerer model type",
+        ),
+        pytest.param(
+            'name = "w"\n[[states]]\nname = "a"\nquestions = "nobody"\n[[states]]\nname = "b"\nterminal = true',
+            "state 'a': questions must be \"answerer\" or \"human\"",
+            id="unknown questions value",
+        ),
+        pytest.param(
+            'name = "w"\n[[states]]\nname = "a"\nquestions = true\n[[states]]\nname = "b"\nterminal = true',
+            "state 'a': questions must be \"answerer\" or \"human\"",
+            id="bad questions type",
         ),
     ],
 )

@@ -65,9 +65,29 @@ terminal = true
 """
 
 
+# A State whose Questions the Workflow reserves for the human (ADR 0046).
+RESERVING = """
+name = "map"
+
+[[states]]
+name = "wayfind"
+prompt = "/wayfinder {subject}"
+questions = "human"
+
+[[states]]
+name = "done"
+terminal = true
+"""
+
+
 @pytest.fixture
 def workflow():
     return parse_workflow(WORKFLOW)
+
+
+@pytest.fixture
+def reserving():
+    return parse_workflow(RESERVING)
 
 
 @pytest.fixture
@@ -1064,6 +1084,44 @@ def test_an_answer_is_sent_once_the_turn_has_ended(workflow):
     )
 
     assert decide(workflow, stopped) == Respond(question=QUESTION, answer="the client")
+
+
+def test_a_question_from_a_state_reserving_its_questions_is_never_consulted(reserving):
+    """The Workflow, not the Prompt, says whose the Question is: a State that
+    reserves its Questions for the human parks as an Escalation does, and the
+    Answerer is never asked (ADR 0046)."""
+    action = decide(reserving, signals("wayfind", question=QUESTION))
+
+    assert isinstance(action, Notify)
+    assert action.question == QUESTION
+
+
+def test_a_reserved_question_notifies_before_any_turn_has_ended(reserving):
+    """Notifying sends nothing into the session, so like a Consultation it
+    need not wait on the agent finishing its turn."""
+    action = decide(reserving, signals("wayfind", question=QUESTION, stopped=False))
+
+    assert isinstance(action, Notify)
+
+
+def test_a_reserved_question_tells_the_human_which_state_and_what_was_asked(reserving):
+    """No Answerer has phrased a reason, so the notification carries the
+    Question itself: the human reads it on their phone, not in the session."""
+    action = decide(reserving, signals("wayfind", question=QUESTION))
+
+    assert "wayfind" in action.reason
+    assert QUESTION.text in action.reason
+
+
+def test_a_reserved_question_notifies_once_however_often_the_decision_is_made(reserving):
+    already = signals("wayfind", question=QUESTION, notified=True)
+
+    assert decide(reserving, already) is NOTHING
+
+
+def test_a_state_that_reserves_nothing_still_consults_the_answerer(workflow):
+    """The key is opt-in: every State that says nothing keeps the Answerer."""
+    assert decide(workflow, signals("implement", question=QUESTION)) == Consult(question=QUESTION)
 
 
 def test_announcing_a_terminal_state_finishes_the_run(workflow):

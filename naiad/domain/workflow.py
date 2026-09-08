@@ -11,9 +11,14 @@ import tomllib
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 DEFAULT_SOURCE = "<workflow>"
+
+# Whose a State's Questions are. The Answerer's unless the State says otherwise,
+# which is what every State meant before the key existed (ADR 0046).
+QuestionsTo = Literal["answerer", "human"]
+QUESTIONS_TO: tuple[QuestionsTo, ...] = ("answerer", "human")
 
 
 class WorkflowError(Exception):
@@ -38,6 +43,10 @@ class State:
     # find (ADR 0040).
     model: str | None = None
     effort: str | None = None
+    # Who answers a Question asked from this State. "human" reserves them: the
+    # Answerer is never consulted and the Run parks as it does on an
+    # Escalation, with the human answering in the Session (ADR 0046).
+    questions: QuestionsTo = "answerer"
 
     @property
     def is_gate_state(self) -> bool:
@@ -192,6 +201,10 @@ def _parse_state(
     own_model = _optional_string(raw, "model", bad)
     own_effort = _optional_string(raw, "effort", bad)
 
+    questions = raw.get("questions", "answerer")
+    if questions not in QUESTIONS_TO:
+        raise bad('questions must be "answerer" or "human"')
+
     return State(
         name=name,
         prompt=prompt,
@@ -200,4 +213,5 @@ def _parse_state(
         next_candidates=tuple(successors),
         model=own_model if own_model is not None else default_model,
         effort=own_effort if own_effort is not None else default_effort,
+        questions=questions,
     )

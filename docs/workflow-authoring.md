@@ -92,3 +92,10 @@ that recurring spend where it does not discount the States'.
 
 The `fallback` key is the Answerer's alone. ADR 0031 gives the reasoning and
 the syntax.
+
+A State may keep the Answerer out with `questions = "human"`. A Question asked
+from such a State is never consulted: the Run parks as it does on an
+Escalation, the notification carries the Question's text, and the human
+answers in the Session. `wayfind` declares it, because a Wayfinder map's
+tickets are the decisions a human is meant to make (ADR 0046). Every other
+State says nothing and keeps the Answerer.

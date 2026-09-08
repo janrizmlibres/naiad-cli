@@ -308,7 +308,8 @@ class Notify:
     the agent announces, and delivery resumes. Only a Terminal State ends a
     Run, which is why this is not Finish.
 
-    question is set when what needs a human is an Escalated Question, so that
+    question is set when what needs a human is a Question — one the Answerer
+    escalated, or one the Workflow reserved for the human (ADR 0046) — so that
     the Answer log records what became of it beside the ones that were
     answered. An Escalation is not a separate Action — a Gate reached, an
     Answerer escalating, an agent gone silent and an agent hung are one
@@ -378,6 +379,20 @@ def decide(workflow: Workflow, signals: Signals, *, skip_gates: bool = False) ->
         # Consulting and escalating both send nothing into the session, so
         # neither can type over work in progress and neither waits on a turn
         # ending. That exemption is theirs alone.
+        asked_from = workflow.state(announcement.state)
+        if asked_from is not None and asked_from.questions == "human":
+            # The Workflow reserved this State's Questions for the human, so
+            # the Answerer is never consulted: the Run parks exactly as it
+            # does on an Escalation, and the human answers in the session
+            # (ADR 0046). The Question rides along for the Answer log, which
+            # records what became of it; the reason carries its text because
+            # no Answerer has phrased one and the notification is all the
+            # human sees before they sit down.
+            return _notify(
+                signals,
+                f"state '{asked_from.name}' reserves its Questions for you: {question.text}",
+                question=question,
+            )
         if consultation is None:
             return Consult(question=question)
         if isinstance(consultation, Escalated):

@@ -183,19 +183,18 @@ terminal = true
 # or an Adoption — so it sits after the Terminal State, out of the declared
 # order, and every State of it names its exits (ADR 0045).
 
-# ADR 0009, 0045
+# ADR 0009, 0045, 0046
 [[states]]
 name = "wayfind"
 model = "opus"
 effort = "high"
 clear = true
+questions = "human"
 next = ["wayfind", "chart", "review"]
 prompt = """
 /wayfinder {subject}
 
 Resolve that one ticket and no other in this pass, research included.
-
-Never ask a Question while resolving it: a decision ticket is answered by a person, not the Answerer. If the ticket cannot be resolved without one, leave it claimed, write what you need on the ticket and in the session, and announce chart, passing that ticket's file as the subject. When the person has replied, finish the ticket, then choose what comes next as below.
 
 Then choose what comes next. A ticket is closed when its Status line reads resolved or wontfix, claimed when it reads claimed, and open otherwise. Scan the map's tickets for the lowest-numbered one that is open, unclaimed, and whose blocking edges are all satisfied, and read its Mode line:
 

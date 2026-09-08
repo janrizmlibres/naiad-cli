@@ -227,10 +227,11 @@ def tick(
         )
         notices.record_notified(announcement, wait_count=wait_count, hold_count=hold_count)
         if action.question is not None:
-            # An Escalated Question. Recorded here rather than at the
-            # consultation so that the log holds what became of it, not merely
-            # what was said about it — and once, because a second notification
-            # for the same Announcement never arrives.
+            # A Question the human is answering: one the Answerer escalated,
+            # or one the Workflow reserved (ADR 0046). Recorded here rather
+            # than at the consultation so that the log holds what became of
+            # it, not merely what was said about it — and once, because a
+            # second notification for the same Announcement never arrives.
             answers.record(question=action.question, answer=action.reason, escalated=True)
 
     log.record(action, seq=announcement.seq if announcement is not None else None)
