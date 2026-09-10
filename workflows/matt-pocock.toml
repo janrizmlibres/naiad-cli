@@ -155,15 +155,17 @@ model = "opus"
 effort = "high"
 clear = true
 prompt = """
-Before anything else, decide whether this repository opens a pull request at all. It does not if it has no remote to open one against, or if a naiad.toml at its root says not to open one. In either case announce {next_state}.
+Before anything else, work out which repositories this Run's work reached. This one, always. A naiad.toml at this repository's root may also name companion repositories — a frontend to this backend, a client to this service — under a `companions` key, whose value is a list of paths to their checkouts relative to this repository's root. A feature that spans them leaves half its work in another checkout, so look at each one that key names: it carries this Run's work if it stands on a branch other than its own base branch, with commits ahead of that base whose contents answer this Run's task. One that carries none — no such branch, or commits that are somebody else's unfinished work — is left untouched, and you say in the session which it was and why.
 
-Otherwise, open a pull request directly through the MCP server for this repository's host — GitHub, Gitea — taking the description from the branch compared against its base.
+Then take each of those repositories in turn, this one first, and decide for it alone whether it opens a pull request at all. It does not if it has no remote to open one against, or if a naiad.toml at its root says not to open one; say so in the session and go on to the next.
+
+Otherwise, open a pull request there directly through the MCP server for that repository's host — GitHub, Gitea — pushing its branch first where the host does not have it yet, and taking the description from that branch compared against its base. Where this Run opens more than one, each body names the others, since half a change that only works whole is not a thing a reviewer should have to go looking for.
 
 Predecessor: {predecessor}
 
-Open it against the right base. When no Predecessor is named above, say nothing about a base and let it default to the repository's own. Otherwise run `git merge-base --is-ancestor <predecessor> <base branch>`, in that order, now — rather than relying on what was true when this Run started, because a Predecessor can land while a Run is working. A non-zero exit says the Predecessor still has not landed and this branch stands on it, so open it against the Predecessor as the base. A zero exit says it has landed, so say nothing about a base and let it default to the repository's own.
+Open this repository's own against the right base. When no Predecessor is named above, say nothing about a base and let it default to the repository's own. Otherwise run `git merge-base --is-ancestor <predecessor> <base branch>`, in that order, now — rather than relying on what was true when this Run started, because a Predecessor can land while a Run is working. A non-zero exit says the Predecessor still has not landed and this branch stands on it, so open it against the Predecessor as the base. A zero exit says it has landed, so say nothing about a base and let it default to the repository's own. A companion's pull request takes no Predecessor — a branch name here is not a fact about another repository — so say nothing about a base there either.
 
-Once the pull request is open, announce {next_state}.
+Once every one of them is settled, opened or deliberately not, announce {next_state}.
 """
 
 [[states]]

@@ -136,7 +136,7 @@ used to be. Read the ADRs named for a State before reshaping it.
 | `implement` | ADR 0009 (an Announcement carries a Subject), ADR 0010, ADR 0027 (wontfix is closed), ADR 0033, ADR 0034 (needs-triage is triaged), ADR 0041 |
 | `triage` | the same six as `implement`; ADR 0034 is the one that created it |
 | `handover` | ADR 0007, ADR 0010, ADR 0034 |
-| `pull-request` | ADR 0015, ADR 0016 (the tail is project-neutral), ADR 0018 (how the tail ends is read from the project) |
+| `pull-request` | ADR 0015, ADR 0016 (the tail is project-neutral), ADR 0018 (how the tail ends is read from the project), ADR 0048 (a companion repository gets its own pull request) |
 | `wayfind` | ADR 0009, ADR 0045 (a Wayfinder map is walked AFK-first and stops at a Gate), ADR 0046 (a State may reserve its Questions for the human) |
 | `chart` | ADR 0045 |
 | `map-spec` | ADR 0045 |
