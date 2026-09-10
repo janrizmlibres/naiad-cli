@@ -2,10 +2,12 @@
 
 ## Workflow files
 
-`workflows/*.toml` is configuration a human hand-edits. Keep it that way: a
-comment is a one-line ADR pointer, never an explanation. Reasoning that needs
-writing down goes to `docs/adr/`. Prompt conventions and this repository's own
-model choices are in `docs/workflow-authoring.md`.
+`workflows/*.toml` is configuration a human hand-edits, and it is shipped to
+projects that know nothing of this repository. Keep it that way: no ADR
+pointers and no explanation in its comments. Reasoning that needs writing down
+goes to `docs/adr/`, and `docs/workflow-authoring.md` indexes, per State, the
+decisions that shaped the shipped file, beside the Prompt conventions and this
+repository's own model choices.
 
 ## Agent skills
 

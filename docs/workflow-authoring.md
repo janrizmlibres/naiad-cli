@@ -68,17 +68,18 @@ These are tuning rather than decisions. Change them when the work changes.
 
 ### Models and effort
 
-The file declares `opus` at `high` effort as its file-level default, and no
-State names either key. The whole chain runs on that pair.
+The file declares no file-level default. Every State that delivers a Prompt
+declares its own pair instead: `fable` at `medium` for the phases that
+interview, diagnose, triage and write specs, and `opus` at `high` for
+classifying, implementing, opening the pull request and walking a Wayfinder
+map. `spec` and `tickets` declare nothing and run on what the State before
+them set.
 
-It is the default that carries the choice, and not the first State, though
-one declaration on `classify` would reach every State a Run walks from there.
-An Entry may name the State it starts at: a batch of known bugs enters at
-`diagnose`, because the operator has already made the judgement `classify`
-exists to make. A pair declared on `classify` would never reach
-those Runs, and they would take the platform's own setting with nothing in
-this file to say so. A default reaches every State however a Run enters
-(ADR 0040).
+Each delivering State carries its own pair because an Entry may name the State
+it starts at: a batch of known bugs enters at `diagnose`, because the operator
+has already made the judgement `classify` exists to make. A pair declared on
+`classify` alone would never reach those Runs, and they would take the
+platform's own setting with nothing in this file to say so (ADR 0040).
 
 ### The Answerer
 
@@ -99,3 +100,28 @@ Escalation, the notification carries the Question's text, and the human
 answers in the Session. `wayfind` declares it, because a Wayfinder map's
 tickets are the decisions a human is meant to make (ADR 0046). Every other
 State says nothing and keeps the Answerer.
+
+## Where each State's shape was decided
+
+The shipped file carries no ADR pointers, because it is shipped to projects
+that have never seen this repository. This table is the index its comments
+used to be. Read the ADRs named for a State before reshaping it.
+
+| State | Decided in |
+|---|---|
+| file as a whole | ADR 0040 (a State without a setting has no opinion), ADR 0043 (its tests assert invariants, not content) |
+| `[answerer]` | ADR 0026 (model and effort ride the Workflow file), ADR 0031 (fallback rides the invocation) |
+| `classify` | ADR 0005 (classification is a State, not a router), ADR 0041 (fewer pins) |
+| `diagnose` | ADR 0008 (the bug branch is one State), ADR 0015 (branch names, not git knowledge), ADR 0022 (a Working branch is given or derived) |
+| `no-repro` | ADR 0007 (Gate skipping follows the declared order), ADR 0008 |
+| `grill` | ADR 0015, ADR 0022 |
+| `review` | ADR 0007, ADR 0045 (the Wayfinder loop re-enters here) |
+| `spec` | ADR 0033 (a Prompt pins what a skill leaves loose), ADR 0041 |
+| `tickets` | ADR 0010 (the implement loop triages), ADR 0033, ADR 0041 |
+| `implement` | ADR 0009 (an Announcement carries a Subject), ADR 0010, ADR 0027 (wontfix is closed), ADR 0033, ADR 0034 (needs-triage is triaged), ADR 0041 |
+| `triage` | the same six as `implement`; ADR 0034 is the one that created it |
+| `handover` | ADR 0007, ADR 0010, ADR 0034 |
+| `pull-request` | ADR 0015, ADR 0016 (the tail is project-neutral), ADR 0018 (how the tail ends is read from the project) |
+| `wayfind` | ADR 0009, ADR 0045 (a Wayfinder map is walked AFK-first and stops at a Gate), ADR 0046 (a State may reserve its Questions for the human) |
+| `chart` | ADR 0045 |
+| `map-spec` | ADR 0045 |

@@ -1,18 +1,16 @@
-# Prompt conventions and this file's model choices: docs/workflow-authoring.md
-# Why each State is shaped as it is: the ADRs it points at, under docs/adr/.
+# Prompt conventions, this file's model choices, and where each State's shape
+# was decided: docs/workflow-authoring.md
 
 name = "matt-pocock"
 
 # Every State, however a Run enters this file — an Entry may name the State it
-# starts at, and a batch of known bugs starts at `diagnose` (ADR 0040).
+# starts at, and a batch of known bugs starts at `diagnose`.
 
-# ADR 0026, 0031
 [answerer]
 model = "fable"
 effort = "medium"
 fallback = "opus,sonnet"
 
-# ADR 0005, 0041
 [[states]]
 name = "classify"
 model = "opus"
@@ -28,7 +26,6 @@ Read as much of the codebase as you need to answer that one question. The criter
 Say in a sentence which it is and why, then announce grill or diagnose.
 """
 
-# ADR 0008, 0015, 0022
 [[states]]
 name = "diagnose"
 model = "fable"
@@ -56,12 +53,10 @@ Do not stop at the diagnosis. Implement the fix immediately.
 If you cannot build a feedback loop at all, do not hypothesise without one: say so in the session, list what you tried and what you need, and announce no-repro. Otherwise, when the fix is in place, announce pull-request.
 """
 
-# ADR 0007, 0008
 [[states]]
 name = "no-repro"
 next = ["pull-request"]
 
-# ADR 0015, 0022
 [[states]]
 name = "grill"
 model = "fable"
@@ -86,12 +81,10 @@ If the task above, or an issue it links to, names an image — a mockup to match
 When the interview is finished and its ADRs and glossary entries are written, announce {next_state}.
 """
 
-# ADR 0007, 0045
 [[states]]
 name = "review"
 next = ["spec", "map-spec"]
 
-# ADR 0033, 0041
 [[states]]
 name = "spec"
 prompt = """
@@ -100,7 +93,6 @@ prompt = """
 After writing the spec, announce {next_state}.
 """
 
-# ADR 0010, 0033, 0041
 [[states]]
 name = "tickets"
 next = ["implement", "handover"]
@@ -110,7 +102,6 @@ prompt = """
 After writing the tickets, announce {next_state}, passing the lowest-numbered ticket that is ready-for-agent and blocked by nothing as the subject. If no ticket qualifies, announce handover instead, and say which status you found.
 """
 
-# ADR 0009, 0010, 0027, 0033, 0034, 0041
 [[states]]
 name = "implement"
 model = "opus"
@@ -130,7 +121,6 @@ Then choose what comes next. A ticket is closed when its Status line reads resol
 - no open tickets remain — announce pull-request.
 """
 
-# ADR 0009, 0010, 0027, 0033, 0034, 0041
 [[states]]
 name = "triage"
 model = "fable"
@@ -152,12 +142,10 @@ Then choose what comes next. A ticket is closed when its Status line reads resol
 - no open tickets remain — announce pull-request.
 """
 
-# ADR 0007, 0010, 0034
 [[states]]
 name = "handover"
 next = ["implement", "triage", "pull-request"]
 
-# ADR 0015, 0016, 0018
 [[states]]
 name = "pull-request"
 model = "opus"
@@ -181,9 +169,8 @@ terminal = true
 
 # The Wayfinder loop. Entered only by name — `--at wayfind --subject <ticket>`
 # or an Adoption — so it sits after the Terminal State, out of the declared
-# order, and every State of it names its exits (ADR 0045).
+# order, and every State of it names its exits.
 
-# ADR 0009, 0045, 0046
 [[states]]
 name = "wayfind"
 model = "opus"
@@ -203,12 +190,10 @@ Then choose what comes next. A ticket is closed when its Status line reads resol
 - no open tickets remain — announce review, passing the map file as the subject.
 """
 
-# ADR 0045
 [[states]]
 name = "chart"
 next = ["wayfind", "map-spec"]
 
-# ADR 0045
 [[states]]
 name = "map-spec"
 model = "fable"

@@ -4,8 +4,9 @@ exit is named to the agent, and a Run can start from it (ADR 0043).
 
 Nothing here reads the file's meaning — which States it declares, what its
 Prompts pin, which settings it chooses — so editing the file never breaks a
-test. What the Workflow says is reviewed in the file itself, beside the ADRs
-its comments point at, and exercised by manual smoke (docs/smoke/matt-pocock.md).
+test. What the Workflow says is reviewed in the file itself, against the
+decisions docs/workflow-authoring.md indexes per State, and exercised by manual
+smoke (docs/smoke/matt-pocock.md).
 
 Every parametrised list below is derived from the loaded file rather than
 written out, which is what keeps a State added or removed from touching this
