@@ -637,3 +637,58 @@ def test_a_malformed_workflow_creates_no_run_directory_and_no_session(repo, stor
     assert "declares no states" in str(caught.value)
     assert sessions.spawned == []
     assert store.all() == []
+
+
+COMPACTING = """
+name = "feature"
+autocompact = "200k"
+
+[[states]]
+name = "grill"
+prompt = "/grill-with-docs {task}"
+
+[[states]]
+name = "review"
+
+[[states]]
+name = "done"
+terminal = true
+"""
+
+
+def test_the_workflows_compaction_point_reaches_the_spawn(repo, store, sessions):
+    """Set once as the Session opens and never typed after (ADR 0047)."""
+    (repo / "workflow.toml").write_text(COMPACTING)
+
+    start(repo, store, sessions)
+
+    (spawn,) = sessions.spawned
+    assert spawn.autocompact == "200k"
+
+
+def test_a_gate_state_first_still_carries_the_compaction_point(repo, store, sessions):
+    """Unlike Model and Effort, which precede a Prompt a Gate State never
+    delivers, the point is the Session's and rides whichever State comes first."""
+    (repo / "workflow.toml").write_text(COMPACTING)
+
+    start(repo, store, sessions, start_state="review")
+
+    (spawn,) = sessions.spawned
+    assert spawn.autocompact == "200k"
+    assert spawn.model is None
+
+
+def test_a_workflow_naming_no_compaction_point_spawns_without_one(repo, store, sessions):
+    start(repo, store, sessions)
+
+    (spawn,) = sessions.spawned
+    assert spawn.autocompact is None
+
+
+def test_the_compaction_point_the_spawn_carried_is_written_to_the_log(repo, store, sessions):
+    (repo / "workflow.toml").write_text(COMPACTING)
+
+    run = start(repo, store, sessions)
+
+    assert [(e.kind, e.state) for e in RunLog(run.root).entries()] == [("launched", "grill")]
+    assert RunLog(run.root).belief(announcement(seq=1)) == ({}, False)

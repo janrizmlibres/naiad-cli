@@ -68,6 +68,11 @@ class Workflow:
     # forwarded as --fallback-model and never parsed: a comma-separated list is
     # the flag's own syntax, not Naiad's (ADR 0031).
     answerer_fallback: str | None = None
+    # Where the Session summarises its own context, handed to the launch as
+    # `--autocompact` and never read: the value is the platform's syntax, not
+    # Naiad's. File-level and never per State because it is a property of the
+    # Session, set once as it opens. None means no flag (ADR 0047).
+    autocompact: str | None = None
 
     def state(self, name: str) -> State | None:
         for state in self.states:
@@ -100,6 +105,7 @@ def parse_workflow(text: str, *, source: str = DEFAULT_SOURCE) -> Workflow:
     default_model = _optional_string(document, "model", reject)
     default_effort = _optional_string(document, "effort", reject)
     answerer_model, answerer_effort, answerer_fallback = _parse_answerer(document, reject)
+    autocompact = _optional_string(document, "autocompact", reject)
 
     raw_states = document.get("states")
     if not raw_states or not isinstance(raw_states, list):
@@ -136,6 +142,7 @@ def parse_workflow(text: str, *, source: str = DEFAULT_SOURCE) -> Workflow:
         answerer_model=answerer_model,
         answerer_effort=answerer_effort,
         answerer_fallback=answerer_fallback,
+        autocompact=autocompact,
     )
 
 

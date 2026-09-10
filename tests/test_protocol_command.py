@@ -10,8 +10,11 @@ import subprocess
 
 import pytest
 
+from naiad.domain.answerer import Escalated
+from naiad.domain.question import Question
 from naiad.runtime.announcements import Announcements
-from naiad.runtime.records import Clears
+from naiad.runtime.log import RunLog
+from naiad.runtime.records import Clears, Consultations, Handled
 from naiad.runtime.run import RunStore
 from naiad_command import NAIAD, naiad_environment, requires_installed_naiad
 
@@ -190,3 +193,91 @@ def test_a_workflow_edited_out_from_under_the_run_does_not_break_the_session(sto
 
     assert finished.returncode == 0
     assert "naiad state" in injected(finished)
+
+
+def test_a_compact_source_records_that_the_context_was_summarised(store, repo):
+    """The diagnostic ADR 0047 keeps: how many times, and in which State, the
+    Session summarised itself is read from the Run log and nowhere else."""
+    run = make_run(store, repo)
+    Announcements(run.root).announce("review")
+
+    finished = protocol(run, source="compact")
+
+    assert finished.returncode == 0, finished.stderr
+    assert [(e.kind, e.state) for e in RunLog(run.root).entries()] == [("compacted", "review")]
+
+
+def test_a_startup_source_records_no_compaction(store, repo):
+    run = make_run(store, repo)
+
+    protocol(run, source="startup")
+
+    assert RunLog(run.root).entries() == []
+
+
+def test_a_compact_source_reminds_the_agent_of_its_state_and_subject(store, repo):
+    run = make_run(store, repo)
+    Announcements(run.root).announce("spec", subject="docs/spec.md")
+
+    told = injected(protocol(run, source="compact"))
+
+    assert "naiad state" in told
+    assert "spec" in told
+    assert "docs/spec.md" in told
+
+
+def test_a_compact_source_before_any_announcement_names_the_state_the_run_began_at(store, repo):
+    told = injected(protocol(make_run(store, repo, start_state="spec"), source="compact"))
+
+    assert "spec" in told
+
+
+def test_a_compact_source_repeats_a_question_still_unanswered(store, repo):
+    run = make_run(store, repo)
+    Announcements(run.root).ask(Question(text="Which module owns retries?", options=()), state="grill")
+
+    told = injected(protocol(run, source="compact"))
+
+    assert "Which module owns retries?" in told
+
+
+def test_a_compact_source_does_not_repeat_a_question_already_answered(store, repo):
+    run = make_run(store, repo)
+    asked = Announcements(run.root).ask(Question(text="Which module owns retries?", options=()), state="grill")
+    Handled(run.root).record(asked.seq)
+
+    told = injected(protocol(run, source="compact"))
+
+    assert "Which module owns retries?" not in told
+
+
+def test_a_startup_source_carries_no_reminder(store, repo):
+    run = make_run(store, repo)
+    Announcements(run.root).announce("spec", subject="docs/spec.md")
+
+    assert "docs/spec.md" not in injected(protocol(run, source="startup"))
+
+
+def test_a_compact_source_does_not_repeat_a_question_handed_to_a_human(store, repo):
+    """An escalated Question is the human's to answer in the Session, and
+    is no longer pending — the same rule `naiad ask` applies (ADR 0044)."""
+    run = make_run(store, repo)
+    asked = Announcements(run.root).ask(Question(text="Which module owns retries?", options=()), state="grill")
+    Consultations(run.root).record(asked, Escalated(reason="needs a credential"))
+
+    told = injected(protocol(run, source="compact"))
+
+    assert "Which module owns retries?" not in told
+
+
+def test_a_compact_source_after_an_announcement_survives_a_workflow_that_no_longer_parses(store, repo):
+    """The State the agent stands in is its own Announcement's, which needs no
+    Workflow to read; only a Run that announced nothing has to consult one."""
+    run = make_run(store, repo)
+    Announcements(run.root).announce("spec", subject="docs/spec.md")
+    (repo / "workflow.toml").write_text("not = [toml")
+
+    told = injected(protocol(run, source="compact"))
+
+    assert "docs/spec.md" in told
+    assert [(e.kind, e.state) for e in RunLog(run.root).entries()] == [("compacted", "spec")]

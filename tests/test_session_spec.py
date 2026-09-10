@@ -82,3 +82,17 @@ def test_a_session_with_neither_key_passes_no_flags():
 
     assert "--model" not in argv
     assert "--effort" not in argv
+
+
+def test_the_compaction_point_rides_as_a_launch_flag():
+    """Handed to the flag verbatim: the Session judges the value (ADR 0047)."""
+    argv = command_for(spec(autocompact="200k"))
+
+    assert argv[argv.index("--autocompact") + 1] == "200k"
+    assert argv[-1] == "do the work"
+
+
+def test_a_session_with_no_compaction_point_passes_no_flag():
+    argv = command_for(spec())
+
+    assert "--autocompact" not in argv

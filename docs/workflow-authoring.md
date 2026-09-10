@@ -55,6 +55,14 @@ types nothing for it. So declare a setting where a phase needs a different one,
 and nowhere else. A file-level default is optional, and a State's own key
 overrides it. ADR 0040 gives the reasoning.
 
+### The compaction point is the file's, not a State's
+
+`autocompact` at the top of the file names the point at which the Session
+summarises its own context, in the platform's own syntax (`"200k"`). It rides
+the launch of a spawned Session and is never typed after, so it belongs to the
+file and no State may declare one. Leave it out and the Session compacts where
+the platform would anyway. ADR 0047 gives the reasoning.
+
 ### A branching State writes its successors out
 
 `{next_state}` renders every candidate as one joined phrase. Use the
@@ -80,6 +88,13 @@ it starts at: a batch of known bugs enters at `diagnose`, because the operator
 has already made the judgement `classify` exists to make. A pair declared on
 `classify` alone would never reach those Runs, and they would take the
 platform's own setting with nothing in this file to say so (ADR 0040).
+
+### The compaction point
+
+The file declares `autocompact = "200k"`. A long `implement` pass on a 1M
+window otherwise runs far past that, and past it the work is worse and every
+turn re-sends the whole context. The Answerer session is untouched: it is not
+the one that grows.
 
 ### The Answerer
 
@@ -109,7 +124,7 @@ used to be. Read the ADRs named for a State before reshaping it.
 
 | State | Decided in |
 |---|---|
-| file as a whole | ADR 0040 (a State without a setting has no opinion), ADR 0043 (its tests assert invariants, not content) |
+| file as a whole | ADR 0040 (a State without a setting has no opinion), ADR 0043 (its tests assert invariants, not content), ADR 0047 (the compaction point rides the launch) |
 | `[answerer]` | ADR 0026 (model and effort ride the Workflow file), ADR 0031 (fallback rides the invocation) |
 | `classify` | ADR 0005 (classification is a State, not a router), ADR 0041 (fewer pins) |
 | `diagnose` | ADR 0008 (the bug branch is one State), ADR 0015 (branch names, not git knowledge), ADR 0022 (a Working branch is given or derived) |

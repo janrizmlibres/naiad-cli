@@ -30,10 +30,21 @@ def render_states(workflow: Workflow) -> str:
     name_width = max(len(name) for name in names)
     command_width = max(len(command) for command in commands)
 
-    lines = [workflow.name]
+    lines = [_heading(workflow)]
     for state, command in zip(workflow.states, commands):
         lines.append(_line(state, command, name_width, command_width))
     return "\n".join(lines)
+
+
+def _heading(workflow: Workflow) -> str:
+    """The Workflow's name, and beside it the one file-level fact an Adoption
+    has to relay: the point at which the Workflow wants the Session to
+    summarise itself. An Adoption types nothing into the human's Session, so
+    the human is told what it wants instead, and this is where the adopt skill
+    reads it (ADR 0047)."""
+    if workflow.autocompact is None:
+        return workflow.name
+    return f"{workflow.name}{GAP}(autocompact {workflow.autocompact})"
 
 
 def _line(state: State, command: str, name_width: int, command_width: int) -> str:

@@ -40,6 +40,11 @@ class SessionSpec:
 
     None when the delivering State has neither key — a Gate State first among
     them, which delivers nothing and so carries nothing.
+
+    autocompact is the Workflow's, not a State's: where the Session summarises
+    its own context is set once as it opens and rides whatever State comes
+    first, Gate State included, because it precedes no Prompt. None means no
+    flag (ADR 0047).
     """
 
     name: str
@@ -48,5 +53,6 @@ class SessionSpec:
     initial_prompt: str | None = None
     model: str | None = None
     effort: str | None = None
+    autocompact: str | None = None
     permission_mode: str = BYPASS_PERMISSIONS
     environ: Mapping[str, str] = field(default_factory=dict)

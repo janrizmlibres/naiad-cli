@@ -101,6 +101,8 @@ def _claude_argv(spec: SessionSpec) -> list[str]:
         argv += ["--model", spec.model]
     if spec.effort is not None:
         argv += ["--effort", spec.effort]
+    if spec.autocompact is not None:
+        argv += ["--autocompact", spec.autocompact]
     if spec.initial_prompt is not None:
         argv.append(spec.initial_prompt)
     return argv

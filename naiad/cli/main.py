@@ -44,7 +44,7 @@ from naiad.cli.library import (
     workflows_in,
 )
 from naiad.cli.kickoff import start_entry
-from naiad.cli.protocol import injection_for
+from naiad.cli.protocol import injection_for, standing_in
 from naiad.cli.refusals import ADD_COMMAND, ADOPT_COMMAND, RUN_COMMAND, Remedy
 from naiad.cli.supervisor import supervise_queue
 from naiad.cli.wait import WaitError, declare_wait
@@ -54,6 +54,7 @@ from naiad.domain.listing import render_states
 from naiad.domain.workflow import WorkflowError, load_workflow
 from naiad.hooks.install import DEFAULT_SETTINGS_PATH, install_hooks
 from naiad.runtime.announcements import Announcements
+from naiad.runtime.log import RunLog
 from naiad.runtime.home import (
     StorageError,
     default_library_root,
@@ -509,15 +510,24 @@ def _protocol(arguments: argparse.Namespace) -> int:
     Clear being confirmed rather than hoped for (ADR 0019). The three sources
     are told apart by the hook's own `source`, a documented field (ADR 0002),
     so only a Clear counts — a startup or a compaction is not this State's
-    Clear."""
+    Clear.
+
+    A fresh context a Compaction made is the Session's own doing, and Naiad
+    only learns of it here: it is written to the Run log as the diagnostic,
+    and the injection gains the reminder of where the agent stands, since the
+    summary may have lost it (ADR 0047)."""
     run = _attached_run()
     if run is None:
         return 0
 
-    if _hook_source() == "clear":
+    source = _hook_source()
+    if source == "clear":
         Clears(run.root).record_landing()
+    compacted = source == "compact"
+    if compacted:
+        RunLog(run.root).record_compaction(state=standing_in(run))
 
-    print(injection_for(run))
+    print(injection_for(run, compacted=compacted))
     return 0
 
 

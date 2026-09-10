@@ -160,6 +160,10 @@ Then tell the human, in your own words:
 
 - that this session is queued to be adopted, and at which state;
 - which branch the work will land on;
+- if the listing's first line showed an `autocompact` point: that the workflow
+  wants this session to compact its context there, and that `/autocompact
+  <that value>` sets it. Naiad does not type into this session, and neither do
+  you on its behalf — the human decides;
 - if the output says no supervisor is running: that the entry will wait in the
   queue indefinitely until they start one, quoting the command it names.
 

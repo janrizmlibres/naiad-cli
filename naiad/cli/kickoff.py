@@ -202,6 +202,10 @@ def start_run(
         # delivers nothing — launches without them (ADR 0026).
         model=None if opening_prompt is None else first.model,
         effort=None if opening_prompt is None else first.effort,
+        # The Workflow's rather than the State's, and carried whichever State
+        # comes first: where the Session summarises itself precedes no Prompt,
+        # so a Gate State first does not lose it (ADR 0047).
+        autocompact=checked.workflow.autocompact,
         environ={RUN_ID_VARIABLE: run_id},
     )
     pane = sessions.spawn(spec)
@@ -214,7 +218,9 @@ def start_run(
     # is what the launch actually carried (ADR 0039). An adopted Run has no
     # counterpart and needs none: Naiad did not open that Session and knows
     # nothing of its settings, so its belief starts empty (ADR 0028).
-    RunLog(run.root).record_launch(state=first.name, model=spec.model, effort=spec.effort)
+    RunLog(run.root).record_launch(
+        state=first.name, model=spec.model, effort=spec.effort, autocompact=spec.autocompact
+    )
     return run
 
 

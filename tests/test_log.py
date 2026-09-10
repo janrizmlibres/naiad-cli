@@ -409,3 +409,44 @@ def test_the_log_survives_being_written_by_one_process_and_read_by_another(tmp_p
     RunLog(tmp_path).record_announcement(announcement(seq=1, state="grill"))
 
     assert kinds(RunLog(tmp_path)) == ["announced"]
+
+
+def test_the_compaction_point_a_launch_carried_is_its_own_line_and_no_switch(log):
+    """A `launched` line rather than a `switched` one: no State ever compares
+    its settings against the point, so a Switch line would lie about what it
+    is for, and the belief must not learn it (ADR 0047)."""
+    log.record_launch(state="grill", model="opus", effort="high", autocompact="200k")
+
+    assert [(e.kind, e.state, e.detail) for e in log.entries() if e.kind != "switched"] == [
+        ("launched", "grill", "compacting at 200k"),
+    ]
+    assert log.belief(announcement(seq=1)) == ({"model": "opus", "effort": "high"}, False)
+
+
+def test_a_launch_with_no_compaction_point_writes_no_launched_line(log):
+    log.record_launch(state="grill", model="opus", effort=None, autocompact=None)
+
+    assert kinds(log) == ["switched"]
+
+
+def test_a_compaction_is_recorded_where_the_agent_stood(log):
+    """The diagnostic: 'its context was summarised three times during
+    implement' is read from here and nowhere else (ADR 0047)."""
+    log.record_compaction(state="implement")
+
+    assert [(e.kind, e.state) for e in log.entries()] == [("compacted", "implement")]
+
+
+def test_a_compaction_before_anything_was_announced_names_no_state(log):
+    log.record_compaction(state=None)
+
+    assert [(e.kind, e.state) for e in log.entries()] == [("compacted", None)]
+
+
+def test_a_compaction_leaves_the_belief_where_it_was(log):
+    """A summary discards conversation and leaves the Session's settings in
+    place, the reason ADR 0039 refused to key the belief on a Clear."""
+    log.record(Switch(state="grill", setting="model", value="opus"), seq=1)
+    log.record_compaction(state="grill")
+
+    assert log.belief(announcement(seq=2)) == ({"model": "opus"}, False)

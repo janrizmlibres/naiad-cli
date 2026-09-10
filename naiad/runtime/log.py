@@ -300,9 +300,17 @@ class RunLog:
         """
         self._append(LogLine(kind="adopted", detail=f"attached to pane {pane}"))
 
-    def record_launch(self, *, state: str, model: str | None, effort: str | None) -> None:
+    def record_launch(
+        self,
+        *,
+        state: str,
+        model: str | None,
+        effort: str | None,
+        autocompact: str | None = None,
+    ) -> None:
         """What the flags on a spawn set the Session to, written down as the
-        Switches they are (ADR 0039).
+        Switches they are (ADR 0039) — and, apart from them, the point at which
+        the Session was told to summarise itself (ADR 0047).
 
         A flag read as the process starts sets the Session as surely as a
         `/model` typed into a running one, and what every later State compares
@@ -319,6 +327,14 @@ class RunLog:
         Each flag is recorded only where it was actually carried. A Gate State
         first delivers nothing, so it launches with neither and is believed to
         hold neither.
+
+        The compaction point is a `launched` line and not a Switch: no State
+        ever compares its settings against it, so a `switched` line would feed
+        the belief a value nothing reads and lie about what it is for. It is
+        written where the Switches are — at the head of a spawned Run's
+        narrative — because it is the third thing the launch carried, and the
+        diagnostic that reads "compacted" later wants to know what point it
+        was compacted at.
         """
         launched: tuple[tuple[Setting, str | None], ...] = (
             ("model", model),
@@ -327,6 +343,23 @@ class RunLog:
         for setting, value in launched:
             if value is not None:
                 self.record(Switch(state=state, setting=setting, value=value))
+        if autocompact is not None:
+            self._append(
+                LogLine(kind="launched", state=state, detail=f"compacting at {autocompact}")
+            )
+
+    def record_compaction(self, *, state: str | None) -> None:
+        """That the Session summarised its own context, as the SessionStart
+        hook reported it (ADR 0047).
+
+        Written here rather than as an Action, like `record_adoption`: no tick
+        decided it, and Naiad neither asked for it nor could have. The State is
+        where the agent stood when it happened, read off the latest
+        Announcement, and None before anything was announced. Automatic and
+        typed compactions are not told apart: for the diagnostic both are the
+        context summarised at this point in the Run.
+        """
+        self._append(LogLine(kind="compacted", state=state))
 
     def record_branch(self, name: str) -> None:
         """The agent's declaration of the Run's Working branch (ADR 0022).

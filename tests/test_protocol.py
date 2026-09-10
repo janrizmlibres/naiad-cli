@@ -6,7 +6,13 @@ than on exact wording, which is prose and will be tuned.
 """
 
 from naiad.domain.decide import NUDGE_LIMIT
-from naiad.domain.protocol import render_adoption, render_answer, render_nudge, render_protocol
+from naiad.domain.protocol import (
+    render_adoption,
+    render_answer,
+    render_compaction,
+    render_nudge,
+    render_protocol,
+)
 
 
 def test_names_the_command_that_announces_a_state():
@@ -270,3 +276,49 @@ def test_no_adoption_is_left_holding_a_placeholder():
     for working_branch in (None, "MC-AGENT-8546"):
         for supervised in (True, False):
             assert "{" not in adoption(working_branch=working_branch, supervised=supervised)
+
+
+def compaction(**overrides):
+    fields = dict(state="implement", subject=".scratch/x/issues/04-toggle.md", question=None)
+    fields.update(overrides)
+    return render_compaction(**fields)
+
+
+def test_after_a_compaction_the_agent_is_told_which_state_it_stands_in():
+    """A summary can lose the phase the agent was in, and a Protocol alone —
+    'when this phase is done announce X' — invites a fresh start on a half-done
+    ticket, which is the Clear failure in different clothes (ADR 0047)."""
+    told = compaction()
+
+    assert "implement" in told
+    assert ".scratch/x/issues/04-toggle.md" in told
+
+
+def test_after_a_compaction_the_agent_is_told_to_carry_on_rather_than_start_over():
+    assert "carry on" in compaction().lower()
+
+
+def test_a_state_with_no_subject_is_named_without_one():
+    told = compaction(subject=None)
+
+    assert "implement" in told
+    assert "None" not in told
+
+
+def test_an_unanswered_question_is_repeated_so_it_is_not_asked_again():
+    """An agent whose summary lost its own Question would ask it again into a
+    refusal — one Question at a time — so the text is handed back with the
+    instruction not to."""
+    told = compaction(question="Which module owns retries?")
+
+    assert "Which module owns retries?" in told
+    assert "not ask it again" in told.lower()
+
+
+def test_with_no_question_open_none_is_mentioned():
+    assert "question" not in compaction().lower()
+
+
+def test_no_compaction_reminder_is_left_holding_a_placeholder():
+    for told in (compaction(), compaction(subject=None, question="Why?")):
+        assert "{" not in told and "}" not in told

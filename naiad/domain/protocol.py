@@ -243,6 +243,38 @@ _ADOPTION_SUPERVISED = """\
 A supervisor is running and will take this entry in its turn."""
 
 
+# What only a Compaction has to say, after the Protocol the fresh context has
+# just been taught (ADR 0047). A summary can lose the phase the agent was in and
+# the Question it had open, and the Protocol alone — "when this phase is done
+# announce X" — invites a fresh start on a half-done ticket, which is the Clear
+# failure in different clothes. Three things Naiad knows and the summary may
+# not: the State, the Subject, and the open Question. Nothing else.
+_COMPACTION_STANDING = """Your context was just compacted. You are in the {state} phase{about}: carry on
+with it from where the summary leaves off rather than starting it over."""
+
+_COMPACTION_ABOUT = ", working on `{subject}`"
+
+_COMPACTION_QUESTION = """You asked this question and its answer has not arrived yet: "{question}".
+Do not ask it again; end your turn and the answer comes back into this session."""
+
+
+def render_compaction(*, state: str, subject: str | None, question: str | None) -> str:
+    """What the SessionStart hook adds after the Protocol when its source is a
+    compaction, and after no other source: a startup has nothing to have lost,
+    and a Clear discards on purpose (ADR 0047).
+
+    The Question is the one still unanswered, if there is one. Repeated with
+    the instruction not to ask it again, because a second Question while one
+    is open is refused, and an agent whose summary lost its own Question would
+    ask it into that refusal.
+    """
+    about = _COMPACTION_ABOUT.format(subject=subject) if subject is not None else ""
+    told = _COMPACTION_STANDING.format(state=state, about=about)
+    if question is not None:
+        told = f"{told}\n\n{_COMPACTION_QUESTION.format(question=question)}"
+    return told
+
+
 def render_adoption(
     *,
     next_states: Sequence[str],
@@ -283,6 +315,7 @@ __all__ = [
     "WAIT_SUBCOMMAND",
     "render_adoption",
     "render_answer",
+    "render_compaction",
     "render_nudge",
     "render_protocol",
 ]

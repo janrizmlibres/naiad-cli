@@ -345,3 +345,43 @@ def test_the_error_names_the_source_of_the_workflow():
         parse_workflow('name = "w"', source="/tmp/broken.toml")
 
     assert "/tmp/broken.toml" in str(caught.value)
+
+
+def test_the_compaction_point_is_a_file_level_key_parsed_as_an_opaque_string():
+    """Where the Session summarises itself is a property of the Session, set
+    once at launch, so the key is the file's and never a State's. The value is
+    handed to the launch verbatim and judged there, as a Model is (ADR 0047)."""
+    workflow = parse_workflow(
+        """
+        name = "w"
+        autocompact = "200k"
+
+        [[states]]
+        name = "done"
+        terminal = true
+        """
+    )
+
+    assert workflow.autocompact == "200k"
+
+
+def test_a_workflow_that_names_no_compaction_point_has_no_opinion():
+    """Absent means no flag, so a Workflow written before the key existed runs
+    exactly as it did (ADR 0040, ADR 0047)."""
+    workflow = parse_workflow(WELL_FORMED)
+
+    assert workflow.autocompact is None
+
+
+def test_a_compaction_point_that_is_not_a_string_is_rejected():
+    with pytest.raises(WorkflowError, match="autocompact must be a string"):
+        parse_workflow(
+            """
+            name = "w"
+            autocompact = 200
+
+            [[states]]
+            name = "done"
+            terminal = true
+            """
+        )

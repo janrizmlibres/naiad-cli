@@ -98,3 +98,17 @@ def test_a_branching_state_names_the_states_it_may_go_to():
     """A Branching State's candidates are what the agent may announce next, so
     they say what starting there commits the Run to."""
     assert "branches: grill, diagnose" in line_for("classify")
+
+
+def test_a_compaction_point_is_shown_so_an_adoption_can_relay_it():
+    """An Adoption types nothing into the human's Session, so the point the
+    Workflow wants is told to the human instead — and the listing is what the
+    adopt skill reads (ADR 0047)."""
+    shown = render_states(parse_workflow(WORKFLOW.replace('name = "matt-pocock"', 'name = "matt-pocock"\nautocompact = "200k"')))
+
+    assert "autocompact" in shown.splitlines()[0]
+    assert "200k" in shown.splitlines()[0]
+
+
+def test_a_workflow_with_no_compaction_point_shows_none():
+    assert "autocompact" not in listing()
