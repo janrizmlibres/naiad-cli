@@ -77,11 +77,15 @@ These are tuning rather than decisions. Change them when the work changes.
 ### Models and effort
 
 The file declares no file-level default. Every State that delivers a Prompt
-declares its own pair instead: `fable` at `medium` for the phases that
-interview, diagnose, triage and write specs, and `opus` at `high` for
-classifying, implementing, opening the pull request and walking a Wayfinder
-map. `spec` and `tickets` declare nothing and run on what the State before
-them set.
+declares its own pair instead, and for now every one of them declares the same
+pair: `opus` at `medium`. `spec` and `tickets` declare nothing and run on what
+the State before them set.
+
+The phases that interview, diagnose, triage and write specs ran on `fable`
+until the Fable credit balance ran out mid-Run, which reaches a State as a
+non-zero exit and the Answerer as an Escalation. Putting every phase on one
+model is the stopgap, not the considered split; restore a per-phase pair when
+the balance is back.
 
 Each delivering State carries its own pair because an Entry may name the State
 it starts at: a batch of known bugs enters at `diagnose`, because the operator
@@ -98,16 +102,19 @@ the one that grows.
 
 ### The Answerer
 
-The `[answerer]` table declares `fable` at `medium` effort. It has to declare
+The `[answerer]` table declares `opus` at `medium` effort. It has to declare
 something to run on either, because a headless session starts clean each time
 and inherits nothing the States set.
 
 The Answerer replies from the Run's own record rather than reasoning fresh.
-Naiad invokes it on every Question, so its cost recurs. This file discounts
-that recurring spend where it does not discount the States'.
+Naiad invokes it on every Question, so its cost recurs, and this file used to
+discount that recurring spend with `fable` where it did not discount the
+States'. It runs on the same pair as the States for now, for the reason under
+Models and effort above.
 
 The `fallback` key is the Answerer's alone. ADR 0031 gives the reasoning and
-the syntax.
+the syntax. It names `sonnet` alone: a fallback repeating the primary is a
+retry on the model that just declined.
 
 A State may keep the Answerer out with `questions = "human"`. A Question asked
 from such a State is never consulted: the Run parks as it does on an
@@ -136,7 +143,7 @@ used to be. Read the ADRs named for a State before reshaping it.
 | `implement` | ADR 0009 (an Announcement carries a Subject), ADR 0010, ADR 0027 (wontfix is closed), ADR 0033, ADR 0034 (needs-triage is triaged), ADR 0041 |
 | `triage` | the same six as `implement`; ADR 0034 is the one that created it |
 | `handover` | ADR 0007, ADR 0010, ADR 0034 |
-| `pull-request` | ADR 0015, ADR 0016 (the tail is project-neutral), ADR 0018 (how the tail ends is read from the project), ADR 0048 (a companion repository gets its own pull request) |
+| `pull-request` | ADR 0015, ADR 0016 (the tail is project-neutral), ADR 0018 (how the tail ends is read from the project), ADR 0048 (a companion repository gets its own pull request), ADR 0051 (a companion is a repository, not a checkout) |
 | `wayfind` | ADR 0009, ADR 0045 (a Wayfinder map is walked AFK-first and stops at a Gate), ADR 0046 (a State may reserve its Questions for the human) |
 | `chart` | ADR 0045 |
 | `map-spec` | ADR 0045 |

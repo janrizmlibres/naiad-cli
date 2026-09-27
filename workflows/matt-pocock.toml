@@ -4,20 +4,20 @@
 name = "matt-pocock"
 
 # Where each Session summarises its own context, carried as a launch flag.
-autocompact = "200k"
+autocompact = "300k"
 
 # Every State, however a Run enters this file — an Entry may name the State it
 # starts at, and a batch of known bugs starts at `diagnose`.
 
 [answerer]
-model = "fable"
+model = "opus"
 effort = "medium"
-fallback = "opus,sonnet"
+fallback = "sonnet"
 
 [[states]]
 name = "classify"
 model = "opus"
-effort = "high"
+effort = "medium"
 next = ["grill", "diagnose"]
 prompt = """
 Decide what kind of work the following task is, then announce where it starts.
@@ -31,7 +31,7 @@ Say in a sentence which it is and why, then announce grill or diagnose.
 
 [[states]]
 name = "diagnose"
-model = "fable"
+model = "opus"
 effort = "medium"
 clear = true
 next = ["no-repro", "pull-request"]
@@ -62,7 +62,7 @@ next = ["pull-request"]
 
 [[states]]
 name = "grill"
-model = "fable"
+model = "opus"
 effort = "medium"
 clear = true
 prompt = """
@@ -108,7 +108,7 @@ After writing the tickets, announce {next_state}, passing the lowest-numbered ti
 [[states]]
 name = "implement"
 model = "opus"
-effort = "high"
+effort = "medium"
 clear = true
 next = ["implement", "triage", "handover", "pull-request"]
 prompt = """
@@ -126,7 +126,7 @@ Then choose what comes next. A ticket is closed when its Status line reads resol
 
 [[states]]
 name = "triage"
-model = "fable"
+model = "opus"
 effort = "medium"
 clear = true
 next = ["implement", "triage", "handover", "pull-request"]
@@ -152,10 +152,12 @@ next = ["implement", "triage", "pull-request"]
 [[states]]
 name = "pull-request"
 model = "opus"
-effort = "high"
+effort = "medium"
 clear = true
 prompt = """
-Before anything else, work out which repositories this Run's work reached. This one, always. A naiad.toml at this repository's root may also name companion repositories — a frontend to this backend, a client to this service — under a `companions` key, whose value is a list of paths to their checkouts relative to this repository's root. A feature that spans them leaves half its work in another checkout, so look at each one that key names: it carries this Run's work if it stands on a branch other than its own base branch, with commits ahead of that base whose contents answer this Run's task. One that carries none — no such branch, or commits that are somebody else's unfinished work — is left untouched, and you say in the session which it was and why.
+Before anything else, work out which repositories this Run's work reached. This one, always. A naiad.toml at this repository's root may also name companion repositories — a frontend to this backend, a client to this service — under a `companions` key, whose value is a list of paths to their checkouts relative to this repository's root. A feature that spans them leaves half its work in another checkout, so look at each one that key names — and not only at what that path has checked out. A path names a repository, and the work may sit in another worktree of it or on a branch nothing has checked out, while the path itself stands on something unrelated. So list every worktree (`git -C <path> worktree list`) and every local branch (`git -C <path> branch`) of that repository, and weigh each branch: it carries this Run's work if it is not the repository's base branch and has commits ahead of that base whose contents answer this Run's task. Push and open from the worktree that has that branch checked out. A companion none of whose branches carries such work — no such branch, or commits that are somebody else's unfinished work — is left untouched, and you say in the session which it was, which branches you weighed and why.
+
+Where this repository's changes break what a companion reads — a renamed field, a removed endpoint, a changed response — and no companion branch carries the counterpart, that is not a follow-up to describe in a pull request body. Ask the human before opening anything.
 
 Then take each of those repositories in turn, this one first, and decide for it alone whether it opens a pull request at all. It does not if it has no remote to open one against, or if a naiad.toml at its root says not to open one; say so in the session and go on to the next.
 
@@ -179,7 +181,7 @@ terminal = true
 [[states]]
 name = "wayfind"
 model = "opus"
-effort = "high"
+effort = "medium"
 clear = true
 questions = "human"
 next = ["wayfind", "chart", "review"]
@@ -201,7 +203,7 @@ next = ["wayfind", "map-spec"]
 
 [[states]]
 name = "map-spec"
-model = "fable"
+model = "opus"
 effort = "medium"
 clear = true
 next = ["tickets"]
