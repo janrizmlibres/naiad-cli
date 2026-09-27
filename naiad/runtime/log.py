@@ -26,6 +26,7 @@ from naiad.domain.announcement import Announcement
 from naiad.domain.decide import (
     Action,
     Clear,
+    Confirm,
     Consult,
     Deliver,
     Finish,
@@ -176,15 +177,16 @@ class RunLog:
 
     def opened(self) -> bool:
         """Whether the Prompt an adopted Run was owed when it joined its
-        session has gone out (ADR 0028).
+        session has gone out (ADR 0028) — landed, not merely typed, since a
+        typing the Session took cut short is typed again (ADR 0053).
 
-        A delivery with no Announcement to tie it to is that one and no other:
+        A Confirm with no Announcement to tie it to is that one and no other:
         every delivery after it answers something the agent said and carries
         that Announcement's seq. Read back from the log rather than kept as a
         flag of its own, for the reason `ended` is — the fact is already
         written here, and one fact deserves one home.
         """
-        return any(entry.kind == "delivered" and entry.seq is None for entry in self.entries())
+        return any(entry.kind == "confirmed" and entry.seq is None for entry in self.entries())
 
     def belief(self, announcement: Announcement | None) -> tuple[dict[str, str], bool]:
         """What Naiad last typed into the Session, by setting, and whether a
@@ -429,10 +431,17 @@ def _entry_for(action: Action) -> LogLine | None:
         # Joined for the same reason LogLine.expected is: the log is prose for a
         # human, not a shape anything queries.
         successors = render_candidates(action.next_states)
+        detail = f"next: {successors}" if successors else None
+        if action.attempt > 1:
+            # Only a retry is worth the number, as with a Clear: it is the
+            # Prompt the Session took cut short, typed again (ADR 0053).
+            detail = f"attempt {action.attempt}" + (f", {detail}" if detail else "")
+        return LogLine(kind="delivered", state=action.state, detail=detail)
+    if isinstance(action, Confirm):
         return LogLine(
-            kind="delivered",
+            kind="confirmed",
             state=action.state,
-            detail=f"next: {successors}" if successors else None,
+            detail=f"attempt {action.attempt}" if action.attempt > 1 else None,
         )
     if isinstance(action, Clear):
         # The attempt is always carried, but only a retry is worth a word: a

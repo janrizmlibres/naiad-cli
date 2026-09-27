@@ -66,6 +66,7 @@ from naiad.runtime.queue import Queue, cancel, prune, status_of
 from naiad.runtime.records import Clears, EntryTurns, Turns
 from naiad.runtime.resolve import NoRunError, RunResolver, turn_recipient
 from naiad.runtime.run import Run, RunStore
+from naiad.runtime.submitted import judge
 from naiad.skills.install import DEFAULT_SKILLS_ROOT, install_adopt_skill
 
 Handler = Callable[[argparse.Namespace], int]
@@ -250,6 +251,11 @@ def main(argv: list[str] | None = None) -> int:
 
     stopped = subcommands.add_parser("stopped", help="record that a turn ended (Stop hook)")
     stopped.set_defaults(handler=_stopped)
+
+    submitted = subcommands.add_parser(
+        "submitted", help="confirm a typed Prompt arrived whole (UserPromptSubmit hook)"
+    )
+    submitted.set_defaults(handler=_submitted)
 
     protocol = subcommands.add_parser(
         "protocol", help="print the Protocol for a fresh context (SessionStart hook)"
@@ -531,6 +537,52 @@ def _protocol(arguments: argparse.Namespace) -> int:
     return 0
 
 
+def _submitted(arguments: argparse.Namespace) -> int:
+    """The UserPromptSubmit hook, run on every prompt submitted in any session
+    on the machine. A prompt is judged against the Prompt the loop typed last,
+    and one the Session took cut short is turned away — exit 2 blocks it and
+    erases it — so the loop can type it whole again (ADR 0053).
+
+    Everything else passes untouched and prints nothing, since what a
+    UserPromptSubmit hook prints is added to the agent's context: a session
+    nobody is driving, a human's prompt between deliveries, and a hook run with
+    no prompt to read.
+
+    Guarded rather than left to raise, as the Stop hook is: a hook that fails
+    must let the human's prompt through rather than lock them out of their own
+    session."""
+    try:
+        run = _attached_run()
+        prompt = _hook_prompt()
+        if run is None or prompt is None:
+            return 0
+        verdict = judge(run.root, prompt, now=time.time())
+    except FAILURES as error:
+        print(f"naiad: {error}", file=sys.stderr)
+        return 0
+
+    if verdict == "rejected":
+        print(
+            "naiad: this prompt arrived with part of it missing and was turned away; "
+            "naiad will type it again in full",
+            file=sys.stderr,
+        )
+        return 2
+    return 0
+
+
+def _hook_prompt() -> str | None:
+    """The `prompt` this UserPromptSubmit hook was fired with, read from the
+    hook's stdin JSON; None when there is none to read, which passes the
+    prompt through rather than judging nothing."""
+    try:
+        payload = json.loads(sys.stdin.read() or "{}")
+    except (json.JSONDecodeError, ValueError):
+        return None
+    prompt = payload.get("prompt")
+    return prompt if isinstance(prompt, str) else None
+
+
 def _hook_source() -> str | None:
     """The `source` this SessionStart hook was fired with — 'startup', 'clear',
     'compact' or 'resume' — read from the hook's stdin JSON.
@@ -548,7 +600,7 @@ def _hook_source() -> str | None:
 
 
 def _install(arguments: argparse.Namespace) -> int:
-    """Everything one machine needs set up: the two hooks, the skill that turns
+    """Everything one machine needs set up: the three hooks, the skill that turns
     the operator's stated intent into `naiad adopt` (ADR 0028), and the library
     entry addressing the Workflow that ships (ADR 0037).
 

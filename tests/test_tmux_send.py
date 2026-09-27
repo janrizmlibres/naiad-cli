@@ -6,7 +6,7 @@ bracketed paste arrives as `[Pasted text #1]` and is submitted as prose. So
 every Prompt is typed, and the newlines inside it are typed too.
 """
 
-from naiad.adapters.tmux import keystrokes_for
+from naiad.adapters.tmux import TYPED_PIECE_BYTES, keystrokes_for
 
 
 def test_a_single_line_is_typed_literally():
@@ -40,10 +40,35 @@ def test_a_long_prompt_is_still_typed_rather_than_pasted():
     every skill-invoking Prompt in the shipped Workflow sat."""
     prompt = "/implement the ticket at " + "x" * 400
 
-    typed = [argv for argv in keystrokes_for("%1", prompt) if "-l" in argv]
+    typed = [argv[-1] for argv in keystrokes_for("%1", prompt) if "-l" in argv]
 
-    assert typed == [["tmux", "send-keys", "-t", "%1", "-l", "--", prompt]]
+    assert "".join(typed) == prompt
     assert not any("paste-buffer" in argv for argv in keystrokes_for("%1", prompt))
+
+
+def test_a_long_line_is_typed_in_pieces_the_session_reads_as_typing():
+    """One write of a kilobyte or more is read by the Session as a paste: it
+    arrives wrapped as pasted content, or with its first 1022 bytes gone —
+    which is how the pull-request Prompt reached the Session headless
+    (ADR 0053). Pieces of TYPED_PIECE_BYTES arrive as typed."""
+    line = "word " * 700
+
+    pieces = [argv[-1] for argv in keystrokes_for("%1", line.strip()) if "-l" in argv]
+
+    assert len(pieces) > 1
+    assert all(len(piece.encode()) <= TYPED_PIECE_BYTES for piece in pieces)
+    assert "".join(pieces) == line.strip()
+
+
+def test_a_piece_never_splits_a_character():
+    """The shipped Prompts are full of em-dashes, three bytes each, and a
+    piece cut through one would type two halves of nothing."""
+    line = "—" * TYPED_PIECE_BYTES
+
+    pieces = [argv[-1] for argv in keystrokes_for("%1", line) if "-l" in argv]
+
+    assert all(len(piece.encode()) <= TYPED_PIECE_BYTES for piece in pieces)
+    assert "".join(pieces) == line
 
 
 def test_a_prompt_opening_with_a_newline_still_types_it():

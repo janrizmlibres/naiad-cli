@@ -14,7 +14,10 @@ from naiad.domain.decide import (
     NOTHING,
     HANG_SECONDS,
     SILENCE_SECONDS,
+    DELIVERY_CONFIRM_SECONDS,
+    DELIVERY_RETRY_LIMIT,
     Clear,
+    Confirm,
     Consult,
     Deliver,
     Finish,
@@ -30,7 +33,8 @@ from naiad.runtime.announcements import Announcements
 from naiad.runtime.answers import AnswerLog
 from naiad.runtime.log import RunLog
 from naiad.runtime.loop import UndrivableRun, tick
-from naiad.runtime.records import Clears, Holds, Turns, Waits
+from naiad.runtime.records import Clears, Deliveries, Handled, Holds, Turns, Waits
+from naiad.runtime.submitted import judge
 from naiad.runtime.run import RunStore
 
 WORKFLOW = """
@@ -99,10 +103,19 @@ def workflow():
     return parse_workflow(WORKFLOW)
 
 
-def drive(run, workflow, session, *, notifier=None, answerer=None, now=None):
+def whole(prompt):
+    return prompt
+
+
+def drive(run, workflow, session, *, notifier=None, answerer=None, now=None, submit=whole):
     """Every tick is given its moment, so no test reads the wall clock. The
-    default is the instant of the Run's newest record: nothing has been idle."""
-    return tick(
+    default is the instant of the Run's newest record: nothing has been idle.
+
+    A typed Prompt is then submitted as the Session would submit it, and judged
+    by what the UserPromptSubmit hook runs (ADR 0053). submit is what the
+    Session made of the typing — whole by default, cut short where a test says
+    so — and None stands for a Session whose hook never fires."""
+    action = tick(
         run=run,
         workflow=workflow,
         session=session,
@@ -110,6 +123,18 @@ def drive(run, workflow, session, *, notifier=None, answerer=None, now=None):
         answerer=answerer or RecordingAnswerer(),
         now=now if now is not None else _later(run, 0),
     )
+    if isinstance(action, Deliver) and submit is not None:
+        typed = Deliveries(run.root).latest()
+        judge(run.root, submit(session.sent[-1][2]), now=typed.at)
+    return action
+
+
+def deliver(run, workflow, session, **kwargs):
+    """Drive a Prompt through to its Confirm: typed on one tick, settled on the
+    next once the hook has seen it land (ADR 0053). Returns the delivery."""
+    delivered = drive(run, workflow, session, **kwargs)
+    drive(run, workflow, session, **kwargs)
+    return delivered
 
 
 def announce(run, state, *, then_stop=True, subject=None):
@@ -161,6 +186,76 @@ effort = "high"
 name = "done"
 terminal = true
 """
+
+
+def test_a_typed_prompt_is_kept_for_the_hook_to_judge_a_submission_against(
+    run, workflow, session
+):
+    announce(run, "grill")
+
+    drive(run, workflow, session, submit=None)
+
+    assert Deliveries(run.root).latest().prompt == session.sent[-1][2]
+
+
+def test_an_announcement_is_settled_only_once_the_hook_saw_its_prompt_land(
+    run, workflow, session
+):
+    """Typing the Prompt is not delivering it: the Announcement is handled on the
+    tick after the hook reported it whole, and not before (ADR 0053)."""
+    announce(run, "grill")
+
+    drive(run, workflow, session)
+    assert Handled(run.root).seq() is None
+
+    assert drive(run, workflow, session) == Confirm(state="grill", attempt=1)
+    assert Handled(run.root).seq() == 1
+    assert [e.kind for e in RunLog(run.root).entries()] == ["announced", "delivered", "confirmed"]
+
+
+def test_a_prompt_the_session_took_cut_short_is_typed_again_and_then_settles(
+    run, workflow, session
+):
+    """The failure this exists for: the Session dropped the head of the typing
+    and took the rest. The hook turns it away and the loop types it again."""
+    announce(run, "grill")
+    prompt = "/grill-with-docs add dark mode, then announce review"
+
+    first = drive(run, workflow, session, submit=lambda text: text[10:])
+    retry = drive(run, workflow, session)
+    settled = drive(run, workflow, session)
+
+    assert (first.attempt, retry.attempt) == (1, 2)
+    assert session.sent == [("send", "%42", prompt), ("send", "%42", prompt)]
+    assert settled == Confirm(state="grill", attempt=2)
+
+
+def test_a_prompt_cut_short_every_time_tells_the_operator(run, workflow, session):
+    notifier = RecordingNotifier()
+    announce(run, "grill")
+
+    for _ in range(DELIVERY_RETRY_LIMIT):
+        drive(run, workflow, session, notifier=notifier, submit=lambda text: text[10:])
+    action = drive(run, workflow, session, notifier=notifier)
+
+    assert isinstance(action, Notify)
+    assert len(session.sent) == DELIVERY_RETRY_LIMIT
+    assert len(notifier.notified) == 1
+
+
+def test_a_prompt_no_hook_reported_tells_the_operator_and_is_not_typed_again(
+    run, workflow, session
+):
+    notifier = RecordingNotifier()
+    announce(run, "grill")
+    drive(run, workflow, session, submit=None)
+
+    waited = drive(run, workflow, session, notifier=notifier, now=_later(run, DELIVERY_CONFIRM_SECONDS - 1))
+    told = drive(run, workflow, session, notifier=notifier, now=_later(run, DELIVERY_CONFIRM_SECONDS))
+
+    assert waited is NOTHING
+    assert isinstance(told, Notify)
+    assert len(session.sent) == 1
 
 
 def test_each_switch_is_typed_on_its_own_tick_ahead_of_the_prompt(run, session):
@@ -594,7 +689,7 @@ def test_an_agent_working_on_the_prompt_it_was_adopted_with_is_not_nudged(
     """The turn end that let the first Prompt be delivered is spent by that
     delivery, exactly as it is for a delivery answering an Announcement."""
     end_turn(adopted)
-    drive(adopted, workflow, session)
+    deliver(adopted, workflow, session)
 
     assert drive(adopted, workflow, session, now=_later(adopted, SILENCE_SECONDS)) is NOTHING
 
@@ -801,7 +896,7 @@ def test_an_agent_that_ends_a_turn_without_announcing_is_nudged_in_the_session(
     run, workflow, session
 ):
     announce(run, "grill")
-    drive(run, workflow, session)
+    deliver(run, workflow, session)
     session.sent.clear()
     Turns(run.root).record_end(latest_seq=1)
 
@@ -813,7 +908,7 @@ def test_an_agent_that_ends_a_turn_without_announcing_is_nudged_in_the_session(
 
 def test_a_second_silence_is_nudged_more_firmly_than_the_first(run, workflow, session):
     announce(run, "grill")
-    drive(run, workflow, session)
+    deliver(run, workflow, session)
     Turns(run.root).record_end(latest_seq=1)
     session.sent.clear()
 
@@ -827,7 +922,7 @@ def test_a_second_silence_is_nudged_more_firmly_than_the_first(run, workflow, se
 def test_a_third_silence_notifies_instead_of_nudging(run, workflow, session):
     notifier = RecordingNotifier()
     announce(run, "grill")
-    drive(run, workflow, session)
+    deliver(run, workflow, session)
     Turns(run.root).record_end(latest_seq=1)
     session.sent.clear()
 
@@ -859,7 +954,7 @@ def test_a_declared_wait_keeps_the_silent_agent_unnudged(run, workflow, session)
     turn correctly ended, and the wake already guaranteed — a Nudge here buys
     a wasted poll turn and marches toward a false parking."""
     announce(run, "grill")
-    drive(run, workflow, session)
+    deliver(run, workflow, session)
     Turns(run.root).record_end(latest_seq=1)
     declare_wait(run, "2 review agents", seconds=SILENCE_SECONDS * 4)
     session.sent.clear()
@@ -872,7 +967,7 @@ def test_a_declared_wait_keeps_the_silent_agent_unnudged(run, workflow, session)
 
 def test_an_expired_wait_is_nudged_naming_what_was_waited_on(run, workflow, session):
     announce(run, "grill")
-    drive(run, workflow, session)
+    deliver(run, workflow, session)
     Turns(run.root).record_end(latest_seq=1)
     declare_wait(run, "2 review agents", seconds=SILENCE_SECONDS)
     session.sent.clear()
@@ -911,7 +1006,7 @@ def test_a_declared_hold_parks_the_run_calmly_and_indefinitely(run, workflow, se
     apart from a stall by the one calm notification."""
     notifier = RecordingNotifier()
     announce(run, "grill")
-    drive(run, workflow, session)
+    deliver(run, workflow, session)
     Turns(run.root).record_end(latest_seq=1)
     declare_hold(run, "user typed 'pause' — holding until they resume")
     session.sent.clear()
@@ -938,7 +1033,7 @@ def test_a_hold_declared_after_a_silence_notification_still_notifies(run, workfl
     load-bearing (ADR 0025), so the earlier alarm must not swallow it."""
     notifier = RecordingNotifier()
     announce(run, "grill")
-    drive(run, workflow, session)
+    deliver(run, workflow, session)
     Turns(run.root).record_end(latest_seq=1)
     for _ in range(3):
         drive(run, workflow, session, notifier=notifier, now=_later(run, SILENCE_SECONDS))
@@ -1015,7 +1110,7 @@ def test_an_agent_working_on_what_it_was_given_is_not_nudged_however_long_it_tak
     look silent — and an implement phase routinely runs for many minutes —
     so Naiad would type a reminder over an agent working normally."""
     announce(run, "grill")
-    drive(run, workflow, session)
+    deliver(run, workflow, session)
     session.sent.clear()
 
     action = drive(run, workflow, session, now=_later(run, SILENCE_SECONDS * 3))

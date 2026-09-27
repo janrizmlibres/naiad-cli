@@ -24,6 +24,13 @@ CLAUDE = "claude"
 # that runs a skill into one that merely describes it.
 NEWLINE = "M-Enter"
 
+# The most one send-keys types at once. The Session reads a single write of a
+# kilobyte or more as a paste — wrapped as pasted content, or with its first
+# 1022 bytes silently dropped — so a long line goes in pieces well under that.
+# Probed against the live TUI: 500-byte pieces arrive whole where 1000-byte ones
+# do not (ADR 0053).
+TYPED_PIECE_BYTES = 256
+
 
 class TmuxError(Exception):
     pass
@@ -124,8 +131,24 @@ def keystrokes_for(pane: str, text: str) -> list[list[str]]:
             # it ends tmux's option parsing, and a line is never anything but
             # text. Without it a bulleted Answer types `-l - step` and tmux
             # rejects the bullet as a flag.
-            keys.append([TMUX, "send-keys", "-t", pane, "-l", "--", line])
+            keys += [[TMUX, "send-keys", "-t", pane, "-l", "--", piece] for piece in _pieces(line)]
     return keys + [[TMUX, "send-keys", "-t", pane, "Enter"]]
+
+
+def _pieces(line: str) -> list[str]:
+    """The line cut into runs of at most TYPED_PIECE_BYTES, measured in bytes
+    because that is what the Session reads, and cut between characters so no
+    multi-byte one is split across two writes."""
+    pieces: list[str] = []
+    piece, size = "", 0
+    for character in line:
+        width = len(character.encode())
+        if size + width > TYPED_PIECE_BYTES:
+            pieces.append(piece)
+            piece, size = "", 0
+        piece += character
+        size += width
+    return pieces + [piece]
 
 
 def command_for(spec: SessionSpec) -> list[str]:

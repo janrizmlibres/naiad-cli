@@ -14,11 +14,13 @@ without a clock inside any rule.
 from __future__ import annotations
 
 import json
+from dataclasses import dataclass
 from pathlib import Path
 
 from naiad.domain.announcement import Announcement
 from naiad.domain.answerer import Answered, Consultation, Escalated
-from naiad.domain.decide import WAIT_BUDGET_SECONDS, WAIT_DEFAULT_SECONDS
+from naiad.domain.decide import WAIT_BUDGET_SECONDS, WAIT_DEFAULT_SECONDS, Submission
+from naiad.domain.submission import Verdict
 from naiad.runtime.announcements import STATE_FILENAME
 from naiad.runtime.atomic import write_atomically
 from naiad.runtime.run import METADATA_FILENAME
@@ -30,6 +32,8 @@ CONSULTATIONS_FILENAME = "consultations.json"
 CLEARS_FILENAME = "clears.json"
 CLEAR_ATTEMPTS_FILENAME = "clearattempts.json"
 SWITCHES_FILENAME = "switches.json"
+DELIVERIES_FILENAME = "deliveries.json"
+SUBMISSIONS_FILENAME = "submissions.json"
 WAITS_FILENAME = "waits.json"
 HOLDS_FILENAME = "holds.json"
 
@@ -49,6 +53,8 @@ SIGNAL_FILENAMES = (
     CLEARS_FILENAME,
     CLEAR_ATTEMPTS_FILENAME,
     SWITCHES_FILENAME,
+    DELIVERIES_FILENAME,
+    SUBMISSIONS_FILENAME,
     WAITS_FILENAME,
     HOLDS_FILENAME,
     METADATA_FILENAME,
@@ -288,6 +294,104 @@ class Switches:
             self.path,
             {"seq": _seq(announcement), "typed": self.typed(announcement) + 1},
         )
+
+
+@dataclass(frozen=True)
+class TypedPrompt:
+    """The latest Prompt the loop typed, as the UserPromptSubmit hook needs it:
+    what to compare a submission against, when it was typed, and which attempt
+    of which Announcement a verdict on it answers."""
+
+    seq: int | None
+    attempt: int
+    prompt: str
+    at: float
+
+
+class Deliveries:
+    """What the loop has typed to get a State's Prompt into the Session: how
+    many times for the current Announcement, the rendered Prompt the hook
+    judges a submission against, when it was typed, and how many Turns had
+    ended then — the baseline the Confirm hands to Handled (ADR 0053).
+
+    The Clear's ClearAttempts, for the Prompt, and kept against the
+    Announcement like it: the next one re-arms the count. Written by the loop
+    alone; the hook's verdicts go in Submissions, because the two are
+    different processes.
+    """
+
+    def __init__(self, run_root: Path) -> None:
+        self.path = Path(run_root) / DELIVERIES_FILENAME
+
+    def attempts(self, announcement: Announcement | None) -> int:
+        return int(_current(self.path, announcement).get("attempts", 0) or 0)
+
+    def turns(self, announcement: Announcement | None) -> int:
+        return int(_current(self.path, announcement).get("turns", 0) or 0)
+
+    def latest(self) -> TypedPrompt | None:
+        """The latest attempt whichever Announcement it answers, read by the
+        hook, which knows no Announcement."""
+        document = _read(self.path)
+        prompt = document.get("prompt")
+        if not isinstance(prompt, str):
+            return None
+        seq = document.get("seq")
+        return TypedPrompt(
+            seq=seq if isinstance(seq, int) else None,
+            attempt=int(document.get("attempts", 0) or 0),
+            prompt=prompt,
+            at=float(document.get("at", 0.0) or 0.0),
+        )
+
+    def record_attempt(
+        self, announcement: Announcement | None, *, prompt: str, turns: int, at: float
+    ) -> None:
+        """turns is taken afresh on every attempt: a turned-away attempt starts
+        no Turn, so the count when the one that lands was typed is the
+        baseline its agent's next Turn end is measured from."""
+        _write(
+            self.path,
+            {
+                "seq": _seq(announcement),
+                "attempts": self.attempts(announcement) + 1,
+                "prompt": prompt,
+                "at": at,
+                "turns": turns,
+            },
+        )
+
+
+class Submissions:
+    """What the UserPromptSubmit hook made of the latest typed Prompt — landed
+    or turned away — keyed by the Announcement and the attempt it judged
+    (ADR 0053).
+
+    Written by the hook alone, apart from Deliveries, as Clears is apart from
+    ClearAttempts. Keyed by the attempt as well as the Announcement because a
+    verdict answers one typing: a rejection read as the retry's would have it
+    typed a third time at once.
+    """
+
+    def __init__(self, run_root: Path) -> None:
+        self.path = Path(run_root) / SUBMISSIONS_FILENAME
+
+    def of(self, announcement: Announcement | None, *, attempt: int) -> Submission:
+        return self.verdict(seq=_seq(announcement), attempt=attempt)
+
+    def verdict(self, *, seq: int | None, attempt: int) -> Submission:
+        document = _read(self.path)
+        if not document or document.get("seq") != seq or document.get("attempt") != attempt:
+            return None
+        verdict = document.get("verdict")
+        if verdict == "landed":
+            return "landed"
+        if verdict == "rejected":
+            return "rejected"
+        return None
+
+    def record(self, *, seq: int | None, attempt: int, verdict: Verdict) -> None:
+        _write(self.path, {"seq": seq, "attempt": attempt, "verdict": verdict})
 
 
 class Handled:
@@ -567,11 +671,14 @@ __all__ = [
     "ClearAttempts",
     "Clears",
     "Consultations",
+    "Deliveries",
     "EntryTurns",
     "Handled",
     "Holds",
     "Notices",
+    "Submissions",
     "Switches",
+    "TypedPrompt",
     "Turns",
     "Waits",
     "idle_seconds",

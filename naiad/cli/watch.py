@@ -14,7 +14,17 @@ from __future__ import annotations
 import time
 from collections.abc import Callable
 
-from naiad.domain.decide import Action, Clear, Consult, Deliver, Finish, Notify, Nudge, Respond
+from naiad.domain.decide import (
+    Action,
+    Clear,
+    Confirm,
+    Consult,
+    Deliver,
+    Finish,
+    Notify,
+    Nudge,
+    Respond,
+)
 from naiad.domain.protocol import DEFAULT_NAIAD
 from naiad.domain.workflow import Workflow
 from naiad.runtime.log import RunLog
@@ -105,7 +115,10 @@ def _narrate(action: Action) -> str | None:
         again = "" if action.attempt == 1 else f" again (attempt {action.attempt})"
         return f"clearing {action.state}{again}"
     if isinstance(action, Deliver):
-        return f"delivered {action.state}"
+        again = "" if action.attempt == 1 else f" again (attempt {action.attempt})"
+        return f"delivered {action.state}{again}"
+    if isinstance(action, Confirm):
+        return f"confirmed {action.state} landed"
     if isinstance(action, Consult):
         return f"consulting the answerer: {action.question.text}"
     if isinstance(action, Respond):

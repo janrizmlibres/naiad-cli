@@ -7,10 +7,12 @@ from naiad.domain.decide import WAIT_BUDGET_SECONDS, WAIT_DEFAULT_SECONDS
 from naiad.runtime.records import (
     ClearAttempts,
     Clears,
+    Deliveries,
     EntryTurns,
     Handled,
     Holds,
     Notices,
+    Submissions,
     Turns,
     Waits,
     idle_seconds,
@@ -498,3 +500,83 @@ def test_the_records_do_not_share_a_file_with_the_state_file(turns, handled, tmp
 
     assert turns.path != handled.path
     assert "state.json" not in {turns.path.name, handled.path.name}
+
+
+def test_no_prompt_has_been_typed_before_the_loop_types_one(tmp_path):
+    deliveries = Deliveries(tmp_path)
+
+    assert deliveries.attempts(GRILL) == 0
+    assert deliveries.latest() is None
+
+
+def test_a_typed_prompt_is_kept_with_what_the_hook_judges_it_against(tmp_path):
+    """The hook runs in the Session's process and knows no Announcement: the
+    latest attempt carries everything it needs (ADR 0053)."""
+    Deliveries(tmp_path).record_attempt(GRILL, prompt="/grill add dark mode", turns=3, at=100.0)
+
+    latest = Deliveries(tmp_path).latest()
+
+    assert latest is not None
+    assert (latest.seq, latest.attempt, latest.prompt, latest.at) == (1, 1, "/grill add dark mode", 100.0)
+    assert Deliveries(tmp_path).attempts(GRILL) == 1
+    assert Deliveries(tmp_path).turns(GRILL) == 3
+
+
+def test_prompt_attempts_accumulate_within_one_announcement(tmp_path):
+    deliveries = Deliveries(tmp_path)
+    deliveries.record_attempt(GRILL, prompt="p", turns=3, at=100.0)
+    deliveries.record_attempt(GRILL, prompt="p", turns=3, at=110.0)
+
+    assert deliveries.attempts(GRILL) == 2
+    assert deliveries.latest().attempt == 2
+
+
+def test_the_next_announcement_types_its_prompt_from_the_first_attempt(tmp_path):
+    deliveries = Deliveries(tmp_path)
+    deliveries.record_attempt(GRILL, prompt="p", turns=3, at=100.0)
+    deliveries.record_attempt(IMPLEMENT, prompt="q", turns=4, at=200.0)
+
+    assert deliveries.attempts(GRILL) == 0
+    assert deliveries.attempts(IMPLEMENT) == 1
+
+
+def test_an_adoptions_opening_prompt_is_kept_against_no_announcement(tmp_path):
+    deliveries = Deliveries(tmp_path)
+    deliveries.record_attempt(None, prompt="p", turns=1, at=100.0)
+
+    assert deliveries.attempts(None) == 1
+    assert deliveries.latest().seq is None
+
+
+def test_the_hook_has_said_nothing_about_an_attempt_it_has_not_seen(tmp_path):
+    assert Submissions(tmp_path).of(GRILL, attempt=1) is None
+
+
+def test_the_hooks_verdict_answers_the_attempt_it_was_given_for(tmp_path):
+    Submissions(tmp_path).record(seq=1, attempt=1, verdict="rejected")
+
+    assert Submissions(tmp_path).of(GRILL, attempt=1) == "rejected"
+
+
+def test_a_verdict_on_an_earlier_attempt_says_nothing_about_the_retry(tmp_path):
+    """The retry is typed after the first was turned away; that rejection must
+    not be read as the retry's, or it would be typed a third time at once."""
+    Submissions(tmp_path).record(seq=1, attempt=1, verdict="rejected")
+
+    assert Submissions(tmp_path).of(GRILL, attempt=2) is None
+
+
+def test_a_verdict_on_another_announcement_says_nothing_about_this_one(tmp_path):
+    Submissions(tmp_path).record(seq=1, attempt=1, verdict="landed")
+
+    assert Submissions(tmp_path).of(IMPLEMENT, attempt=1) is None
+
+
+def test_typing_a_prompt_and_the_hooks_verdict_are_signs_of_life(tmp_path):
+    Deliveries(tmp_path).record_attempt(GRILL, prompt="p", turns=0, at=0.0)
+    typed = (tmp_path / "deliveries.json").stat().st_mtime
+    assert idle_seconds(tmp_path, now=typed + 5) == pytest.approx(5, abs=1)
+
+    Submissions(tmp_path).record(seq=1, attempt=1, verdict="landed")
+    judged = (tmp_path / "submissions.json").stat().st_mtime
+    assert idle_seconds(tmp_path, now=judged + 2) == pytest.approx(2, abs=1)

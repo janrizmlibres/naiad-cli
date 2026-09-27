@@ -9,7 +9,7 @@ so even the timeouts are decided over a number handed in.
 from __future__ import annotations
 
 from collections.abc import Mapping
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Literal
 
 from naiad.domain.announcement import Announcement
@@ -35,6 +35,18 @@ CLEAR_CONFIRM_SECONDS = 8.0
 # is cheap and safe, but an un-cleared context is the one thing delivery must
 # never happen into, so past the bound Naiad stops rather than delivers.
 CLEAR_RETRY_LIMIT = 3
+
+# How long a typed Prompt may go without the UserPromptSubmit hook reporting it
+# before Naiad reads it as never having reached the Session (ADR 0053). The
+# Clear's window, for the Clear's reason: a Prompt that reaches the Session is
+# reported at once, so the window is only ever spent on one that did not.
+DELIVERY_CONFIRM_SECONDS = CLEAR_CONFIRM_SECONDS
+
+# How many times a State's Prompt is typed before the human is told it would
+# not arrive whole. A Prompt the Session took cut short is turned away by the
+# hook and typed again, and past the bound Naiad stops rather than lets the
+# agent work from part of what its State asks.
+DELIVERY_RETRY_LIMIT = 3
 
 # How long a session that has ended a turn may say nothing before Naiad reads
 # it as a forgotten Protocol. Long enough that an agent pausing between tool
@@ -148,6 +160,12 @@ class Signals:
     what the rule asks is how far along the sequence is; and per Announcement
     like the Clear, so the next Announcement counts from zero again.
 
+    deliveries and submission are the Prompt's own handshake (ADR 0053).
+    deliveries is how many times this Announcement's Prompt has been typed;
+    submission is what the UserPromptSubmit hook made of the latest of them —
+    landed whole, turned away cut short, or None while it has said nothing.
+    Per Announcement like the Clear's pair, and re-armed by the next one.
+
     belief and handed_over are the two facts a Switch is decided over (ADR
     0039). belief is what Naiad last typed into the Session, by setting, and is
     what a State's own settings are compared against — so a State asking for
@@ -180,6 +198,8 @@ class Signals:
     cleared: bool = False
     clear_attempts: int = 0
     switches: int = 0
+    deliveries: int = 0
+    submission: Submission = None
     belief: Mapping[str, str] = field(default_factory=dict)
     handed_over: bool = False
     waiting: bool = False
@@ -201,6 +221,11 @@ class Clear:
 
     state: str
     attempt: int
+
+
+# What the UserPromptSubmit hook made of the latest typed Prompt, or None while
+# it has said nothing (ADR 0053).
+Submission = Literal["landed", "rejected"] | None
 
 
 # The settings a Switch can carry, by the name the session's command takes.
@@ -261,12 +286,33 @@ class Deliver:
     ahead of this one, as a Switch, because the session discards what arrives
     while it is handling a slash command (ADR 0038). Reaching this Action says
     both were typed, and no more than that: whether either took is what ADR 0026
-    declines to find out."""
+    declines to find out.
+
+    Typing it is not delivering it. The Session can take the typing with
+    keystrokes missing, so the Prompt is confirmed by the UserPromptSubmit hook
+    and a Confirm settles the Announcement once it has (ADR 0053). attempt is
+    carried like a Clear's, so a retry reads apart from the first try."""
 
     state: str
     prompt: str
     next_states: tuple[str, ...]
     subject: str | None = None
+    attempt: int = 1
+
+
+@dataclass(frozen=True)
+class Confirm:
+    """The State's Prompt reached the Session whole, as the UserPromptSubmit
+    hook reported: the Announcement is handled, and the agent is working on
+    what it was given (ADR 0053).
+
+    Sends nothing. It is an Action rather than a bookkeeping step inside the
+    loop because it is the terminal one of the delivery — the one that marks
+    the Announcement handled — and which Action is terminal is the decision's
+    to say (ADR 0004). attempt is which typing it was that landed."""
+
+    state: str
+    attempt: int
 
 
 @dataclass(frozen=True)
@@ -342,7 +388,7 @@ class Nothing:
 
 NOTHING = Nothing()
 
-Action = Clear | Consult | Deliver | Finish | Notify | Nudge | Respond | Switch | Nothing
+Action = Clear | Confirm | Consult | Deliver | Finish | Notify | Nudge | Respond | Switch | Nothing
 
 
 def decide(workflow: Workflow, signals: Signals, *, skip_gates: bool = False) -> Action:
@@ -544,11 +590,14 @@ def _owed(
         # nothing needs to be.
         return pending[signals.switches]
 
-    return Deliver(
-        state=state.name,
-        prompt=state.prompt,
-        next_states=resolve_next_states(workflow, state.name, skip_gates=skip_gates),
-        subject=subject,
+    return _deliver(
+        signals,
+        Deliver(
+            state=state.name,
+            prompt=state.prompt,
+            next_states=resolve_next_states(workflow, state.name, skip_gates=skip_gates),
+            subject=subject,
+        ),
     )
 
 
@@ -603,6 +652,41 @@ def _clear(signals: Signals, state_name: str) -> Action:
     )
 
 
+def _deliver(signals: Signals, delivery: Deliver) -> Action:
+    """Get this State's Prompt into the Session whole, catching one the Session
+    took cut short rather than letting the agent work from part of it
+    (ADR 0053).
+
+    The Clear's handshake with one difference, and the difference is the
+    point. A Prompt the hook turned away is typed again at once, because the
+    hook blocking it is proof the Session is idle and took none of it. A
+    Prompt the hook said nothing about is not typed again: silence is also what
+    a hook that is not installed produces, over a Prompt the agent is working
+    on, and a retype would queue a second copy behind it. So that one tells the
+    human, as a Clear past its bound does.
+    """
+    if signals.submission == "landed":
+        return Confirm(state=delivery.state, attempt=signals.deliveries)
+    if signals.deliveries == 0:
+        return delivery
+    if signals.submission == "rejected":
+        if signals.deliveries < DELIVERY_RETRY_LIMIT:
+            return replace(delivery, attempt=signals.deliveries + 1)
+        return _notify(
+            signals,
+            f"the prompt for '{delivery.state}' arrived cut short "
+            f"{DELIVERY_RETRY_LIMIT} times and was turned away each time",
+        )
+    if signals.idle_for < DELIVERY_CONFIRM_SECONDS:
+        return NOTHING
+    return _notify(
+        signals,
+        f"the prompt for '{delivery.state}' was typed but never reported as submitted; "
+        "it may not have reached the session, or naiad's UserPromptSubmit hook "
+        "is not installed (run `naiad install`)",
+    )
+
+
 def _switches(
     state: State, belief: Mapping[str, str], *, handed_over: bool
 ) -> tuple[Switch, ...]:
@@ -652,6 +736,8 @@ def _notify(signals: Signals, reason: str, *, question: Question | None = None) 
 __all__ = [
     "CLEAR_CONFIRM_SECONDS",
     "CLEAR_RETRY_LIMIT",
+    "DELIVERY_CONFIRM_SECONDS",
+    "DELIVERY_RETRY_LIMIT",
     "HANG_SECONDS",
     "NOTHING",
     "NUDGE_LIMIT",
@@ -660,6 +746,7 @@ __all__ = [
     "WAIT_DEFAULT_SECONDS",
     "Action",
     "Clear",
+    "Confirm",
     "Consult",
     "Deliver",
     "Finish",
@@ -670,6 +757,7 @@ __all__ = [
     "Respond",
     "Setting",
     "Signals",
+    "Submission",
     "Switch",
     "decide",
     "terminal_state",

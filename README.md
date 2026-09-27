@@ -9,7 +9,7 @@ The shipped workflow, `workflows/matt-pocock.toml`, takes a task from classifica
 ## How it works
 
 - **The agent owns workflow state.** The agent declares which state it is in with `naiad state <name>`. Naiad only reacts. It never guesses where the agent is.
-- **Naiad never reads Claude Code internals.** Turn boundaries come from a `Stop` hook and a `SessionStart` hook that `naiad install` writes into your user settings. The hooks do nothing when no run is attached.
+- **Naiad never reads Claude Code internals.** Turn boundaries come from a `Stop` hook and a `SessionStart` hook, and a `UserPromptSubmit` hook confirms each Prompt arrived whole. `naiad install` writes all three into your user settings. The hooks do nothing when no run is attached.
 - **One session per run, cleared between states.** A prompt is delivered only after the `/clear` is confirmed. An unconfirmed clear is retried a bounded number of times before a human is told. Artifacts in the repository (ADRs, specs, tickets) carry state across the clears.
 - **Per-state model and effort.** A state may pin a model and reasoning effort. Switches are typed into the session one per tick, and Naiad keeps a belief of the session's current settings so an unchanged setting costs nothing.
 - **Gates and branches.** A gate state has no prompt. The run parks and you type directly into the session. A branching state lets the agent choose the next state (a task classifies itself as a bug or a feature, for example).
@@ -35,7 +35,7 @@ uv sync
 uv run naiad install
 ```
 
-`naiad install` writes the two hooks into `~/.claude/settings.json` (preserving everything else there), installs the `naiad-adopt` skill into `~/.claude/skills`, and links the shipped workflow into the library so it can be named as `matt-pocock` from anywhere.
+`naiad install` writes the three hooks into `~/.claude/settings.json` (preserving everything else there), installs the `naiad-adopt` skill into `~/.claude/skills`, and links the shipped workflow into the library so it can be named as `matt-pocock` from anywhere.
 
 Optional phone notifications go through [ntfy](https://ntfy.sh). Export `NAIAD_NTFY_URL=https://ntfy.sh/<your-topic>` (and `NAIAD_NTFY_TOKEN` if the topic is protected). Terminal and desktop notifications need no setup.
 
@@ -111,7 +111,7 @@ naiad/domain     pure decisions: transitions, prompts, questions, supervision
 naiad/runtime    runs, the queue, announcements, answers, the tick loop
 naiad/adapters   tmux, the answerer, notifications, locks, executables
 naiad/cli        the operator's and the agent's commands
-naiad/hooks      installing the Stop and SessionStart hooks
+naiad/hooks      installing the Stop, SessionStart and UserPromptSubmit hooks
 naiad/skills     the naiad-adopt skill
 workflows/       shipped workflow files
 docs/adr/        one decision per file

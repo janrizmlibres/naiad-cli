@@ -7,11 +7,14 @@ from naiad.domain.answerer import Answered, Escalated
 from naiad.domain.decide import (
     CLEAR_CONFIRM_SECONDS,
     CLEAR_RETRY_LIMIT,
+    DELIVERY_CONFIRM_SECONDS,
+    DELIVERY_RETRY_LIMIT,
     HANG_SECONDS,
     NOTHING,
     NUDGE_LIMIT,
     SILENCE_SECONDS,
     Clear,
+    Confirm,
     Consult,
     Deliver,
     Finish,
@@ -143,6 +146,8 @@ def signals(
     cleared=False,
     clear_attempts=0,
     switches=0,
+    deliveries=0,
+    submission=None,
     belief=None,
     handed_over=False,
     waiting=False,
@@ -169,6 +174,8 @@ def signals(
         cleared=cleared,
         clear_attempts=clear_attempts,
         switches=switches,
+        deliveries=deliveries,
+        submission=submission,
         belief=belief or {},
         handed_over=handed_over,
         waiting=waiting,
@@ -480,6 +487,77 @@ def test_a_confirmed_clear_delivers_rather_than_retrying_however_many_were_typed
     )
 
     assert isinstance(decide(workflow, landed), Deliver)
+
+
+def test_a_typed_prompt_is_waited_on_before_it_is_judged(workflow):
+    """The Prompt has been typed and the hook has said nothing yet: it may be
+    on its way, so nothing is typed over it (ADR 0053)."""
+    typed = signals("grill", deliveries=1, idle_for=DELIVERY_CONFIRM_SECONDS - 1)
+
+    assert decide(workflow, typed) is NOTHING
+
+
+def test_a_prompt_the_hook_saw_land_settles_the_announcement(workflow):
+    """Confirmation is what makes the Announcement handled, so a Prompt that
+    never arrived whole is never recorded as delivered."""
+    landed = signals("grill", deliveries=1, submission="landed")
+
+    assert decide(workflow, landed) == Confirm(state="grill", attempt=1)
+
+
+def test_a_prompt_the_hook_turned_away_is_typed_again(workflow):
+    """The Session took it cut short and the hook blocked it, so the Session is
+    idle and the Prompt goes again at once — numbered, so the retry reads apart
+    from the first in the log."""
+    rejected = signals("grill", deliveries=1, submission="rejected")
+
+    assert decide(workflow, rejected) == Deliver(
+        state="grill",
+        prompt="/grill-with-docs {task}",
+        next_states=("review",),
+        attempt=2,
+    )
+
+
+def test_a_prompt_turned_away_at_the_retry_limit_tells_the_human(workflow):
+    exhausted = signals("grill", deliveries=DELIVERY_RETRY_LIMIT, submission="rejected")
+
+    action = decide(workflow, exhausted)
+
+    assert isinstance(action, Notify)
+    assert "cut short" in action.reason
+    told = signals(
+        "grill", deliveries=DELIVERY_RETRY_LIMIT, submission="rejected", notified=True
+    )
+    assert decide(workflow, told) is NOTHING
+
+
+def test_a_prompt_nothing_reported_tells_the_human_rather_than_typing_it_again(workflow):
+    """Silence from the hook is not evidence the Prompt was lost: a hook that is
+    not installed says nothing about a Prompt the agent is working on. Typing it
+    again would queue a second copy behind the agent, so the human is told."""
+    unreported = signals("grill", deliveries=1, idle_for=DELIVERY_CONFIRM_SECONDS)
+
+    action = decide(workflow, unreported)
+
+    assert isinstance(action, Notify)
+    assert "naiad install" in action.reason
+
+
+def test_a_confirmed_prompt_is_settled_after_its_clear_and_switches(switched):
+    """The handshake sits behind the Clear and the Switches, so reaching it
+    does not re-type either."""
+    landed = signals("grill", switches=2, deliveries=1, submission="landed")
+
+    assert decide(switched, landed) == Confirm(state="grill", attempt=1)
+
+
+def test_the_prompt_an_adoption_is_owed_is_confirmed_like_any_other(workflow):
+    adopted = signals(
+        None, opening=Opening(state="grill"), deliveries=2, submission="landed"
+    )
+
+    assert decide(workflow, adopted) == Confirm(state="grill", attempt=2)
 
 
 def test_a_clear_is_not_typed_before_a_turn_has_ended(workflow):

@@ -4,9 +4,10 @@ Pure: a settings document in, a settings document out. Whoever writes the file
 decides where it goes — hooks are installed independently of any Run, and never
 into the target repository (PRD, 'Storage').
 
-Naiad's entire coupling to Claude Code is three documented surfaces (ADR 0002),
-two of which are these hooks: a SessionStart injecting the Protocol, and a Stop
-reporting that a turn ended.
+Naiad's entire coupling to Claude Code is a few documented surfaces (ADR 0002),
+most of them these hooks: a SessionStart injecting the Protocol, a Stop
+reporting that a turn ended, and a UserPromptSubmit confirming that a typed
+Prompt reached the Session whole (ADR 0053).
 """
 
 from __future__ import annotations
@@ -25,6 +26,7 @@ SESSION_START_MATCHERS = ("startup", "clear", "compact")
 
 PROTOCOL_SUBCOMMAND = "protocol"
 STOPPED_SUBCOMMAND = "stopped"
+SUBMITTED_SUBCOMMAND = "submitted"
 
 Settings = dict[str, Any]
 
@@ -32,7 +34,7 @@ Settings = dict[str, Any]
 # subcommand rather than the full path is what lets a naiad that has moved —
 # a rebuilt virtualenv, a different machine — replace its predecessor instead
 # of running alongside it.
-_NAIAD_HOOK_COMMAND = re.compile(rf"(^|/)naiad\s+({PROTOCOL_SUBCOMMAND}|{STOPPED_SUBCOMMAND})\b")
+_NAIAD_HOOK_COMMAND = re.compile(rf"(^|/)naiad\s+({PROTOCOL_SUBCOMMAND}|{STOPPED_SUBCOMMAND}|{SUBMITTED_SUBCOMMAND})\b")
 
 
 def with_naiad_hooks(settings: Settings, *, naiad: str) -> Settings:
@@ -55,6 +57,12 @@ def with_naiad_hooks(settings: Settings, *, naiad: str) -> Settings:
     # Stop takes no matcher: it fires whenever the agent finishes a turn.
     hooks["Stop"] = _without_ours(hooks.get("Stop", [])) + [
         {"hooks": [_command(naiad, STOPPED_SUBCOMMAND)]}
+    ]
+
+    # Nor does UserPromptSubmit: every submitted prompt is judged, and one Naiad
+    # did not type is let through untouched.
+    hooks["UserPromptSubmit"] = _without_ours(hooks.get("UserPromptSubmit", [])) + [
+        {"hooks": [_command(naiad, SUBMITTED_SUBCOMMAND)]}
     ]
     return merged
 

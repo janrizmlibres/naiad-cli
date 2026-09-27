@@ -18,6 +18,7 @@ from naiad.domain.answerer import Answered, ConsultationSpec, Escalated, render_
 from naiad.domain.decide import (
     Action,
     Clear,
+    Confirm,
     Consult,
     Deliver,
     Finish,
@@ -43,9 +44,11 @@ from naiad.runtime.records import (
     ClearAttempts,
     Clears,
     Consultations,
+    Deliveries,
     Handled,
     Holds,
     Notices,
+    Submissions,
     Switches,
     Turns,
     Waits,
@@ -102,6 +105,8 @@ def tick(
     clears = Clears(run.root)
     clearing = ClearAttempts(run.root)
     switching = Switches(run.root)
+    deliveries = Deliveries(run.root)
+    submissions = Submissions(run.root)
     answers = AnswerLog(run.root)
     waits = Waits(run.root)
     holds = Holds(run.root)
@@ -118,6 +123,7 @@ def tick(
     wait_count = waits.count(announcement)
     hold_count = holds.count(announcement)
     notified, nudges = notices.of(announcement, wait_count=wait_count, hold_count=hold_count)
+    typed = deliveries.attempts(announcement)
 
     # Written before the decision rather than after it, because where the agent
     # stood before this Announcement is read back out of the log — and because
@@ -143,6 +149,8 @@ def tick(
             cleared=clearing.confirmed(announcement, clears),
             clear_attempts=clearing.attempts(announcement),
             switches=switching.typed(announcement),
+            deliveries=typed,
+            submission=submissions.of(announcement, attempt=typed),
             belief=belief,
             handed_over=handed_over,
             waiting=waits.waiting(announcement, now=moment),
@@ -177,26 +185,34 @@ def tick(
         session.send(_pane(run), f"/{action.setting} {action.value}")
         switching.record_typed(announcement)
     elif isinstance(action, Deliver):
-        session.send(
-            _pane(run),
-            render_prompt(
-                action.prompt,
-                task=run.task,
-                next_states=action.next_states,
-                subject=action.subject,
-                # Read off the Run rather than off the Action: the branch and
-                # what it stands on are facts of the Run like the task, so they
-                # reach every delivery rather than being decided per
-                # Announcement as the Subject is.
-                branch=run.working_branch,
-                predecessor=run.predecessor,
-            ),
+        prompt = render_prompt(
+            action.prompt,
+            task=run.task,
+            next_states=action.next_states,
+            subject=action.subject,
+            # Read off the Run rather than off the Action: the branch and what
+            # it stands on are facts of the Run like the task, so they reach
+            # every delivery rather than being decided per Announcement as the
+            # Subject is.
+            branch=run.working_branch,
+            predecessor=run.predecessor,
         )
+        # Recorded before it is typed, because the UserPromptSubmit hook fires
+        # while it is being typed and judges the submission against this. The
+        # Announcement is not handled yet: a Confirm does that once the hook has
+        # seen the Prompt land whole (ADR 0053).
+        deliveries.record_attempt(announcement, prompt=prompt, turns=turns.count(), at=moment)
+        session.send(_pane(run), prompt)
+    elif isinstance(action, Confirm):
         # An adopted Run's first delivery answers no Announcement, so there is
         # no seq to record against it — only the turn baseline, which is what
         # keeps the agent working on what it was just given from reading as a
-        # silent one (ADR 0028).
-        handled.record(announcement.seq if announcement is not None else None, turns=turns.count())
+        # silent one (ADR 0028). The baseline is the one taken when the Prompt
+        # that landed was typed, so a Turn the agent ended since then counts.
+        handled.record(
+            announcement.seq if announcement is not None else None,
+            turns=deliveries.turns(announcement),
+        )
     elif isinstance(action, Consult):
         consultations.record(
             announcement, answerer.consult(_consultation(run, workflow, action.question))
