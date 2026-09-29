@@ -42,6 +42,7 @@ from naiad.cli.library import (
     LibraryError,
     empty_library_message,
     install_starter,
+    new_workflow,
     resolve_workflow,
     workflows_in,
 )
@@ -53,9 +54,9 @@ from naiad.cli.terminal import terminal_width
 from naiad.cli.wait import WaitError, declare_wait
 from naiad.cli.watch import tick_once, watch
 from naiad.domain.entry import Attachment, Entry
-from naiad.domain.listing import render_states
+from naiad.domain.listing import render_states, render_workflow
 from naiad.domain.protocol import ANNOUNCE_SUBCOMMAND
-from naiad.domain.workflow import WorkflowError, load_workflow
+from naiad.domain.workflow import Workflow, WorkflowError, load_workflow
 from naiad.hooks.install import install_hooks
 from naiad.runtime.announcements import Announcements
 from naiad.runtime.answers import AnswerLog
@@ -119,6 +120,12 @@ def _driving_parser(
         help=help,
         epilog=NOTIFICATIONS_HELP,
         formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+
+
+def _workflow_argument(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument(
+        "workflow", help="path to the Workflow file, or the bare name of one in the library"
     )
 
 
@@ -219,6 +226,29 @@ def build_parser() -> argparse.ArgumentParser:
         "omit it to list every workflow the library holds",
     )
     states.set_defaults(handler=_states)
+
+    workflow = subcommands.add_parser(
+        "workflow", help="author and read the Workflows in the library"
+    )
+    workflow_commands = workflow.add_subparsers(dest="workflow_command", required=True)
+
+    workflow_new = workflow_commands.add_parser(
+        "new", help="create a Workflow in the library holding one terminal State, done"
+    )
+    workflow_new.add_argument("name", help="the new Workflow's name, which is its file's stem")
+    workflow_new.set_defaults(handler=_workflow_new)
+
+    workflow_show = workflow_commands.add_parser(
+        "show", help="print a Workflow's file-level keys and each State's kind and marks"
+    )
+    _workflow_argument(workflow_show)
+    workflow_show.set_defaults(handler=_workflow_show)
+
+    workflow_check = workflow_commands.add_parser(
+        "check", help="load a Workflow as a Run would, and say what is wrong with it"
+    )
+    _workflow_argument(workflow_check)
+    workflow_check.set_defaults(handler=_workflow_check)
 
     announce = subcommands.add_parser(
         ANNOUNCE_SUBCOMMAND, help="announce the State you are in"
@@ -951,15 +981,42 @@ def _states(arguments: argparse.Namespace) -> int:
     if arguments.workflow is None:
         return _every_workflow(library)
 
+    # A name asked for by name is refused: the agent named one thing and
+    # printing something else would answer a question nobody asked.
+    return _print_workflow(arguments.workflow, render_states)
+
+
+def _print_workflow(argument: str, render: Callable[[Workflow], str]) -> int:
+    """A Workflow named by name or path, loaded the way a Run loads it and laid
+    out by `render`, or refused in one line."""
     try:
-        workflow = load_workflow(resolve_workflow(arguments.workflow, library=library))
-    except FAILURES as error:
-        # A name asked for by name is refused: the agent named one thing and
-        # printing something else would answer a question nobody asked.
+        workflow = load_workflow(resolve_workflow(argument, library=default_library_root()))
+    except (*FAILURES, WorkflowError) as error:
         print(f"naiad: {error}", file=sys.stderr)
         return 2
 
-    print(render_states(workflow))
+    print(render(workflow))
+    return 0
+
+
+def _workflow_show(arguments: argparse.Namespace) -> int:
+    return _print_workflow(arguments.workflow, render_workflow)
+
+
+def _workflow_check(arguments: argparse.Namespace) -> int:
+    """Whether a Run could start from this file, decided by loading it exactly
+    as a Run does: through the library's resolution, then the one loader."""
+    return _print_workflow(arguments.workflow, lambda workflow: f"{workflow.name}: OK")
+
+
+def _workflow_new(arguments: argparse.Namespace) -> int:
+    try:
+        path, workflow = new_workflow(arguments.name, library=default_library_root())
+    except (*FAILURES, WorkflowError) as error:
+        print(f"naiad: {error}", file=sys.stderr)
+        return 2
+
+    print(f"created {workflow.name}: {path}")
     return 0
 
 

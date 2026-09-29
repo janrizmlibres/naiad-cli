@@ -9,7 +9,7 @@ that State would park the Run or end it (ADR 0032).
 Column positions are not asserted. They are alignment, and alignment is prose.
 """
 
-from naiad.domain.listing import render_states
+from naiad.domain.listing import render_states, render_workflow
 from naiad.domain.workflow import parse_workflow
 
 WORKFLOW = """
@@ -97,7 +97,92 @@ def test_the_terminal_state_is_marked_terminal_and_never_a_gate():
 def test_a_branching_state_names_the_states_it_may_go_to():
     """A Branching State's candidates are what the agent may announce next, so
     they say what starting there commits the Run to."""
-    assert "branches: grill, diagnose" in line_for("classify")
+    assert "→ grill, diagnose" in line_for("classify")
+
+
+def test_the_kind_says_what_naiad_does_on_entry():
+    """One word per State, ahead of its marks: a Prompt is delivered, a Gate
+    hands the Run to a human, a Terminal State ends it."""
+    kinds = {name: line_for(name).split()[1] for name in ("classify", "review", "done")}
+
+    assert kinds == {"classify": "prompt", "review": "gate", "done": "terminal"}
+
+
+MARKED = """
+name = "marked"
+model = "opus"
+
+[answerer]
+fallback = "sonnet"
+
+[[states]]
+name = "plan"
+clear = true
+report = true
+effort = "high"
+questions = "human"
+next = ["build"]
+prompt = "Plan {task}."
+
+[[states]]
+name = "build"
+prompt = "Build it."
+
+[[states]]
+name = "done"
+terminal = true
+"""
+
+
+def marked_line(name):
+    for line in render_states(parse_workflow(MARKED)).splitlines():
+        if line.split()[:1] == [name]:
+            return line
+    raise AssertionError(name)
+
+
+def test_a_state_shows_the_marks_it_carries():
+    line = marked_line("plan")
+
+    for mark in ("→ build", "clears", "report", "questions: human", "model: opus", "effort: high"):
+        assert mark in line
+
+
+def test_questions_show_whose_they_are_resolved_against_the_files_default():
+    """`build` wrote no key, and the file declares an [answerer], so the
+    Answerer takes its Questions: the mark says so rather than staying silent."""
+    assert "questions: answerer" in marked_line("build")
+
+
+def test_a_state_carrying_nothing_shows_no_marks_it_does_not_carry():
+    line = marked_line("build")
+
+    assert "clears" not in line and "report" not in line and "→" not in line
+    assert "effort" not in line
+
+
+def test_a_terminal_state_asks_no_questions():
+    assert "questions" not in marked_line("done")
+
+
+def test_the_file_level_keys_stand_above_the_states():
+    shown = render_workflow(parse_workflow(MARKED)).splitlines()
+
+    assert shown[0].split() == ["name", "marked"]
+    assert ["model", "opus"] in [line.split() for line in shown[:4]]
+    assert ["answerer.fallback", "sonnet"] in [line.split() for line in shown[:4]]
+    assert shown.index("") < [line.split()[:1] for line in shown].index(["plan"])
+
+
+def test_workflow_show_and_states_render_the_states_identically():
+    """One renderer behind both readers, so a mark cannot mean one thing to the
+    operator and another to the adopting agent."""
+    workflow = parse_workflow(MARKED)
+
+    listed = render_states(workflow).splitlines()[1:]
+    shown = render_workflow(workflow).splitlines()
+
+    assert shown[-len(listed):] == listed
 
 
 def test_a_compaction_point_is_shown_so_an_adoption_can_relay_it():

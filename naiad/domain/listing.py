@@ -25,15 +25,42 @@ def render_states(workflow: Workflow) -> str:
     where along the Workflow the human stopped, which is a position in the
     file rather than a path through it.
     """
+    return "\n".join([_heading(workflow), *_state_lines(workflow)])
+
+
+def render_workflow(workflow: Workflow) -> str:
+    """The file-level keys the Workflow declares, then its States through the
+    same lines `render_states` prints, so the two readers cannot disagree."""
+    return "\n".join([*_file_lines(workflow), "", *_state_lines(workflow)])
+
+
+def _state_lines(workflow: Workflow) -> list[str]:
     commands = [_opening_command(state) or "" for state in workflow.states]
     names = [state.name for state in workflow.states]
     name_width = max(len(name) for name in names)
+    kind_width = max(len(_kind(state)) for state in workflow.states)
     command_width = max(len(command) for command in commands)
+    return [
+        _line(state, command, name_width, kind_width, command_width)
+        for state, command in zip(workflow.states, commands)
+    ]
 
-    lines = [_heading(workflow)]
-    for state, command in zip(workflow.states, commands):
-        lines.append(_line(state, command, name_width, command_width))
-    return "\n".join(lines)
+
+def _file_lines(workflow: Workflow) -> list[str]:
+    """Only what the file says: a key it leaves out is no opinion, and listing
+    it as empty would read as one."""
+    declared = [
+        ("name", workflow.name),
+        ("model", workflow.model),
+        ("effort", workflow.effort),
+        ("autocompact", workflow.autocompact),
+        ("answerer.model", workflow.answerer_model),
+        ("answerer.effort", workflow.answerer_effort),
+        ("answerer.fallback", workflow.answerer_fallback),
+    ]
+    shown = [(key, value) for key, value in declared if value is not None]
+    width = max(len(key) for key, _ in shown)
+    return [f"{key:<{width}}{GAP}{value}" for key, value in shown]
 
 
 def _heading(workflow: Workflow) -> str:
@@ -47,15 +74,17 @@ def _heading(workflow: Workflow) -> str:
     return f"{workflow.name}{GAP}(autocompact {workflow.autocompact})"
 
 
-def _line(state: State, command: str, name_width: int, command_width: int) -> str:
-    cells = [f"{state.name:<{name_width}}"]
+def _line(
+    state: State, command: str, name_width: int, kind_width: int, command_width: int
+) -> str:
+    cells = [f"{state.name:<{name_width}}", f"{_kind(state):<{kind_width}}"]
     # A Workflow whose every Prompt opens with prose has no command column at
     # all, rather than a column of blanks the reader has to account for.
     if command_width:
         cells.append(f"{command:<{command_width}}")
-    note = _note(state)
-    if note:
-        cells.append(note)
+    marks = _marks(state)
+    if marks:
+        cells.append(marks)
     return (GAP + GAP.join(cells)).rstrip()
 
 
@@ -75,21 +104,38 @@ def _opening_command(state: State) -> str | None:
     return opening[0]
 
 
-def _note(state: State) -> str:
-    """What starting here would commit the Run to.
+def _kind(state: State) -> str:
+    """What Naiad does on entering the State.
 
     Terminal before Gate, and never both: a Terminal State with no Prompt ends
     the Run rather than holding it for a human, so reading it as a Gate State
     would promise a handover that never comes.
     """
-    marks = []
     if state.terminal:
-        marks.append("terminal")
-    elif state.is_gate_state:
-        marks.append("gate")
+        return "terminal"
+    if state.is_gate_state:
+        return "gate"
+    return "prompt"
+
+
+def _marks(state: State) -> str:
+    """What else starting here would commit the Run to, after the kind."""
+    marks = []
     if state.next_candidates:
-        marks.append("branches: " + ", ".join(state.next_candidates))
+        marks.append("→ " + ", ".join(state.next_candidates))
+    if state.clear:
+        marks.append("clears")
+    if state.report:
+        marks.append("report")
+    # Whose Questions are asked only where a Prompt is delivered: a Gate hands
+    # the Run to a human and a Terminal State ends it, so neither asks one.
+    if _kind(state) == "prompt":
+        marks.append(f"questions: {state.questions}")
+    if state.model is not None:
+        marks.append(f"model: {state.model}")
+    if state.effort is not None:
+        marks.append(f"effort: {state.effort}")
     return GAP.join(marks)
 
 
-__all__ = ["render_states"]
+__all__ = ["render_states", "render_workflow"]

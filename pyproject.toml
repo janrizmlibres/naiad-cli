@@ -7,6 +7,9 @@ name = "naiad"
 version = "0.1.0"
 description = "Drives a multi-phase Claude Code workflow to completion"
 requires-python = ">=3.11"
+dependencies = [
+    "tomlkit>=0.15.1",
+]
 
 [project.scripts]
 naiad = "naiad.cli.main:main"

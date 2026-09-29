@@ -21,8 +21,9 @@ import os
 from importlib.resources import files
 from pathlib import Path
 
-from naiad.domain.workflow import load_workflow
+from naiad.domain.workflow import Workflow, load_workflow
 from naiad.runtime.atomic import write_atomically
+from naiad.runtime.workflow_file import scaffold_workflow
 
 STARTER_FILE = "starter.toml"
 
@@ -104,6 +105,22 @@ def install_starter(*, library: Path, force: bool = False) -> Path:
     return entry
 
 
+def new_workflow(name: str, *, library: Path) -> tuple[Path, Workflow]:
+    """Scaffold a Workflow of this name in the library, refusing one that is
+    there. Only a bare name is taken: a path would put the file somewhere the
+    name does not address."""
+    if not name or not _is_name(name):
+        raise LibraryError(
+            f"'{name}' is not a workflow name: give a bare name, "
+            "with no '/' and no '.toml' suffix"
+        )
+    path = library / f"{name}.toml"
+    try:
+        return path, scaffold_workflow(path, name)
+    except FileExistsError:
+        raise LibraryError(f"workflow '{name}' already exists: {path}") from None
+
+
 def _is_theirs(entry: Path, shipped: bytes) -> bool:
     if entry.is_symlink():
         return True
@@ -143,6 +160,7 @@ __all__ = [
     "LibraryError",
     "empty_library_message",
     "install_starter",
+    "new_workflow",
     "resolve_workflow",
     "workflows_in",
 ]

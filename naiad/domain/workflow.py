@@ -103,6 +103,11 @@ class Workflow:
     # Naiad's. File-level and never per State because it is a property of the
     # Session, set once as it opens. None means no flag (ADR 0047).
     autocompact: str | None = None
+    # The file-level Model and Effort, kept beside the States that already have
+    # them applied so that a reader of the file (`naiad workflow show`) can say
+    # what the file itself declares rather than only what each State resolved to.
+    model: str | None = None
+    effort: str | None = None
 
     def state(self, name: str) -> State | None:
         for state in self.states:
@@ -177,6 +182,8 @@ def parse_workflow(text: str, *, source: str = DEFAULT_SOURCE) -> Workflow:
         answerer_effort=answerer_effort,
         answerer_fallback=answerer_fallback,
         autocompact=autocompact,
+        model=default_model,
+        effort=default_effort,
     )
 
 
