@@ -34,6 +34,26 @@ def render_workflow(workflow: Workflow) -> str:
     return "\n".join([*_file_lines(workflow), "", *_state_lines(workflow)])
 
 
+def render_state_list(workflow: Workflow) -> str:
+    """The States alone, one per line: what `render_states` prints under the
+    Workflow's name, for the reader who has already named the Workflow."""
+    return "\n".join(_state_lines(workflow))
+
+
+def render_state(workflow: Workflow, state: State) -> str:
+    """One State: its line exactly as the listing prints it, columns aligned to
+    the States around it, then its Prompt in full.
+
+    The Prompt is what the listing cuts to a command, and the only part of a
+    State an author cannot read off a line. A Gate and a Terminal State without
+    one show their line alone.
+    """
+    line = _state_lines(workflow)[workflow.states.index(state)]
+    if state.prompt is None:
+        return line
+    return f"{line}\n\n{state.prompt.rstrip()}"
+
+
 def _state_lines(workflow: Workflow) -> list[str]:
     commands = [_opening_command(state) or "" for state in workflow.states]
     names = [state.name for state in workflow.states]
@@ -138,4 +158,4 @@ def _marks(state: State) -> str:
     return GAP.join(marks)
 
 
-__all__ = ["render_states", "render_workflow"]
+__all__ = ["render_state", "render_state_list", "render_states", "render_workflow"]

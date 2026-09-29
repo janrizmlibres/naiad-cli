@@ -9,7 +9,7 @@ that State would park the Run or end it (ADR 0032).
 Column positions are not asserted. They are alignment, and alignment is prose.
 """
 
-from naiad.domain.listing import render_states, render_workflow
+from naiad.domain.listing import render_state, render_state_list, render_states, render_workflow
 from naiad.domain.workflow import parse_workflow
 
 WORKFLOW = """
@@ -203,3 +203,50 @@ def test_a_compaction_point_is_shown_so_an_adoption_can_relay_it():
 
 def test_a_workflow_with_no_compaction_point_shows_none():
     assert "autocompact" not in listing()
+
+
+LONG_PROMPT = """
+name = "long"
+
+[[states]]
+name = "plan"
+clear = true
+prompt = \"\"\"
+/to-spec {task}
+
+Write the spec.
+  Indented, kept.
+\"\"\"
+
+[[states]]
+name = "review"
+
+[[states]]
+name = "done"
+terminal = true
+"""
+
+
+def test_the_state_list_is_the_states_the_other_readers_print_and_no_more():
+    workflow = parse_workflow(MARKED)
+
+    assert render_state_list(workflow).splitlines() == render_states(workflow).splitlines()[1:]
+
+
+def test_one_state_shows_its_own_line_from_the_list_then_its_prompt_in_full():
+    workflow = parse_workflow(LONG_PROMPT)
+    plan = workflow.state("plan")
+
+    shown = render_state(workflow, plan).splitlines()
+
+    assert shown[0] == render_state_list(workflow).splitlines()[0]
+    assert shown[1] == ""
+    assert "\n".join(shown[2:]) == plan.prompt.rstrip("\n")
+
+
+def test_a_gate_shows_its_line_and_no_prompt():
+    workflow = parse_workflow(LONG_PROMPT)
+
+    shown = render_state(workflow, workflow.state("review")).splitlines()
+
+    assert shown == [render_state_list(workflow).splitlines()[1]]

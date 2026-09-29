@@ -46,10 +46,12 @@ def test_the_parser_is_built_without_running_a_command(monkeypatch, tmp_path):
 
 
 def test_the_old_announce_spelling_is_not_in_the_command_tree(capsys):
+    """`state` is the authoring noun now, and a State's name is not one of its
+    verbs, so the old spelling of an announcement reaches no handler."""
     with pytest.raises(SystemExit):
         build_parser().parse_args(["state", "grill"])
 
-    assert "invalid choice: 'state'" in capsys.readouterr().err
+    assert "invalid choice: 'grill'" in capsys.readouterr().err
 
 
 def test_watching_a_run_that_does_not_exist_fails_rather_than_watching_another(

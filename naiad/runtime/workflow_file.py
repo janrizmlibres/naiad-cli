@@ -4,8 +4,9 @@ A Workflow is configuration a human hand-edits, so every writing verb goes
 through here and gets the same guarantees: comments, key order and multi-line
 Prompts survive the write; a file the loader would refuse is never left behind;
 and a symlinked library entry has its target written, the link untouched
-(ADR 0049). Reading for a Run still goes through the standard loader; this is
-the only place the TOML writer is used.
+(ADR 0049). Reading for a Run still goes through the standard loader; this
+module and naiad.runtime.state_file, which shapes what an edit does to a State,
+are the only places the TOML writer is used.
 """
 
 from __future__ import annotations

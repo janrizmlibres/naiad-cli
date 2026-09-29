@@ -266,8 +266,8 @@ def test_an_ordinary_state_and_a_terminal_state_keep_the_plain_reply(tmp_path):
 
 
 def test_the_old_verb_is_no_longer_a_command_and_no_alias_is_kept(run):
-    """`naiad state` is the authoring noun's, so the old spelling of an
-    announcement must fail rather than quietly work."""
+    """`naiad state` is the authoring noun's and takes no State name as a verb,
+    so the old spelling of an announcement must fail rather than quietly work."""
     finished = subprocess.run(
         [NAIAD, "state", "grill"],
         capture_output=True,
@@ -277,7 +277,7 @@ def test_the_old_verb_is_no_longer_a_command_and_no_alias_is_kept(run):
     )
 
     assert finished.returncode != 0
-    assert "invalid choice: 'state'" in finished.stderr
+    assert "invalid choice: 'grill'" in finished.stderr
     assert not (run.root / STATE_FILENAME).exists()
 
 

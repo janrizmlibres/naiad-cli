@@ -38,6 +38,7 @@ from naiad.cli.branch import BranchError, declare_branch
 from naiad.cli.doctor import Severity, diagnose, entrance_refusal, render_report
 from naiad.cli.enqueue import REFUSALS, Work, enqueue
 from naiad.cli.hold import HoldError, declare_hold
+from naiad.cli.state import add_state_commands
 from naiad.cli.library import (
     LibraryError,
     empty_library_message,
@@ -313,6 +314,8 @@ def build_parser() -> argparse.ArgumentParser:
     )
     _workflow_argument(workflow_check)
     workflow_check.set_defaults(handler=_workflow_check)
+
+    add_state_commands(subcommands)
 
     announce = subcommands.add_parser(
         ANNOUNCE_SUBCOMMAND, help="announce the State you are in"
