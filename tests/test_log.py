@@ -16,6 +16,7 @@ from naiad.domain.decide import (
     Finish,
     Notify,
     Nudge,
+    Report,
     Respond,
     Switch,
 )
@@ -450,3 +451,30 @@ def test_a_compaction_leaves_the_belief_where_it_was(log):
     log.record_compaction(state="grill")
 
     assert log.belief(announcement(seq=2)) == ({"model": "opus"}, False)
+
+
+def test_a_report_is_logged_as_reported_with_its_state_and_subject(log):
+    log.record(Report(state="implement", subject="04-x.md"), seq=3)
+
+    (entry,) = log.entries()
+    assert (entry.kind, entry.state, entry.detail, entry.seq) == (
+        "reported",
+        "implement",
+        "04-x.md",
+        3,
+    )
+
+
+def test_a_report_hands_nothing_over_so_the_belief_stands(log):
+    """Nobody took the keyboard, so what Naiad typed is still evidence
+    (ADR 0055)."""
+    log.record(Switch(state="grill", setting="model", value="opus"), seq=1)
+    log.record(Report(state="implement"), seq=2)
+
+    assert log.belief(announcement(seq=3)) == ({"model": "opus"}, False)
+
+
+def test_a_report_does_not_end_a_run(log):
+    log.record(Report(state="implement"), seq=1)
+
+    assert log.ended() is False

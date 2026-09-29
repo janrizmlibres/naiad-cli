@@ -28,6 +28,7 @@ from naiad.runtime.run import METADATA_FILENAME
 TURNS_FILENAME = "turns.json"
 HANDLED_FILENAME = "handled.json"
 NOTICES_FILENAME = "notices.json"
+REPORTS_FILENAME = "reports.json"
 CONSULTATIONS_FILENAME = "consultations.json"
 CLEARS_FILENAME = "clears.json"
 CLEAR_ATTEMPTS_FILENAME = "clearattempts.json"
@@ -49,6 +50,7 @@ SIGNAL_FILENAMES = (
     TURNS_FILENAME,
     HANDLED_FILENAME,
     NOTICES_FILENAME,
+    REPORTS_FILENAME,
     CONSULTATIONS_FILENAME,
     CLEARS_FILENAME,
     CLEAR_ATTEMPTS_FILENAME,
@@ -494,6 +496,28 @@ class Notices:
         )
 
 
+class Reports:
+    """Whether the operator has been told the Run entered the current
+    Announcement's State (ADR 0055).
+
+    Kept against the Announcement it belongs to and read as nothing for any
+    other one, like Notices: the next Announcement re-arms it, so a State
+    announced for the fifth ticket reports a fifth time. A record of its own
+    rather than a field of Notices, because everything that reads a hand-off
+    reads Notices, and a Report is not one. Nothing that decides parking can
+    see it.
+    """
+
+    def __init__(self, run_root: Path) -> None:
+        self.path = Path(run_root) / REPORTS_FILENAME
+
+    def of(self, announcement: Announcement | None) -> bool:
+        return bool(_current(self.path, announcement).get("reported", False))
+
+    def record(self, announcement: Announcement | None) -> None:
+        _write(self.path, {"seq": _seq(announcement), "reported": True})
+
+
 class Waits:
     """The agent's declared Wait — what it said it was waiting on, until when,
     and how much of the Announcement's wait budget has gone (ADR 0021).
@@ -676,6 +700,7 @@ __all__ = [
     "Handled",
     "Holds",
     "Notices",
+    "Reports",
     "Submissions",
     "Switches",
     "TypedPrompt",

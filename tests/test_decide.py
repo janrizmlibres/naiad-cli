@@ -21,6 +21,7 @@ from naiad.domain.decide import (
     Notify,
     Nudge,
     Opening,
+    Report,
     Respond,
     Signals,
     Switch,
@@ -189,6 +190,7 @@ def signals(
     holding=False,
     hold_reason=None,
     opening=None,
+    reported=False,
 ):
     return Signals(
         announcement=(
@@ -197,6 +199,7 @@ def signals(
             else None
         ),
         opening=opening,
+        reported=reported,
         handled_seq=handled_seq,
         stopped=stopped,
         stopped_since_action=stopped_since_action,
@@ -1322,3 +1325,111 @@ def test_a_terminal_state_with_a_prompt_finishes_rather_than_delivering(workflow
     )
 
     assert decide(talkative, signals("shipped")) == Finish(state="shipped")
+
+
+REPORTING = """
+name = "feature"
+
+[answerer]
+
+[[states]]
+name = "implement"
+prompt = "/implement {subject}"
+clear = true
+report = true
+
+[[states]]
+name = "ship"
+prompt = "/ship"
+report = true
+
+[[states]]
+name = "done"
+terminal = true
+"""
+
+
+@pytest.fixture
+def reporting():
+    return parse_workflow(REPORTING)
+
+
+def test_an_announcement_of_a_reporting_state_is_reported(reporting):
+    action = decide(reporting, signals("ship", subject="04-x.md"))
+
+    assert action == Report(state="ship", subject="04-x.md")
+
+
+def test_a_report_waits_for_no_turn_to_end(reporting):
+    """It sends nothing into the Session, so it cannot type over an agent still
+    writing: the operator hears it when the agent says it (ADR 0055)."""
+    action = decide(reporting, signals("ship", stopped=False))
+
+    assert isinstance(action, Report)
+
+
+def test_a_report_comes_before_the_clear(reporting):
+    action = decide(reporting, signals("implement", subject="04-x.md"))
+
+    assert isinstance(action, Report)
+
+
+def test_the_clear_follows_once_the_announcement_has_been_reported(reporting):
+    action = decide(reporting, signals("implement", reported=True))
+
+    assert isinstance(action, Clear)
+
+
+def test_the_prompt_follows_once_the_announcement_has_been_reported(reporting):
+    action = decide(reporting, signals("ship", reported=True))
+
+    assert isinstance(action, Deliver)
+
+
+def test_an_announcement_is_reported_once(reporting):
+    """Reported is a fact about the Announcement, and a State announced again
+    is a new one that reports again."""
+    assert not isinstance(decide(reporting, signals("ship", reported=True)), Report)
+    assert isinstance(decide(reporting, signals("ship", seq=2, reported=False)), Report)
+
+
+def test_a_state_that_did_not_ask_is_not_reported(workflow):
+    assert not isinstance(decide(workflow, signals("grill")), Report)
+
+
+def test_a_question_asked_from_a_reporting_state_is_not_reported(reporting):
+    """A Question's Announcement names the State the agent stands in but is not
+    an entry (ADR 0055)."""
+    action = decide(reporting, signals("ship", question=QUESTION))
+
+    assert isinstance(action, Consult)
+
+
+def test_an_answered_question_from_a_reporting_state_is_still_not_reported(reporting):
+    answered = decide(
+        reporting,
+        signals("ship", question=QUESTION, consultation=Answered(text="the client"), stopped=False),
+    )
+
+    assert not isinstance(answered, Report)
+
+
+def test_an_announcement_already_acted_on_is_not_reported(reporting):
+    action = decide(reporting, signals("ship", seq=3, handled_seq=3))
+
+    assert not isinstance(action, Report)
+
+
+def test_a_run_that_started_at_a_reporting_state_reports_nothing(reporting):
+    """Nothing was announced, so there is no entry to report."""
+    assert decide(reporting, signals(None, stopped=False)) is NOTHING
+
+
+def test_an_adoption_at_a_reporting_state_reports_nothing(reporting):
+    action = decide(reporting, signals(None, opening=Opening(state="ship")))
+
+    assert not isinstance(action, Report)
+
+
+def test_a_finished_run_reports_nothing(reporting):
+    assert decide(reporting, signals("ship", finished=True)) is NOTHING

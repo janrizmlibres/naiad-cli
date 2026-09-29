@@ -25,6 +25,7 @@ from naiad.domain.decide import (
     Notify,
     Nudge,
     Opening,
+    Report,
     Respond,
     Signals,
     Switch,
@@ -48,6 +49,7 @@ from naiad.runtime.records import (
     Handled,
     Holds,
     Notices,
+    Reports,
     Submissions,
     Switches,
     Turns,
@@ -70,10 +72,10 @@ class Notifier(Protocol):
     """Where a telling goes, and what kind of telling it is.
 
     The kind is service-neutral (naiad.domain.notification): the loop says
-    whether a human is needed or the work is done, and an adapter maps that
-    onto whatever scale of urgency its service understands. Deciding here
-    which push priority a Gate State deserves would put a service's vocabulary
-    in the tick.
+    whether a human is needed, the work is done or a State was entered, and an
+    adapter maps that onto whatever scale of urgency its service understands.
+    Deciding here which push priority a Gate State deserves would put a
+    service's vocabulary in the tick.
     """
 
     def notify(self, title: str, message: str, kind: Notification) -> None: ...
@@ -101,6 +103,7 @@ def tick(
     turns = Turns(run.root)
     handled = Handled(run.root)
     notices = Notices(run.root)
+    reports = Reports(run.root)
     consultations = Consultations(run.root)
     clears = Clears(run.root)
     clearing = ClearAttempts(run.root)
@@ -142,6 +145,7 @@ def tick(
             stopped=turns.ended_since(announcement),
             stopped_since_action=turns.ended_since_action(handled),
             notified=notified,
+            reported=reports.of(announcement),
             nudges=nudges,
             idle_for=idle_seconds(run.root, now=moment),
             consultation=consultations.of(announcement),
@@ -237,6 +241,17 @@ def tick(
             message=f"finished at {action.state}",
             kind=Notification.FINISH,
         )
+    elif isinstance(action, Report):
+        # Nothing is sent into the session and nothing is parked: the Report
+        # goes to the operator and is recorded apart from the Notices, so no
+        # reader of a hand-off can see it (ADR 0055). The Task is left out
+        # because the run id already names the Run and a Task can swamp a
+        # banner.
+        message = f"entered {action.state}"
+        if action.subject is not None:
+            message += f": {action.subject}"
+        notifier.notify(title=f"naiad: {run.id}", message=message, kind=Notification.REPORT)
+        reports.record(announcement)
     elif isinstance(action, Notify):
         notifier.notify(
             title=f"naiad: {run.id}", message=action.reason, kind=Notification.NOTIFY

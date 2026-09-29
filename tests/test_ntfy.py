@@ -137,3 +137,15 @@ def test_the_variables_name_the_service_they_configure():
     detail."""
     assert NTFY_URL_VARIABLE == "NAIAD_NTFY_URL"
     assert NTFY_TOKEN_VARIABLE == "NAIAD_NTFY_TOKEN"
+
+
+def test_a_report_is_sent_at_a_lower_priority_than_a_gate():
+    """A milestone is low enough that it never sounds like a request for the
+    operator (ADR 0055)."""
+    reported, needed = RecordingPost(), RecordingPost()
+
+    notify(reported, kind=Notification.REPORT)
+    notify(needed, kind=Notification.NOTIFY)
+
+    assert reported.posts[0]["headers"]["Priority"] == "2"
+    assert int(reported.posts[0]["headers"]["Priority"]) < int(needed.posts[0]["headers"]["Priority"])

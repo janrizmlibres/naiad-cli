@@ -12,6 +12,7 @@ from naiad.runtime.records import (
     Handled,
     Holds,
     Notices,
+    Reports,
     Submissions,
     Turns,
     Waits,
@@ -580,3 +581,35 @@ def test_typing_a_prompt_and_the_hooks_verdict_are_signs_of_life(tmp_path):
     Submissions(tmp_path).record(seq=1, attempt=1, verdict="landed")
     judged = (tmp_path / "submissions.json").stat().st_mtime
     assert idle_seconds(tmp_path, now=judged + 2) == pytest.approx(2, abs=1)
+
+
+def test_nothing_has_been_reported_about_a_fresh_announcement(tmp_path):
+    assert Reports(tmp_path).of(GRILL) is False
+
+
+def test_a_report_is_remembered_for_the_announcement_it_was_about(tmp_path):
+    Reports(tmp_path).record(GRILL)
+
+    assert Reports(tmp_path).of(GRILL) is True
+
+
+def test_a_new_announcement_re_arms_the_report(tmp_path):
+    """A State announced again reports again."""
+    Reports(tmp_path).record(GRILL)
+
+    assert Reports(tmp_path).of(Announcement(seq=2, state="grill")) is False
+
+
+def test_a_report_leaves_the_notices_alone(tmp_path):
+    """The two records are kept apart so that nothing reading the parked
+    status can see a Report (ADR 0055)."""
+    Reports(tmp_path).record(GRILL)
+
+    assert Notices(tmp_path).of(GRILL) == (False, 0)
+    assert Reports(tmp_path).of(GRILL) is True
+
+
+def test_a_report_counts_as_a_signal(tmp_path):
+    from naiad.runtime.records import SIGNAL_FILENAMES
+
+    assert Reports(tmp_path).path.name in SIGNAL_FILENAMES

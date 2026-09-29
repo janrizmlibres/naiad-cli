@@ -23,6 +23,7 @@ from naiad.domain.decide import (
     Finish,
     Notify,
     Nudge,
+    Report,
     Respond,
     Switch,
 )
@@ -33,6 +34,8 @@ from naiad.runtime.announcements import Announcements
 from naiad.runtime.answers import AnswerLog
 from naiad.runtime.log import RunLog
 from naiad.runtime.loop import UndrivableRun, tick
+from naiad.domain.entry import Entry
+from naiad.runtime.queue import RUNNING, status_of
 from naiad.runtime.records import Clears, Deliveries, Handled, Holds, Turns, Waits
 from naiad.runtime.submitted import judge
 from naiad.runtime.run import RunStore
@@ -1517,3 +1520,152 @@ def test_a_run_that_reached_its_terminal_state_is_told_as_a_finish(run, workflow
     assert isinstance(action, Finish)
     assert notifier.notified[0][2] is Notification.FINISH
     assert "done" in notifier.notified[0][1]
+
+
+# A State that asks for a Report on entry (ADR 0055): the clearing `implement`,
+# and a `ship` with a Model of its own so a Report can be told from a hand-off
+# by what the next delivery types.
+REPORTING = edited(
+    edited(WORKFLOW, 'clear = true', 'clear = true\nreport = true'),
+    '[[states]]\nname = "done"',
+    '[[states]]\nname = "ship"\nprompt = "ship it"\nmodel = "opus"\nreport = true\n\n[[states]]\nname = "done"',
+)
+
+
+@pytest.fixture
+def reporting():
+    return parse_workflow(REPORTING)
+
+
+def test_an_announcement_of_a_reporting_state_tells_the_operator_what_was_entered(
+    run, reporting, session
+):
+    notifier = RecordingNotifier()
+    announce(run, "ship", then_stop=False)
+
+    action = drive(run, reporting, session, notifier=notifier)
+
+    assert isinstance(action, Report)
+    assert notifier.notified == [("naiad: a-run", "entered ship", Notification.REPORT)]
+    assert session.sent == []
+
+
+def test_a_report_names_the_subject_when_the_announcement_has_one(run, reporting, session):
+    notifier = RecordingNotifier()
+    announce(run, "ship", then_stop=False, subject="04-x.md")
+
+    drive(run, reporting, session, notifier=notifier)
+
+    assert notifier.notified[0][1] == "entered ship: 04-x.md"
+
+
+def test_a_report_waits_for_no_turn_and_the_clear_and_prompt_proceed_as_before(
+    run, reporting, session
+):
+    notifier = RecordingNotifier()
+    announce(run, "implement", subject="04-x.md")
+
+    first = drive(run, reporting, session, notifier=notifier)
+    delivered = deliver_clearing(run, reporting, session, notifier=notifier)
+
+    assert isinstance(first, Report)
+    assert isinstance(delivered, Deliver)
+    assert session.sent == [
+        ("clear", "%42", None),
+        ("send", "%42", "/implement the ticket at 04-x.md"),
+    ]
+    assert len(notifier.notified) == 1
+
+
+def test_an_announcement_is_reported_once_however_often_the_loop_ticks(run, reporting, session):
+    notifier = RecordingNotifier()
+    announce(run, "ship", then_stop=False)
+
+    for _ in range(4):
+        drive(run, reporting, session, notifier=notifier)
+
+    assert len(notifier.notified) == 1
+
+
+def test_the_same_state_announced_again_is_reported_again(run, reporting, session):
+    notifier = RecordingNotifier()
+    announce(run, "ship", subject="04-x.md")
+    for _ in range(3):
+        drive(run, reporting, session, notifier=notifier)
+
+    announce(run, "ship", subject="05-y.md")
+    drive(run, reporting, session, notifier=notifier)
+
+    assert [message for _, message, _ in notifier.notified] == [
+        "entered ship: 04-x.md",
+        "entered ship: 05-y.md",
+    ]
+
+
+def test_a_run_that_has_only_reported_reads_running_and_not_parked(run, reporting, session):
+    announce(run, "ship", then_stop=False)
+    drive(run, reporting, session)
+
+    entry = Entry(
+        id=run.id,
+        workflow_path=run.workflow_path,
+        task=run.task,
+        target_repo=run.target_repo,
+        working_branch="a-branch",
+        created_at="2026-07-19T12:00:00Z",
+        run_id=run.id,
+    )
+
+    assert status_of(entry, RunStore(run.root.parent)) == RUNNING
+
+
+def test_a_report_leaves_the_belief_standing_so_the_next_switch_is_not_retyped(
+    run, reporting, session
+):
+    """A Report hands nothing over: nobody took the keyboard, so the Model
+    Naiad typed is still what the Session holds (ADR 0055)."""
+    announce(run, "ship")
+    for _ in range(3):
+        drive(run, reporting, session)
+    assert ("send", "%42", "/model opus") in session.sent
+    typed = len(session.sent)
+
+    announce(run, "ship")
+    for _ in range(3):
+        drive(run, reporting, session)
+
+    assert session.sent[typed:] == [("send", "%42", "ship it")]
+
+
+def test_a_report_reaches_the_run_log_and_is_not_a_hand_off(run, reporting, session):
+    announce(run, "ship", then_stop=False)
+    drive(run, reporting, session)
+
+    kinds = [entry.kind for entry in RunLog(run.root).entries()]
+    assert kinds == ["announced", "reported"]
+    assert RunLog(run.root).belief(Announcements(run.root).latest())[1] is False
+
+
+def test_a_question_asked_from_a_reporting_state_is_not_reported(run, reporting, session):
+    notifier = RecordingNotifier()
+    announce(run, "ship")
+    for _ in range(3):
+        drive(run, reporting, session, notifier=notifier)
+    reported = len(notifier.notified)
+
+    Announcements(run.root).ask(Question(text="Which branch?", options=("a", "b")), state="ship")
+    drive(run, reporting, session, notifier=notifier)
+
+    assert len(notifier.notified) == reported
+
+
+def test_a_run_that_started_at_a_reporting_state_is_not_reported(tmp_path, session):
+    notifier = RecordingNotifier()
+    reporting = parse_workflow(REPORTING)
+    started = adopted_at(tmp_path, "ship", text=REPORTING)
+    end_turn(started)
+
+    action = drive(started, reporting, session, notifier=notifier)
+
+    assert not isinstance(action, Report)
+    assert notifier.notified == []

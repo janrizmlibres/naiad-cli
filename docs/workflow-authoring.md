@@ -63,6 +63,16 @@ the launch of a spawned Session and is never typed after, so it belongs to the
 file and no State may declare one. Leave it out and the Session compacts where
 the platform would anyway. ADR 0047 gives the reasoning.
 
+### A State reports only where a milestone is worth hearing
+
+`report = true` on a State tells the operator `entered <state>`, plus the
+Subject when the Announcement has one, each time an Announcement of it is seen.
+It goes down every leg (ntfy at priority 2) and hands nothing over: the Run does
+not park and the Belief stands. It fires before the State's Clear, and never for
+a Question asked from the State or for the State a Run starts at. Declare it on
+a Prompt State only. On a Gate State or a Terminal State it is refused at load,
+because each already tells the operator on entry. ADR 0055 gives the reasoning.
+
 ### A branching State writes its successors out
 
 `{next_state}` renders every candidate as one joined phrase. Use the

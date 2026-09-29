@@ -32,6 +32,7 @@ from naiad.domain.decide import (
     Finish,
     Notify,
     Nudge,
+    Report,
     Respond,
     Setting,
     Switch,
@@ -474,6 +475,10 @@ def _entry_for(action: Action) -> LogLine | None:
         return LogLine(kind="nudged", detail=detail)
     if isinstance(action, Notify):
         return LogLine(kind="notified", detail=action.reason)
+    if isinstance(action, Report):
+        # Its own kind, so that nothing reading `notified` — the belief, the
+        # hand-off — can mistake it for a human being needed (ADR 0055).
+        return LogLine(kind="reported", state=action.state, detail=action.subject)
     if isinstance(action, Finish):
         return LogLine(kind="finished", state=action.state)
     return None

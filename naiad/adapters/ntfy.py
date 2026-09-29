@@ -3,7 +3,7 @@
 An adapter and nothing more: whether to notify, and once per what, are rules
 and were decided in naiad.domain.decide (ADR 0004). What is here is one POST —
 the message as the body, the title and the priority as headers — and the
-mapping from Naiad's two tellings onto ntfy's scale of five.
+mapping from Naiad's three tellings onto ntfy's scale of five.
 
 Turned on by the presence of NAIAD_NTFY_URL holding the full topic URL, which
 is what keeps a self-hosted server free: the operator moves the host and
@@ -33,8 +33,13 @@ TIMEOUT_SECONDS = 5.0
 
 # ntfy grades 1 (min) to 5 (max). A human who is needed gets 4, which is a
 # push loud enough to notice; 5 breaks through Do Not Disturb and a Gate State
-# waiting until morning does not deserve that. Good news travels at 3.
-PRIORITIES = {Notification.NOTIFY: "4", Notification.FINISH: "3"}
+# waiting until morning does not deserve that. Good news travels at 3, and a
+# Report at 2, low enough that a milestone never sounds like a Gate (ADR 0055).
+PRIORITIES = {
+    Notification.NOTIFY: "4",
+    Notification.FINISH: "3",
+    Notification.REPORT: "2",
+}
 
 
 class NtfyNotifications:

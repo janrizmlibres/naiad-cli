@@ -183,6 +183,11 @@ class Signals:
     Both are facts about the Run rather than the current Announcement, and
     nothing re-arms them: what the Session holds does not change because the
     agent spoke again.
+
+    reported says the current Announcement has been Reported (ADR 0055). Kept
+    apart from notified because nothing that decides parking or the hand-off
+    may be able to see it; per Announcement like nudges and cleared, and re-armed
+    by the next one.
     """
 
     announcement: Announcement | None
@@ -206,6 +211,7 @@ class Signals:
     wait_reason: str | None = None
     holding: bool = False
     hold_reason: str | None = None
+    reported: bool = False
 
 
 @dataclass(frozen=True)
@@ -366,6 +372,20 @@ class Notify:
 
 
 @dataclass(frozen=True)
+class Report:
+    """Tell the operator the Run entered a State the Workflow marked for it, and
+    hand nothing over. The Run does not park and the Belief stands, because
+    nobody took the keyboard (ADR 0055).
+
+    The Subject rides along so the message can tell one Announcement of the
+    State from the next, since a State announced for a fifth ticket reports a
+    fifth time."""
+
+    state: str
+    subject: str | None = None
+
+
+@dataclass(frozen=True)
 class Finish:
     """The Run is over: the agent announced a State the Workflow marks
     Terminal. The operator is told the work is done and the tick loop stops,
@@ -388,7 +408,19 @@ class Nothing:
 
 NOTHING = Nothing()
 
-Action = Clear | Confirm | Consult | Deliver | Finish | Notify | Nudge | Respond | Switch | Nothing
+Action = (
+    Clear
+    | Confirm
+    | Consult
+    | Deliver
+    | Finish
+    | Notify
+    | Nudge
+    | Report
+    | Respond
+    | Switch
+    | Nothing
+)
 
 
 def decide(workflow: Workflow, signals: Signals, *, skip_gates: bool = False) -> Action:
@@ -455,6 +487,19 @@ def decide(workflow: Workflow, signals: Signals, *, skip_gates: bool = False) ->
         # Falling through rather than returning is deliberate: it leaves the
         # hang rule below reachable, so an answer waiting on a session that has
         # died is not waited on forever.
+
+    if announcement is not None and announcement.question is None and not signals.reported:
+        # A Report sends nothing into the session, so like a Consultation it
+        # waits on no turn ending and cannot type over an agent still writing;
+        # the operator hears "entered" when the agent says it. It comes before
+        # the Clear, and costs one Tick (ADR 0055).
+        #
+        # Only an Announcement reports. A Question names the State the agent
+        # is standing in without arriving at it, and the State a Run starts at
+        # has no Announcement behind it, spawned or adopted.
+        entered = workflow.state(announcement.state)
+        if entered is not None and entered.report:
+            return Report(state=entered.name, subject=announcement.subject)
 
     if signals.announcement is None and signals.opening is not None and signals.stopped:
         # An Adoption. The Run has joined a session and has said nothing in
@@ -756,6 +801,7 @@ __all__ = [
     "Notify",
     "Nudge",
     "Opening",
+    "Report",
     "Respond",
     "Setting",
     "Signals",

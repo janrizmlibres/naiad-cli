@@ -75,6 +75,19 @@ def test_the_terminal_leg_prints_what_the_banner_cannot_be_scrolled_back_to(caps
     assert "naiad: run-1" in printed and "why" in printed
 
 
+def test_a_report_goes_down_the_terminal_leg_and_every_other(capsys):
+    """A Report is told on every leg, the terminal included: it is the record of
+    the night (ADR 0055)."""
+    recording = RecordingNotifier()
+
+    Notifications(TerminalNotifications(), recording).notify(
+        title="naiad: run-1", message="entered ship", kind=Notification.REPORT
+    )
+
+    assert "naiad: run-1: entered ship" in capsys.readouterr().err
+    assert recording.notified == [("naiad: run-1", "entered ship", Notification.REPORT)]
+
+
 def test_no_topic_configured_pushes_nothing():
     """The phone leg is off until it is asked for, and everything else about
     a Run is unchanged by its absence."""

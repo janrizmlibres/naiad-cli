@@ -491,13 +491,13 @@ def test_a_compaction_point_that_is_not_a_string_is_rejected():
         pytest.param(
             'name = "w"\n[[states]]\nname = "a"\nquestons = "human"\n[[states]]\nname = "b"\nterminal = true',
             "unknown key 'questons' in state 'a'; allowed: "
-            "name, prompt, clear, terminal, next, model, effort, questions",
+            "name, prompt, clear, terminal, next, model, effort, questions, report",
             id="state",
         ),
         pytest.param(
             'name = "w"\n[[states]]\nnmae = "a"\n[[states]]\nname = "b"\nterminal = true',
             "unknown key 'nmae' in state 1; allowed: "
-            "name, prompt, clear, terminal, next, model, effort, questions",
+            "name, prompt, clear, terminal, next, model, effort, questions, report",
             id="misspelt name",
         ),
         pytest.param(
@@ -524,3 +524,60 @@ def test_a_workflow_file_with_an_unknown_key_fails_to_load(tmp_path):
 
     with pytest.raises(WorkflowError, match=f"workflow {path}: unknown key 'questons'"):
         load_workflow(path)
+
+
+REPORTING = """
+name = "w"
+
+[[states]]
+name = "ship"
+prompt = "ship it"
+report = true
+
+[[states]]
+name = "plain"
+prompt = "work"
+
+[[states]]
+name = "done"
+terminal = true
+"""
+
+
+def test_a_state_may_declare_that_an_announcement_of_it_is_reported():
+    workflow = parse_workflow(REPORTING)
+
+    assert workflow.state("ship").report is True
+    assert workflow.state("plain").report is False
+
+
+def test_report_must_be_a_boolean():
+    with pytest.raises(WorkflowError, match="state 'ship': report must be a boolean"):
+        parse_workflow(REPORTING.replace("report = true", 'report = "yes"'))
+
+
+@pytest.mark.parametrize(
+    ("states", "kind"),
+    [
+        pytest.param('name = "review"\nreport = true', "a Gate State", id="gate"),
+        pytest.param('name = "review"\nterminal = true\nreport = true', "a Terminal State", id="terminal"),
+        pytest.param(
+            'name = "review"\nprompt = "x"\nterminal = true\nreport = true',
+            "a Terminal State",
+            id="terminal with a prompt",
+        ),
+    ],
+)
+def test_report_is_refused_on_a_state_that_already_tells_on_entry(states, kind):
+    source = f'name = "w"\n[[states]]\n{states}\n[[states]]\nname = "done"\nterminal = true'
+
+    with pytest.raises(WorkflowError) as caught:
+        parse_workflow(source, source="w.toml")
+
+    assert f"workflow w.toml: state 'review': report is refused on {kind}" in str(caught.value)
+
+
+def test_report_false_is_accepted_anywhere():
+    source = 'name = "w"\n[[states]]\nname = "review"\nreport = false\n[[states]]\nname = "done"\nterminal = true\nreport = false'
+
+    assert parse_workflow(source).state("review").report is False

@@ -23,6 +23,7 @@ from naiad.domain.decide import (
     Finish,
     Notify,
     Nudge,
+    Report,
     Respond,
 )
 from naiad.domain.protocol import DEFAULT_NAIAD
@@ -128,6 +129,8 @@ def _narrate(action: Action) -> str | None:
         return f"nudged the agent ({action.attempt}){expired}"
     if isinstance(action, Notify):
         return f"notified: {action.reason}"
+    if isinstance(action, Report):
+        return f"reported entering {action.state}"
     if isinstance(action, Finish):
         return f"finished at {action.state}"
     return None

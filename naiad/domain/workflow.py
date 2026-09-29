@@ -27,7 +27,17 @@ QUESTIONS_TO: tuple[QuestionsTo, ...] = ("answerer", "human")
 # for a newer Naiad fails loudly on an older one instead of losing its new keys
 # without a word. This is the whole of the format's versioning.
 FILE_KEYS = ("name", "model", "effort", "autocompact", "answerer", "states")
-STATE_KEYS = ("name", "prompt", "clear", "terminal", "next", "model", "effort", "questions")
+STATE_KEYS = (
+    "name",
+    "prompt",
+    "clear",
+    "terminal",
+    "next",
+    "model",
+    "effort",
+    "questions",
+    "report",
+)
 ANSWERER_KEYS = ("model", "effort", "fallback")
 
 
@@ -63,6 +73,10 @@ class State:
     # Questions, while one the file's default gave them to names the missing
     # Answerer (ADR 0050).
     questions_explicit: bool = False
+    # Whether an Announcement of this State is Reported: the operator is told
+    # the Run entered it and nothing is handed over (ADR 0055). Never set on a
+    # Gate State or a Terminal State, which already tell on entry.
+    report: bool = False
 
     @property
     def is_gate_state(self) -> bool:
@@ -242,6 +256,17 @@ def _parse_state(
     own_model = _optional_string(raw, "model", bad)
     own_effort = _optional_string(raw, "effort", bad)
 
+    report = raw.get("report", False)
+    if not isinstance(report, bool):
+        raise bad("report must be a boolean")
+    # Refused rather than ignored: each of these already tells the operator on
+    # entry, a Notify and a Finish, and a second telling is a mistake to point
+    # out. `report = false` says nothing and is accepted anywhere.
+    if report and terminal:
+        raise bad("report is refused on a Terminal State, which already tells on entry")
+    if report and prompt is None:
+        raise bad("report is refused on a Gate State, which already tells on entry")
+
     questions = raw.get("questions", default_questions)
     if questions not in QUESTIONS_TO:
         raise bad('questions must be "answerer" or "human"')
@@ -256,4 +281,5 @@ def _parse_state(
         effort=own_effort if own_effort is not None else default_effort,
         questions=questions,
         questions_explicit="questions" in raw,
+        report=report,
     )
