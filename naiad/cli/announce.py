@@ -13,6 +13,7 @@ from __future__ import annotations
 from naiad.cli.ask import unanswered_question
 from naiad.domain.announcement import Announcement
 from naiad.domain.prompt import BRANCH_PLACEHOLDER, SUBJECT_PLACEHOLDER
+from naiad.domain.protocol import ANNOUNCE_SUBCOMMAND
 from naiad.domain.transitions import UnknownState, start_state as resolve_start_state
 from naiad.domain.workflow import Workflow, load_workflow
 from naiad.runtime.announcements import Announcements
@@ -50,7 +51,7 @@ def announce_state(state: str, *, run: Run, subject: str | None = None) -> Annou
     if not subject and declared.prompt and SUBJECT_PLACEHOLDER in declared.prompt:
         raise AnnounceError(
             f"state '{state}' needs a subject saying what this announcement is about; "
-            f"announce it as: naiad state {state} --subject <value>"
+            f"announce it as: naiad {ANNOUNCE_SUBCOMMAND} {state} --subject <value>"
         )
     # Forgetting to declare a Derived branch is loud, not silent (ADR 0022): a
     # branchless Run that was handed a Prompt asking for one is refused here,

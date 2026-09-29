@@ -121,7 +121,7 @@ def test_a_wait_past_the_spent_budget_is_refused_toward_announce_ask_or_hold(run
     finished = wait(run, "yet another check")
 
     assert finished.returncode == 2
-    assert "naiad state" in finished.stderr
+    assert "naiad announce" in finished.stderr
     assert "naiad ask" in finished.stderr
     assert "naiad hold" in finished.stderr
     assert waits_file(run)["reason"] == "an earlier wait"

@@ -51,6 +51,7 @@ from naiad.cli.wait import WaitError, declare_wait
 from naiad.cli.watch import tick_once, watch
 from naiad.domain.entry import Attachment, Entry
 from naiad.domain.listing import render_states
+from naiad.domain.protocol import ANNOUNCE_SUBCOMMAND
 from naiad.domain.workflow import WorkflowError, load_workflow
 from naiad.hooks.install import DEFAULT_SETTINGS_PATH, install_hooks
 from naiad.runtime.announcements import Announcements
@@ -117,7 +118,9 @@ def _driving_parser(
     )
 
 
-def main(argv: list[str] | None = None) -> int:
+def build_parser() -> argparse.ArgumentParser:
+    """The whole command tree, each command bound to its handler and none of them
+    run, so the tree can be read without a Run or a home directory."""
     parser = argparse.ArgumentParser(prog="naiad")
     subcommands = parser.add_subparsers(dest="command", required=True)
 
@@ -190,10 +193,7 @@ def main(argv: list[str] | None = None) -> int:
 
     # Read before adopting, and by nothing else: the operator names a phase in
     # their own words, and only the Workflow says what its States are actually
-    # called (ADR 0032). One letter from `state` below, which is a Protocol
-    # verb the agent types all run long — tolerated because the two fail
-    # visibly rather than quietly: this one prints a listing and announces
-    # nothing, and that one refuses without a State to name.
+    # called (ADR 0032).
     states = subcommands.add_parser(
         "states", help="list what a Workflow declares, to choose a State to start at"
     )
@@ -205,14 +205,16 @@ def main(argv: list[str] | None = None) -> int:
     )
     states.set_defaults(handler=_states)
 
-    state = subcommands.add_parser("state", help="announce the State you are in")
-    state.add_argument("name", help="the State's name, as declared by the Workflow")
-    state.add_argument(
+    announce = subcommands.add_parser(
+        ANNOUNCE_SUBCOMMAND, help="announce the State you are in"
+    )
+    announce.add_argument("name", help="the State's name, as declared by the Workflow")
+    announce.add_argument(
         "--subject",
         default=None,
         help="what this announcement is about, for a State whose Prompt names one",
     )
-    state.set_defaults(handler=_announce)
+    announce.set_defaults(handler=_announce)
 
     ask = subcommands.add_parser("ask", help="ask a Question you cannot decide alone")
     ask.add_argument("question", help="what you need decided")
@@ -287,7 +289,11 @@ def main(argv: list[str] | None = None) -> int:
     )
     watch_parser.set_defaults(handler=_watch)
 
-    arguments = parser.parse_args(argv)
+    return parser
+
+
+def main(argv: list[str] | None = None) -> int:
+    arguments = build_parser().parse_args(argv)
     handler: Handler = arguments.handler
     return handler(arguments)
 

@@ -156,6 +156,10 @@ def test_it_names_the_naiad_that_installed_it(skill):
     assert COMMAND in skill
 
 
+def test_it_names_the_verb_the_agent_holds_back_until_the_first_prompt(skill):
+    assert f"{COMMAND} announce" in skill
+
+
 def test_a_document_it_rendered_is_recognised_as_its_own(skill):
     assert installed_by_naiad(skill)
 

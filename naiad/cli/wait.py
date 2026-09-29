@@ -12,6 +12,7 @@ with no human told is exactly what the budget exists to stop.
 
 from __future__ import annotations
 
+from naiad.domain.protocol import ANNOUNCE_SUBCOMMAND
 from naiad.runtime.announcements import Announcements
 from naiad.runtime.records import Holds, Waits
 from naiad.runtime.run import Run
@@ -47,7 +48,7 @@ def declare_wait(
     if waits.remaining(announcement, now=now) < 1.0:
         raise WaitError(
             "this announcement's wait budget is spent, so no further wait can be "
-            "declared. If the phase is finished, announce with `naiad state <name>`; "
+            f"declared. If the phase is finished, announce with `naiad {ANNOUNCE_SUBCOMMAND} <name>`; "
             "if you are stuck on a decision you cannot make alone, ask with "
             '`naiad ask "<question>" --option "<one>" --option "<another>"`; '
             "if the human told you to pause, relay that with "

@@ -374,7 +374,7 @@ def test_the_output_teaches_the_protocol(home, repo, capsys):
     and need not hold a bare `naiad` at all."""
     printed = teaching(repo, capsys)
 
-    for verb in ("state", "ask", "wait", "hold"):
+    for verb in ("announce", "ask", "wait", "hold"):
         assert f"{naiad_command()} {verb}" in printed
 
 

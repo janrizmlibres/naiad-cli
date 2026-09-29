@@ -79,7 +79,7 @@ def run(tmp_path):
 
 def announce(run, *arguments, run_id="a-run"):
     return subprocess.run(
-        [NAIAD, "state", *arguments],
+        [NAIAD, "announce", *arguments],
         capture_output=True,
         text=True,
         env=naiad_environment(run, run_id=run_id),
@@ -158,6 +158,23 @@ def test_a_rejected_subjectless_announcement_names_the_correct_invocation(run):
 
     assert "--subject" in finished.stderr
     assert "implement" in finished.stderr
+    assert "naiad announce implement" in finished.stderr
+
+
+def test_the_old_verb_is_no_longer_a_command_and_no_alias_is_kept(run):
+    """`naiad state` is the authoring noun's, so the old spelling of an
+    announcement must fail rather than quietly work."""
+    finished = subprocess.run(
+        [NAIAD, "state", "grill"],
+        capture_output=True,
+        text=True,
+        env=naiad_environment(run, run_id="a-run"),
+        cwd=str(run.target_repo),
+    )
+
+    assert finished.returncode != 0
+    assert "invalid choice: 'state'" in finished.stderr
+    assert not (run.root / STATE_FILENAME).exists()
 
 
 def test_a_rejected_subjectless_announcement_does_not_alter_the_state_file(run):

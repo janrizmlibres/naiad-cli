@@ -90,7 +90,7 @@ def test_prints_the_protocol_for_injection_into_a_fresh_context(store, repo):
     finished = protocol(make_run(store, repo))
 
     assert finished.returncode == 0, finished.stderr
-    assert "naiad state" in injected(finished)
+    assert "naiad announce" in injected(finished)
     assert "naiad ask" in injected(finished)
 
 
@@ -155,7 +155,7 @@ def test_a_clear_source_still_injects_the_protocol(store, repo):
     a Clear made still needs the Protocol, like any other."""
     finished = protocol(make_run(store, repo), source="clear")
 
-    assert "naiad state" in injected(finished)
+    assert "naiad announce" in injected(finished)
 
 
 def test_no_run_attached_prints_nothing_and_succeeds(store, repo):
@@ -176,7 +176,7 @@ def test_a_workflow_carrying_no_protocol_text_still_yields_the_full_protocol(sto
 
     finished = protocol(make_run(store, repo))
 
-    assert "naiad state" in injected(finished)
+    assert "naiad announce" in injected(finished)
     assert "naiad ask" in injected(finished)
     assert "announce: review" in injected(finished)
 
@@ -192,7 +192,7 @@ def test_a_workflow_edited_out_from_under_the_run_does_not_break_the_session(sto
     finished = protocol(run)
 
     assert finished.returncode == 0
-    assert "naiad state" in injected(finished)
+    assert "naiad announce" in injected(finished)
 
 
 def test_a_compact_source_records_that_the_context_was_summarised(store, repo):
@@ -221,7 +221,7 @@ def test_a_compact_source_reminds_the_agent_of_its_state_and_subject(store, repo
 
     told = injected(protocol(run, source="compact"))
 
-    assert "naiad state" in told
+    assert "naiad announce" in told
     assert "spec" in told
     assert "docs/spec.md" in told
 

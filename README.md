@@ -8,7 +8,7 @@ The shipped workflow, `workflows/matt-pocock.toml`, takes a task from classifica
 
 ## How it works
 
-- **The agent owns workflow state.** The agent declares which state it is in with `naiad state <name>`. Naiad only reacts. It never guesses where the agent is.
+- **The agent owns workflow state.** The agent declares which state it is in with `naiad announce <name>`. Naiad only reacts. It never guesses where the agent is.
 - **Naiad never reads Claude Code internals.** Turn boundaries come from a `Stop` hook and a `SessionStart` hook, and a `UserPromptSubmit` hook confirms each Prompt arrived whole. `naiad install` writes all three into your user settings. The hooks do nothing when no run is attached.
 - **One session per run, cleared between states.** A prompt is delivered only after the `/clear` is confirmed. An unconfirmed clear is retried a bounded number of times before a human is told. Artifacts in the repository (ADRs, specs, tickets) carry state across the clears.
 - **Per-state model and effort.** A state may pin a model and reasoning effort. Switches are typed into the session one per tick, and Naiad keeps a belief of the session's current settings so an unchanged setting costs nothing.
@@ -84,7 +84,7 @@ These are typed by the agent, not by you. The `SessionStart` hook prints the pro
 
 | Command | Meaning |
 |---|---|
-| `naiad state <name> [--subject ...]` | Announce the state the agent is in. |
+| `naiad announce <name> [--subject ...]` | Announce the state the agent is in. |
 | `naiad ask "<question>" --option ... ` | Ask a question the agent cannot decide alone. The answerer replies. |
 | `naiad wait "<reason>" [--seconds N]` | Declare a wait so silence is not misread as a stall. |
 | `naiad hold "<reason>"` | Relay the human's request to pause. The run parks until they return. |

@@ -10,8 +10,10 @@ import json
 from datetime import datetime, timezone
 from pathlib import Path
 
+import pytest
+
 from naiad.adapters.lock import SupervisorLock
-from naiad.cli.main import _run_id, main
+from naiad.cli.main import _run_id, build_parser, main
 
 STARTED = datetime(2026, 7, 19, 12, 0, 0, tzinfo=timezone.utc)
 
@@ -30,6 +32,24 @@ def test_a_run_id_names_the_workflow_and_when_it_started():
     run_id = _run_id(STARTED, Path("/repo/Matt Pocock Feature.toml"))
 
     assert run_id.startswith("20260719-120000-matt-pocock-feature-")
+
+
+def test_the_parser_is_built_without_running_a_command(monkeypatch, tmp_path):
+    """Reading the command tree must not execute a handler."""
+    monkeypatch.setenv("NAIAD_HOME", str(tmp_path))
+
+    arguments = build_parser().parse_args(["announce", "grill", "--subject", "01-a.md"])
+
+    assert arguments.name == "grill"
+    assert arguments.subject == "01-a.md"
+    assert not (tmp_path / "runs").exists()
+
+
+def test_the_old_announce_spelling_is_not_in_the_command_tree(capsys):
+    with pytest.raises(SystemExit):
+        build_parser().parse_args(["state", "grill"])
+
+    assert "invalid choice: 'state'" in capsys.readouterr().err
 
 
 def test_watching_a_run_that_does_not_exist_fails_rather_than_watching_another(

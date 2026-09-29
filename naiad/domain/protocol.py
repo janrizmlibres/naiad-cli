@@ -15,7 +15,7 @@ from collections.abc import Sequence
 
 from naiad.domain.prompt import render_candidates
 
-ANNOUNCE_SUBCOMMAND = "state"
+ANNOUNCE_SUBCOMMAND = "announce"
 ASK_SUBCOMMAND = "ask"
 WAIT_SUBCOMMAND = "wait"
 HOLD_SUBCOMMAND = "hold"
@@ -310,6 +310,7 @@ def render_adoption(
 
 
 __all__ = [
+    "ANNOUNCE_SUBCOMMAND",
     "DEFAULT_NAIAD",
     "HOLD_SUBCOMMAND",
     "WAIT_SUBCOMMAND",

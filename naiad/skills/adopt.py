@@ -32,7 +32,7 @@ read as an instruction.
 
 from __future__ import annotations
 
-from naiad.domain.protocol import DEFAULT_NAIAD
+from naiad.domain.protocol import ANNOUNCE_SUBCOMMAND, DEFAULT_NAIAD
 
 # The directory the skill is installed under, which is also the name Claude
 # Code addresses it by.
@@ -168,7 +168,7 @@ Then tell the human, in your own words:
   queue indefinitely until they start one, quoting the command it names.
 
 Then end your turn. The first prompt arrives after your turn has ended and the
-lane is free. Announce nothing until it does.
+lane is free. Do not run `{naiad} {announce}` until it does.
 """
 
 
@@ -179,7 +179,9 @@ def render_adopt_skill(*, naiad: str = DEFAULT_NAIAD) -> str:
     one: a session's PATH is whatever the human's shell held, and a command the
     agent cannot run leaves the session unadopted.
     """
-    return _SKILL.format(name=SKILL_NAME, marker=INSTALLED_BY_NAIAD, naiad=naiad)
+    return _SKILL.format(
+        name=SKILL_NAME, marker=INSTALLED_BY_NAIAD, naiad=naiad, announce=ANNOUNCE_SUBCOMMAND
+    )
 
 
 def installed_by_naiad(document: str) -> bool:

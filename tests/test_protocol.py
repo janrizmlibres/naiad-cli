@@ -16,7 +16,7 @@ from naiad.domain.protocol import (
 
 
 def test_names_the_command_that_announces_a_state():
-    assert "naiad state" in render_protocol(next_states=("spec",))
+    assert "naiad announce" in render_protocol(next_states=("spec",))
 
 
 def test_names_the_command_that_asks_a_question():
@@ -107,7 +107,7 @@ def test_the_commands_are_named_as_the_agent_must_actually_invoke_them():
     it the ability to participate at all."""
     protocol = render_protocol(next_states=("spec",), naiad="/opt/naiad/bin/naiad")
 
-    assert "/opt/naiad/bin/naiad state" in protocol
+    assert "/opt/naiad/bin/naiad announce" in protocol
     assert "/opt/naiad/bin/naiad ask" in protocol
     assert "/opt/naiad/bin/naiad wait" in protocol
     assert "/opt/naiad/bin/naiad hold" in protocol
@@ -121,11 +121,11 @@ def test_a_run_with_no_next_state_is_told_so_rather_than_left_a_placeholder():
 
 
 def test_a_nudge_tells_the_agent_what_to_run_to_get_the_run_moving():
-    assert "naiad state" in render_nudge(attempt=1)
+    assert "naiad announce" in render_nudge(attempt=1)
 
 
 def test_a_nudge_names_the_command_as_the_agent_must_invoke_it():
-    assert "/opt/naiad/bin/naiad state" in render_nudge(attempt=1, naiad="/opt/naiad/bin/naiad")
+    assert "/opt/naiad/bin/naiad announce" in render_nudge(attempt=1, naiad="/opt/naiad/bin/naiad")
 
 
 def test_the_second_nudge_is_worded_more_firmly_than_the_first():
@@ -158,7 +158,7 @@ def test_a_nudge_after_an_expired_wait_names_what_was_waited_on():
     nudge = render_nudge(attempt=1, expired_wait="2 review agents")
 
     assert "2 review agents" in nudge
-    assert "naiad state" in nudge
+    assert "naiad announce" in nudge
 
 
 def test_the_second_nudge_after_an_expired_wait_still_warns_of_the_human():
@@ -200,7 +200,7 @@ def test_an_adoption_teaches_the_whole_protocol():
     it learns the verbs."""
     taught = adoption()
 
-    assert "naiad state" in taught
+    assert "naiad announce" in taught
     assert "naiad ask" in taught
     assert "naiad wait" in taught
     assert "naiad hold" in taught
@@ -267,7 +267,7 @@ def test_an_adoption_names_the_commands_as_the_agent_must_invoke_them():
         naiad="/opt/naiad/bin/naiad",
     )
 
-    assert "/opt/naiad/bin/naiad state" in taught
+    assert "/opt/naiad/bin/naiad announce" in taught
     assert "/opt/naiad/bin/naiad branch" in taught
     assert "/opt/naiad/bin/naiad queue watch" in taught
 

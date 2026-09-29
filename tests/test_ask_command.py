@@ -115,7 +115,7 @@ def test_a_rejected_question_writes_no_state_file(run):
 def test_a_question_takes_its_number_from_the_same_sequence_as_states(run):
     """A Question and a State are ordered against each other, so the Answer log
     reads in the order things actually happened."""
-    naiad(run, "state", "implement")
+    naiad(run, "announce", "implement")
     announced = state_file(run)["seq"]
 
     ask(run, "Which module owns retries?", "the client")
@@ -125,7 +125,7 @@ def test_a_question_takes_its_number_from_the_same_sequence_as_states(run):
 
 def test_a_question_names_the_state_the_agent_is_standing_in(run):
     """It is where the agent carries on once the answer arrives."""
-    naiad(run, "state", "implement")
+    naiad(run, "announce", "implement")
 
     ask(run, "Which module owns retries?", "the client")
 
@@ -145,7 +145,7 @@ def test_an_announcement_after_a_question_leaves_no_question_behind(run):
     State would be consulted a second time, after it was already answered."""
     ask(run, "Which module owns retries?", "the client")
 
-    naiad(run, "state", "done")
+    naiad(run, "announce", "done")
 
     assert state_file(run).get("question") is None
 
