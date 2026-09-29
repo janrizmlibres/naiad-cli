@@ -1,15 +1,34 @@
 [build-system]
-requires = ["setuptools>=68"]
+requires = ["setuptools>=77"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "naiad"
+name = "naiad-cli"
 version = "0.1.0"
 description = "Drives a multi-phase Claude Code workflow to completion"
+readme = "README.md"
+license = "MIT AND 0BSD"
+license-files = ["LICENSE", "LICENSES/0BSD.txt"]
+authors = [{ name = "Janriz Libres", email = "libres.janriz@gmail.com" }]
 requires-python = ">=3.11"
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Environment :: Console",
+    "Intended Audience :: Developers",
+    "Operating System :: POSIX",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+]
 dependencies = [
     "tomlkit>=0.15.1",
 ]
+
+[project.urls]
+Homepage = "https://github.com/janrizmlibres/naiad-cli"
+Source = "https://github.com/janrizmlibres/naiad-cli"
+Issues = "https://github.com/janrizmlibres/naiad-cli/issues"
 
 [project.scripts]
 naiad = "naiad.cli.main:main"
