@@ -13,7 +13,13 @@ import pytest
 
 from naiad.domain.workflow import WorkflowError
 from naiad.runtime import workflow_file
-from naiad.runtime.workflow_file import edit_workflow, scaffold_workflow
+from naiad.runtime.workflow_file import (
+    copy_workflow,
+    edit_workflow,
+    scaffold_workflow,
+    set_file_key,
+    unset_file_key,
+)
 
 COMMENTED = """\
 # Hand-written header: kept.
@@ -163,3 +169,73 @@ def test_a_scaffold_never_replaces_a_dangling_link(tmp_path):
         scaffold_workflow(entry, "demo")
 
     assert entry.is_symlink()
+
+
+def test_a_new_file_key_lands_beside_the_name_not_after_the_states(workflow):
+    edit_workflow(workflow, lambda document: set_file_key(document, "model", "opus"))
+
+    written = workflow.read_text()
+    assert written.index('model = "opus"') < written.index("[[states]]")
+    assert written.replace('model = "opus"\n', "", 1) == COMMENTED
+
+
+def test_a_file_key_that_is_there_is_replaced_in_place(workflow):
+    workflow.write_text(COMMENTED.replace('name = "demo"\n', 'name = "demo"\nmodel = "opus"\n'))
+
+    edit_workflow(workflow, lambda document: set_file_key(document, "model", "haiku"))
+
+    assert workflow.read_text() == COMMENTED.replace(
+        'name = "demo"\n', 'name = "demo"\nmodel = "haiku"\n'
+    )
+
+
+def test_an_answerer_key_makes_the_table_when_there_is_none(workflow):
+    loaded = edit_workflow(workflow, lambda d: set_file_key(d, "answerer.fallback", "sonnet"))
+
+    assert loaded.answerer_fallback == "sonnet"
+    assert "[answerer]" in workflow.read_text()
+
+
+def test_unset_deletes_the_key(workflow):
+    edit_workflow(workflow, lambda d: set_file_key(d, "effort", "high"))
+
+    loaded = edit_workflow(workflow, lambda d: unset_file_key(d, "effort"))
+
+    assert loaded.effort is None
+    assert workflow.read_text() == COMMENTED
+
+
+def test_unsetting_the_last_answerer_key_keeps_the_table_because_it_is_the_opt_in(workflow):
+    """An `[answerer]` table flips the file's default for Questions (ADR 0050),
+    so emptying it must not switch the Answerer off as a side effect."""
+    edit_workflow(workflow, lambda d: set_file_key(d, "answerer.model", "haiku"))
+
+    loaded = edit_workflow(workflow, lambda d: unset_file_key(d, "answerer.model"))
+
+    assert "[answerer]" in workflow.read_text()
+    assert loaded.state("plan").questions == "answerer"
+
+
+def test_unset_of_a_key_that_is_not_there_changes_nothing(workflow):
+    edit_workflow(workflow, lambda d: unset_file_key(d, "answerer.model"))
+
+    assert workflow.read_text() == COMMENTED
+
+
+def test_a_copy_takes_the_new_stem_as_its_name_and_keeps_everything_else(tmp_path, workflow):
+    target = tmp_path / "copy.toml"
+
+    copied = copy_workflow(workflow, target, "copy")
+
+    assert copied.name == "copy"
+    assert target.read_text() == COMMENTED.replace('name = "demo"', 'name = "copy"')
+
+
+def test_a_copy_refuses_a_file_that_is_there(tmp_path, workflow):
+    target = tmp_path / "copy.toml"
+    target.write_text("mine")
+
+    with pytest.raises(FileExistsError):
+        copy_workflow(workflow, target, "copy")
+
+    assert target.read_text() == "mine"

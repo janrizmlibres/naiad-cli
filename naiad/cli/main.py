@@ -42,7 +42,10 @@ from naiad.cli.library import (
     LibraryError,
     empty_library_message,
     install_starter,
+    library_entries,
     new_workflow,
+    remove_workflow,
+    rename_workflow,
     resolve_workflow,
     workflows_in,
 )
@@ -54,6 +57,7 @@ from naiad.cli.terminal import terminal_width
 from naiad.cli.wait import WaitError, declare_wait
 from naiad.cli.watch import tick_once, watch
 from naiad.domain.entry import Attachment, Entry
+from naiad.domain.key_table import file_key_help, file_row, file_value
 from naiad.domain.listing import render_states, render_workflow
 from naiad.domain.protocol import ANNOUNCE_SUBCOMMAND
 from naiad.domain.workflow import Workflow, WorkflowError, load_workflow
@@ -73,6 +77,7 @@ from naiad.runtime.records import Clears, EntryTurns, Turns
 from naiad.runtime.resolve import NoRunError, RunResolver, turn_recipient
 from naiad.runtime.run import Run, RunStore
 from naiad.runtime.submitted import judge
+from naiad.runtime.workflow_file import edit_workflow, set_file_key, unset_file_key
 from naiad.skills.install import install_adopt_skill
 
 Handler = Callable[[argparse.Namespace], int]
@@ -121,6 +126,14 @@ def _driving_parser(
         epilog=NOTIFICATIONS_HELP,
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
+
+
+# Named on `set` and `unset` because the table is what an author reads to learn
+# which keys exist and what each takes.
+KEYS_HELP = (
+    "keys (name is changed with `naiad workflow rename`, not set):\n"
+    + "\n".join(f"  {line}" for line in file_key_help().splitlines())
+)
 
 
 def _workflow_argument(parser: argparse.ArgumentParser) -> None:
@@ -232,11 +245,62 @@ def build_parser() -> argparse.ArgumentParser:
     )
     workflow_commands = workflow.add_subparsers(dest="workflow_command", required=True)
 
+    workflow_list = workflow_commands.add_parser(
+        "list", help="list every Workflow the library holds, naming a broken link as broken"
+    )
+    workflow_list.set_defaults(handler=_workflow_list)
+
     workflow_new = workflow_commands.add_parser(
-        "new", help="create a Workflow in the library holding one terminal State, done"
+        "new",
+        help="create a Workflow in the library: one terminal State, done, or a copy of another",
     )
     workflow_new.add_argument("name", help="the new Workflow's name, which is its file's stem")
+    workflow_new.add_argument(
+        "--from",
+        dest="source",
+        metavar="WF",
+        default=None,
+        help="copy this Workflow (a library name or a path) instead, its name rewritten "
+        "to the new one",
+    )
     workflow_new.set_defaults(handler=_workflow_new)
+
+    workflow_rm = workflow_commands.add_parser(
+        "rm",
+        help="delete a Workflow file; refused while an Entry or Run addresses it",
+    )
+    _workflow_argument(workflow_rm)
+    workflow_rm.set_defaults(handler=_workflow_rm)
+
+    workflow_rename = workflow_commands.add_parser(
+        "rename",
+        help="rename a Workflow, its file and its name key together; "
+        "refused while an Entry or Run addresses it",
+    )
+    _workflow_argument(workflow_rename)
+    workflow_rename.add_argument("new", help="the new name, which is the file's new stem")
+    workflow_rename.set_defaults(handler=_workflow_rename)
+
+    workflow_set = workflow_commands.add_parser(
+        "set",
+        help="set a file-level key of a Workflow",
+        epilog=KEYS_HELP,
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    _workflow_argument(workflow_set)
+    workflow_set.add_argument("key", help="which key, from the table below")
+    workflow_set.add_argument("value", help="what to write, in the shape the table gives")
+    workflow_set.set_defaults(handler=_workflow_set)
+
+    workflow_unset = workflow_commands.add_parser(
+        "unset",
+        help="delete a file-level key of a Workflow, leaving it with no opinion",
+        epilog=KEYS_HELP,
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    _workflow_argument(workflow_unset)
+    workflow_unset.add_argument("key", help="which key, from the table below")
+    workflow_unset.set_defaults(handler=_workflow_unset)
 
     workflow_show = workflow_commands.add_parser(
         "show", help="print a Workflow's file-level keys and each State's kind and marks"
@@ -1018,12 +1082,94 @@ def _workflow_check(arguments: argparse.Namespace) -> int:
 
 def _workflow_new(arguments: argparse.Namespace) -> int:
     try:
-        path, workflow = new_workflow(arguments.name, library=default_library_root())
+        path, workflow = new_workflow(
+            arguments.name, library=default_library_root(), source=arguments.source
+        )
     except (*FAILURES, WorkflowError) as error:
         print(f"naiad: {error}", file=sys.stderr)
         return 2
 
     print(f"created {workflow.name}: {path}")
+    return 0
+
+
+def _workflow_list(arguments: argparse.Namespace) -> int:
+    """Every entry the library holds, one line each, the ones a Run could not
+    start from saying why beside their name."""
+    library = default_library_root()
+    held = library_entries(library)
+    if not held:
+        print(empty_library_message(library))
+        return 0
+
+    width = max(len(name) for name, _ in held)
+    for name, problem in held:
+        print(f"{name:<{width}}  {problem}" if problem else name)
+    return 0
+
+
+def _workflow_set(arguments: argparse.Namespace) -> int:
+    try:
+        value = file_value(arguments.key, arguments.value)
+        path = resolve_workflow(arguments.workflow, library=default_library_root())
+        edit_workflow(path, lambda document: set_file_key(document, arguments.key, value))
+    except (*FAILURES, WorkflowError) as error:
+        print(f"naiad: {error}", file=sys.stderr)
+        return 2
+
+    print(f"{path.stem}: {arguments.key} = {value}")
+    return 0
+
+
+def _workflow_unset(arguments: argparse.Namespace) -> int:
+    removed: list[bool] = []
+    try:
+        file_row(arguments.key)
+        path = resolve_workflow(arguments.workflow, library=default_library_root())
+        edit_workflow(
+            path, lambda document: removed.append(unset_file_key(document, arguments.key))
+        )
+    except (*FAILURES, WorkflowError) as error:
+        print(f"naiad: {error}", file=sys.stderr)
+        return 2
+
+    if removed == [True]:
+        print(f"{path.stem}: {arguments.key} removed")
+    else:
+        print(f"{path.stem}: {arguments.key} was not set")
+    return 0
+
+
+def _workflow_rm(arguments: argparse.Namespace) -> int:
+    try:
+        path = remove_workflow(
+            arguments.workflow,
+            library=default_library_root(),
+            queue=Queue(default_queue_root()),
+            runs=RunStore(default_runs_root()),
+        )
+    except (*FAILURES, WorkflowError) as error:
+        print(f"naiad: {error}", file=sys.stderr)
+        return 2
+
+    print(f"removed {path}")
+    return 0
+
+
+def _workflow_rename(arguments: argparse.Namespace) -> int:
+    try:
+        path = rename_workflow(
+            arguments.workflow,
+            arguments.new,
+            library=default_library_root(),
+            queue=Queue(default_queue_root()),
+            runs=RunStore(default_runs_root()),
+        )
+    except (*FAILURES, WorkflowError) as error:
+        print(f"naiad: {error}", file=sys.stderr)
+        return 2
+
+    print(f"renamed {arguments.workflow} to {arguments.new}: {path}")
     return 0
 
 

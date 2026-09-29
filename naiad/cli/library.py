@@ -21,9 +21,17 @@ import os
 from importlib.resources import files
 from pathlib import Path
 
-from naiad.domain.workflow import Workflow, load_workflow
+from naiad.domain.workflow import Workflow, WorkflowError, load_workflow
 from naiad.runtime.atomic import write_atomically
-from naiad.runtime.workflow_file import scaffold_workflow
+from naiad.runtime.queue import Queue
+from naiad.runtime.run import RunStore
+from naiad.runtime.workflow_file import (
+    copy_workflow,
+    edit_workflow,
+    scaffold_workflow,
+    set_name,
+)
+from naiad.runtime.workflow_use import addressing
 
 STARTER_FILE = "starter.toml"
 
@@ -105,21 +113,124 @@ def install_starter(*, library: Path, force: bool = False) -> Path:
     return entry
 
 
-def new_workflow(name: str, *, library: Path) -> tuple[Path, Workflow]:
-    """Scaffold a Workflow of this name in the library, refusing one that is
-    there. Only a bare name is taken: a path would put the file somewhere the
-    name does not address."""
+def new_workflow(
+    name: str, *, library: Path, source: str | None = None
+) -> tuple[Path, Workflow]:
+    """Create a Workflow of this name in the library, refusing one that is
+    there: scaffolded, or a copy of `source` (a name or a path, by shape) with
+    its `name` rewritten to the new stem. Only a bare name is taken for the new
+    one: a path would put the file somewhere the name does not address."""
+    _require_a_name(name)
+    path = library / f"{name}.toml"
+    original = None if source is None else resolve_workflow(source, library=library)
+    try:
+        if original is None:
+            return path, scaffold_workflow(path, name)
+        return path, copy_workflow(original, path, name)
+    except FileExistsError:
+        raise LibraryError(f"workflow '{name}' already exists: {path}") from None
+
+
+def library_entries(library: Path) -> list[tuple[str, str | None]]:
+    """Every entry the library holds as (name, problem), the problem None for
+    one a Run could start from.
+
+    A listing of what is there rather than of what loads: a link whose target
+    is gone is still an entry, and the operator needs it named as broken, not
+    left out as though they had never made it.
+    """
+    if not library.is_dir():
+        return []
+    held = sorted(
+        (file for file in library.glob("*.toml") if file.is_file() or file.is_symlink()),
+        key=_stem,
+    )
+    return [(file.stem, _problem_with(file)) for file in held]
+
+
+def remove_workflow(argument: str, *, library: Path, queue: Queue, runs: RunStore) -> Path:
+    """Delete the library entry named, or the file at the path given.
+
+    A link is removed and its target left, because the file behind it is the
+    operator's own and may live in a repository.
+    """
+    path = _held(argument, library)
+    _refuse_while_addressed("remove", argument, path, queue=queue, runs=runs)
+    path.unlink()
+    return path
+
+
+def rename_workflow(
+    argument: str, new: str, *, library: Path, queue: Queue, runs: RunStore
+) -> Path:
+    """Move the file and its `name` key together, beside where it was.
+
+    The key is written first, through the editor that validates and can undo
+    it, and the move follows; a move that fails puts the key back, so the two
+    never part.
+    """
+    _require_a_name(new)
+    path = _held(argument, library)
+    destination = path.with_name(f"{new}.toml")
+    if destination.is_symlink() or destination.exists():
+        raise LibraryError(f"workflow '{new}' already exists: {destination}")
+    _refuse_while_addressed("rename", argument, path, queue=queue, runs=runs)
+
+    previous = load_workflow(path.resolve()).name
+    edit_workflow(path, lambda document: set_name(document, new))
+    try:
+        path.rename(destination)
+    except OSError as error:
+        edit_workflow(path, lambda document: set_name(document, previous))
+        raise LibraryError(f"cannot move {path} to {destination} ({error.strerror})") from error
+    return destination
+
+
+def _require_a_name(name: str) -> None:
     # An empty name has the shape of a name, and would be the file `.toml`.
     if not name or not _is_name(name):
         raise LibraryError(
             f"'{name}' is not a workflow name: give a bare name, "
             "with no '/' and no '.toml' suffix"
         )
-    path = library / f"{name}.toml"
+
+
+def _held(argument: str, library: Path) -> Path:
+    """The file a verb that changes the library acts on, as it is spelt there:
+    not resolved, so a link is the thing acted on and not what it points at."""
+    if not _is_name(argument):
+        path = Path(argument).expanduser()
+        if not path.is_file():
+            raise LibraryError(f"no workflow file at {path}")
+        return path
+    path = library / f"{argument}.toml"
+    if not path.is_file() and not path.is_symlink():
+        raise LibraryError(_unknown(argument, library))
+    return path
+
+
+def _refuse_while_addressed(
+    verb: str, argument: str, path: Path, *, queue: Queue, runs: RunStore
+) -> None:
+    users = addressing(path, queue=queue, runs=runs)
+    if users:
+        raise LibraryError(
+            f"cannot {verb} '{argument}': {', '.join(users)} "
+            f"{'addresses' if len(users) == 1 else 'address'} it; "
+            "end each with `naiad queue rm <entry id>` first"
+        )
+
+
+def _problem_with(file: Path) -> str | None:
+    if file.is_symlink() and not file.exists():
+        return f"broken link: points at {os.readlink(file)}, which does not exist"
     try:
-        return path, scaffold_workflow(path, name)
-    except FileExistsError:
-        raise LibraryError(f"workflow '{name}' already exists: {path}") from None
+        declared = load_workflow(file).name
+    except WorkflowError as error:
+        return str(error)
+    if declared != file.stem:
+        return f"misfiled: declares name '{declared}'; a library file must declare its own stem"
+    return None
 
 
 def _is_theirs(entry: Path, shipped: bytes) -> bool:
@@ -161,7 +272,10 @@ __all__ = [
     "LibraryError",
     "empty_library_message",
     "install_starter",
+    "library_entries",
     "new_workflow",
+    "remove_workflow",
+    "rename_workflow",
     "resolve_workflow",
     "workflows_in",
 ]
