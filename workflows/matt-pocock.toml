@@ -114,6 +114,13 @@ next = ["implement", "triage", "handover", "pull-request"]
 prompt = """
 /implement {subject}
 
+Working branch: {branch}
+Predecessor: {predecessor}
+
+Do this ticket on the Working branch, wherever it is checked out, and not on whatever this checkout stands on now: a person or another Run may have switched it since this Run's last ticket. Run `git worktree list` before you change anything. If a worktree of this repository has the Working branch checked out, work and commit in that worktree. Otherwise, if the branch exists, check it out here. If the line names a branch that exists nowhere, do not create it from what is checked out — say so in the session and announce handover.
+
+If the Working branch line above is empty, this Run was started here without one. Derive a name from this repository's conventions — its recent branch names, its pull requests, the team's prefixes — create it from the Predecessor when one is named above and `git merge-base --is-ancestor <predecessor> <base branch>` exits non-zero, and from the repository's base branch otherwise, never from what is checked out. Declare it to Naiad in the same turn with `naiad branch <name>`.
+
 When it is done, set that ticket's Status line to resolved.
 
 Then choose what comes next. A ticket is closed when its Status line reads resolved or wontfix, and open otherwise. Scan for the next lowest-numbered ticket in the set that is open and whose blocking edges are all satisfied and read its Status line:
@@ -155,7 +162,11 @@ model = "opus"
 effort = "medium"
 clear = true
 prompt = """
-Before anything else, work out which repositories this Run's work reached. This one, always. A .matt-pocock.toml at this repository's root may also name companion repositories — a frontend to this backend, a client to this service — under a `companions` key, whose value is a list of paths to their checkouts relative to this repository's root. A feature that spans them leaves half its work in another checkout, so look at each one that key names — and not only at what that path has checked out. A path names a repository, and the work may sit in another worktree of it or on a branch nothing has checked out, while the path itself stands on something unrelated. So list every worktree (`git -C <path> worktree list`) and every local branch (`git -C <path> branch`) of that repository, and weigh each branch: it carries this Run's work if it is not the repository's base branch and has commits ahead of that base whose contents answer this Run's task. Push and open from the worktree that has that branch checked out. A companion none of whose branches carries such work — no such branch, or commits that are somebody else's unfinished work — is left untouched, and you say in the session which it was, which branches you weighed and why.
+Working branch: {branch}
+
+Before anything else, work out which repositories this Run's work reached. This one, always, and in this one the Run's work is the Working branch above — not whatever this checkout stands on now, which a person or another Run may have switched while this Run worked. Run `git worktree list`: push and open from the worktree that has the Working branch checked out, or from this checkout if it stands on it. Ask the human before opening anything if the line above is empty, if no local branch has that name, or if the branch has commits ahead of its base that do not answer this Run's task.
+
+A .matt-pocock.toml at this repository's root may also name companion repositories — a frontend to this backend, a client to this service — under a `companions` key, whose value is a list of paths to their checkouts relative to this repository's root. A feature that spans them leaves half its work in another checkout, so look at each one that key names — and not only at what that path has checked out. A path names a repository, and the work may sit in another worktree of it or on a branch nothing has checked out, while the path itself stands on something unrelated. So list every worktree (`git -C <path> worktree list`) and every local branch (`git -C <path> branch`) of that repository, and weigh each branch: it carries this Run's work if it is not the repository's base branch and has commits ahead of that base whose contents answer this Run's task. Push and open from the worktree that has that branch checked out. A companion none of whose branches carries such work — no such branch, or commits that are somebody else's unfinished work — is left untouched, and you say in the session which it was, which branches you weighed and why.
 
 Where this repository's changes break what a companion reads — a renamed field, a removed endpoint, a changed response — and no companion branch carries the counterpart, that is not a follow-up to describe in a pull request body. Ask the human before opening anything.
 
