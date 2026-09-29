@@ -66,7 +66,7 @@ Useful flags on `naiad run`:
 ```
 uv run naiad queue add matt-pocock "<task>" --repo /path/to/repo   # queue without supervising
 uv run naiad queue add --file tasks.toml                             # queue several at once
-uv run naiad queue list                                              # entries in order, with what became of each
+uv run naiad queue list                                              # entries in order, with what became of each and the State it stands in
 uv run naiad queue watch                                             # take the queue in order and keep following it
 uv run naiad queue rm <entry-id>                                     # cancel an entry and free its session
 uv run naiad queue prune                                             # remove done entries and their runs

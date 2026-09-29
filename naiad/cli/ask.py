@@ -22,8 +22,7 @@ from collections.abc import Sequence
 from naiad.domain.announcement import Announcement
 from naiad.domain.answerer import Escalated
 from naiad.domain.question import Question
-from naiad.domain.transitions import start_state
-from naiad.domain.workflow import load_workflow
+from naiad.domain.transitions import standing_state
 from naiad.runtime.announcements import Announcements
 from naiad.runtime.records import Consultations, Handled
 from naiad.runtime.run import Run
@@ -73,13 +72,14 @@ def ask_question(text: str, *, options: Sequence[str], run: Run) -> Announcement
 
     announcements = Announcements(run.root)
     latest = announcements.latest()
-    # Where the agent is standing: its latest Announcement, or — before it has
-    # made one — the State the Run began at, whose Prompt it was handed at
-    # kickoff without ever announcing it.
-    if latest is not None:
-        standing = latest.state
-    else:
-        standing = start_state(load_workflow(run.workflow_path), run.start_state).name
+    standing = standing_state(
+        announced=latest.state if latest is not None else None, started_at=run.start_state
+    )
+    if standing is None:
+        raise AskError(
+            "this run has announced no state and recorded none it began at, so there is "
+            "nowhere to ask from; announce a state first"
+        )
     return announcements.ask(Question(text=text, options=tuple(options)), state=standing)
 
 

@@ -163,7 +163,7 @@ def start_run(
         working_branch=working_branch,
         predecessor=predecessor,
         skip_gates=skip_gates,
-        start_state=start_state,
+        start_state=first.name,
         start_subject=subject,
     )
 
@@ -262,7 +262,7 @@ def attach_run(
     # have been edited in between. The line quoted back is the one that queues
     # this work again — from the session, which is the only place an Adoption
     # can be described.
-    check_start(
+    checked = check_start(
         workflow_path=workflow_path,
         start_state=start_state,
         subject=subject,
@@ -279,7 +279,7 @@ def attach_run(
         working_branch=working_branch,
         predecessor=predecessor,
         skip_gates=skip_gates,
-        start_state=start_state,
+        start_state=checked.state.name,
         # Read back by the delivery that follows, in a later tick and possibly
         # a later process: what an adopted Run's first Prompt renders from
         # cannot be held in the hand that attached it.

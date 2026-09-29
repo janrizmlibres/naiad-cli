@@ -12,6 +12,7 @@ from naiad.domain.transitions import (
     deviation,
     expected_next_states,
     next_states,
+    standing_state,
     start_state,
 )
 from naiad.domain.workflow import parse_workflow
@@ -213,7 +214,19 @@ def test_a_run_can_start_at_a_named_state(workflow):
 def test_before_anything_is_announced_the_expectation_follows_the_starting_state(workflow):
     """At kickoff the agent has been given the first State's Prompt but has not
     announced anything, so what it owes next is that State's successor."""
-    assert expected_next_states(workflow, announced=None, started_at=None) == ("review",)
+    assert expected_next_states(workflow, announced=None, started_at="grill") == ("review",)
+
+
+def test_a_run_with_no_recorded_start_and_no_announcement_expects_nothing(workflow):
+    """The record is the only source of where a Run began: the Workflow's first
+    State is not a substitute, since it may have been renamed since."""
+    assert expected_next_states(workflow, announced=None, started_at=None) == ()
+
+
+def test_the_standing_state_is_the_announced_one_else_the_recorded_start():
+    assert standing_state(announced="spec", started_at="grill") == "spec"
+    assert standing_state(announced=None, started_at="grill") == "grill"
+    assert standing_state(announced=None, started_at=None) is None
 
 
 def test_before_anything_is_announced_a_named_starting_state_is_followed(workflow):
@@ -280,7 +293,9 @@ def test_announcing_outside_the_candidates_deviates_from_all_of_them(branching):
 def test_before_any_announcement_the_run_stands_where_it_began(workflow):
     """The Run's first State was delivered at kickoff without an Announcement,
     so with nothing announced yet the expectation is that State's successor."""
-    assert deviation(workflow, announced="spec", previous_state=None) == ("review",)
+    assert deviation(workflow, announced="spec", previous_state=None, started_at="grill") == (
+        "review",
+    )
 
 
 def test_a_run_started_partway_expects_from_the_state_it_started_at(workflow):

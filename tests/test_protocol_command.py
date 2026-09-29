@@ -54,6 +54,8 @@ def repo(tmp_path):
 
 
 def make_run(store, repo, **options):
+    # Recorded as kickoff records it: a Run always knows where it began.
+    options.setdefault("start_state", "grill")
     return store.create(
         run_id="a-run",
         workflow_path=repo / "workflow.toml",
@@ -98,6 +100,27 @@ def test_before_anything_is_announced_it_names_the_state_after_the_starting_one(
     finished = protocol(make_run(store, repo))
 
     assert "announce: review" in injected(finished)
+
+
+def test_the_expectation_before_an_announcement_survives_a_state_put_in_front_of_the_first(
+    store, repo
+):
+    """The Run recorded where it began, so a Workflow edited under it does not
+    move it to whichever State is now first."""
+    run = make_run(store, repo)
+    edited = WORKFLOW.replace('[[states]]\nname = "grill"', '[[states]]\nname = "intake"\n\n[[states]]\nname = "grill"', 1)
+    (repo / "workflow.toml").write_text(edited)
+
+    assert "announce: review" in injected(protocol(run))
+
+
+def test_a_compaction_reminder_names_the_recorded_state_after_the_first_is_renamed(store, repo):
+    """The Protocol, the reminder and the listing read one record, so the first
+    State being renamed changes none of them."""
+    run = make_run(store, repo)
+    (repo / "workflow.toml").write_text(WORKFLOW.replace('name = "grill"', 'name = "interview"'))
+
+    assert "in the grill phase" in injected(protocol(run, source="compact"))
 
 
 def test_after_an_announcement_it_names_the_state_after_the_announced_one(store, repo):

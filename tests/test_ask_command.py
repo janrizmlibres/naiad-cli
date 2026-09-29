@@ -48,6 +48,7 @@ def run(tmp_path):
         task="add dark mode",
         target_repo=repo,
         created_at="2026-07-19T12:00:00Z",
+        start_state="grill",
     )
 
 
@@ -138,6 +139,19 @@ def test_a_question_asked_before_any_announcement_names_the_state_the_run_began_
     ask(run, "Which module owns retries?", "the client")
 
     assert state_file(run)["state"] == "grill"
+
+
+def test_a_run_that_recorded_no_start_and_announced_nothing_has_nowhere_to_ask_from(run):
+    """A Run written before kickoff recorded its start: guessing the Workflow's
+    first State would name somewhere the Run never said it stood."""
+    run.start_state = None
+    run.save()
+
+    finished = ask(run, "Which module owns retries?", "the client")
+
+    assert finished.returncode != 0
+    assert "announce a state first" in finished.stderr
+    assert not (run.root / STATE_FILENAME).exists()
 
 
 def test_an_announcement_after_a_question_leaves_no_question_behind(run):

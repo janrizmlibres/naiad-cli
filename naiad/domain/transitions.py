@@ -66,16 +66,20 @@ def start_state(workflow: Workflow, named: str | None) -> State:
     return found
 
 
-def standing_state(workflow: Workflow, *, announced: str | None, started_at: str | None) -> str:
+def standing_state(*, announced: str | None, started_at: str | None) -> str | None:
     """Where the agent stands: its latest Announcement, or — before it has made
     one — the State the Run began at, whose Prompt it was handed at kickoff.
 
-    One resolver rather than two, because it is asked from both ends: the
-    Protocol tells the agent what it owes from here, and a Deviation is
-    measured from here. Two copies would drift, and the Workflow file is the
-    single source of truth for ordering.
+    Read from what the Run recorded rather than from the Workflow, so that a
+    Workflow edited under a live Run changes no answer. One resolver rather
+    than several, because it is asked from every end: the Protocol tells the
+    agent what it owes from here, a Deviation is measured from here, a
+    Compaction reminds the agent of it, and the Queue shows it. None when the
+    Run has announced nothing and recorded no start, as a Run written before
+    kickoff recorded one has: guessing the Workflow's first State instead
+    would be an answer the Run never gave.
     """
-    return announced if announced is not None else start_state(workflow, started_at).name
+    return announced if announced is not None else started_at
 
 
 def expected_next_states(
@@ -86,7 +90,9 @@ def expected_next_states(
     skip_gates: bool = False,
 ) -> tuple[str, ...]:
     """What the agent owes next, told to it by the Protocol."""
-    standing = standing_state(workflow, announced=announced, started_at=started_at)
+    standing = standing_state(announced=announced, started_at=started_at)
+    if standing is None:
+        return ()
     return next_states(workflow, standing, skip_gates=skip_gates)
 
 
@@ -120,15 +126,8 @@ def deviation(
     ticket — and an empty expectation is a State with nothing after it, where
     inventing an expectation to deviate from would be worse than having none.
     """
-    try:
-        standing = standing_state(workflow, announced=previous_state, started_at=started_at)
-    except UnknownState:
-        # A Workflow edited mid-Run that no longer declares the State this one
-        # began at. That costs the expectation, not the Run: the same choice is
-        # made where the Protocol is rendered (naiad.cli.protocol).
-        return ()
-
-    if announced == standing:
+    standing = standing_state(announced=previous_state, started_at=started_at)
+    if standing is None or announced == standing:
         return ()
     expected = next_states(workflow, standing, skip_gates=skip_gates)
     return () if announced in expected else expected

@@ -345,6 +345,23 @@ def test_the_run_remembers_the_options_it_was_started_with(repo, store, sessions
     assert reloaded.start_state == "review"
 
 
+def test_the_run_records_the_state_it_began_at_when_the_entry_named_none(repo, store, sessions):
+    """The Standing State is read off the Run, so the first declared State's
+    name is written down at kickoff rather than left to be re-derived from a
+    Workflow that may since have been edited."""
+    run = start(repo, store, sessions)
+
+    assert store.load(run.id).start_state == "grill"
+
+
+def test_the_adopted_run_records_the_state_it_began_at_when_the_entry_named_none(
+    repo, store, sessions
+):
+    run = attach(repo, store, sessions)
+
+    assert store.load(run.id).start_state == "grill"
+
+
 def test_a_run_started_with_gates_skipped_names_the_next_state_that_has_a_prompt(
     repo, store, sessions
 ):

@@ -100,6 +100,7 @@ def run(tmp_path):
         task="add dark mode",
         target_repo=repo,
         created_at="2026-07-19T12:00:00Z",
+        start_state="grill",
     )
     created.attach_session(tmux_session="naiad-a-run", tmux_pane="%42")
     return created

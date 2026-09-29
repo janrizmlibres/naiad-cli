@@ -44,6 +44,11 @@ class Run:
     # How this Run resolves its next State. Options of the Run rather than of
     # the Workflow: the same Workflow file runs supervised or unattended.
     skip_gates: bool = False
+    # The name of the State the Run began at, resolved when it started: the
+    # first declared State when the Entry named none. What the Standing State
+    # is read from before the Run has announced anything, so that a Workflow
+    # edited under a live Run changes no answer. Absent only on a Run written
+    # before kickoff recorded it.
     start_state: str | None = None
     # What the Run's first Prompt is to say it is about, when the State it
     # begins at names a Subject (ADR 0009). Kept on the Run rather than passed

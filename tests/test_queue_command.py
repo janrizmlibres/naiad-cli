@@ -6,6 +6,7 @@ tests hold it to returning without supervising anything.
 """
 
 import json
+import re
 
 import pytest
 
@@ -13,9 +14,11 @@ from naiad.adapters.lock import SupervisorLock
 from naiad.cli.main import main
 from naiad.domain.decide import Finish
 from naiad.domain.entry import Entry
+from naiad.domain.question import Question
 from naiad.runtime.announcements import Announcements
 from naiad.runtime.log import RunLog
 from naiad.runtime.queue import Queue
+from naiad.runtime.records import Notices
 from naiad.runtime.resolve import RunResolver
 from naiad.runtime.run import RunStore
 
@@ -212,6 +215,112 @@ def test_listing_shows_entries_in_queue_order_with_what_became_of_each(home, rep
     assert printed.index(first.id) < printed.index(second.id)
     assert printed.count("waiting") == 2
     assert "MC-AGENT-8546" in printed and "add dark mode" in printed
+
+
+def run_entry(home, repo, name, *, start_state="grill"):
+    """An Entry whose Run exists, named so its line can be found in a listing."""
+    run = RunStore(home / "runs").create(
+        run_id=f"{name}-run",
+        workflow_path=repo / "workflow.toml",
+        task=f"task of {name}",
+        target_repo=repo,
+        created_at="2026-07-22T12:00:00Z",
+        start_state=start_state,
+    )
+    queue_of(home).add(
+        Entry(
+            id=name,
+            workflow_path=repo / "workflow.toml",
+            task=f"task of {name}",
+            target_repo=repo,
+            working_branch=None,
+            created_at="2026-07-22T12:00:00Z",
+            run_id=run.id,
+        )
+    )
+    return run
+
+
+def standing_shown(capsys, entry_id):
+    """The State column of one Entry's line: the third cell, after the id and
+    the status, cells being told apart by two spaces or more."""
+    capsys.readouterr()
+    main(["queue", "list"])
+    (line,) = [l for l in capsys.readouterr().out.splitlines() if l.startswith(entry_id)]
+    return re.split(r"\s{2,}", line)[2]
+
+
+def test_listing_shows_a_dash_for_a_waiting_entry(home, repo, capsys):
+    add(repo)
+    (waiting,) = queue_of(home).all()
+
+    assert standing_shown(capsys, waiting.id) == "-"
+
+
+def test_listing_shows_the_recorded_start_state_of_a_run_that_has_not_announced(
+    home, repo, capsys
+):
+    run_entry(home, repo, "fresh", start_state="implement")
+
+    assert standing_shown(capsys, "fresh") == "implement"
+
+
+def test_listing_shows_the_gate_a_parked_run_stands_at(home, repo, capsys):
+    run = run_entry(home, repo, "parked")
+    Notices(run.root).record_notified(Announcements(run.root).announce("review"))
+
+    assert standing_shown(capsys, "parked") == "review"
+
+
+def test_listing_shows_the_final_state_of_a_done_run(home, repo, capsys):
+    run = run_entry(home, repo, "finished")
+    Announcements(run.root).announce("done")
+    RunLog(run.root).record(Finish(state="done"))
+
+    assert standing_shown(capsys, "finished") == "done"
+
+
+def test_listing_shows_an_announced_state_the_workflow_no_longer_declares(home, repo, capsys):
+    """The Standing State is read from the Run alone, so editing the Workflow
+    under a live Run cannot change or lose it."""
+    run = run_entry(home, repo, "edited")
+    Announcements(run.root).announce("implement")
+    (repo / "workflow.toml").write_text(WORKFLOW.replace('name = "implement"', 'name = "build"'))
+
+    assert standing_shown(capsys, "edited") == "implement"
+
+
+def test_listing_marks_neither_a_question_nor_a_subject(home, repo, capsys):
+    asking = run_entry(home, repo, "asking")
+    Announcements(asking.root).ask(Question(text="which?", options=("a", "b")), state="implement")
+    working = run_entry(home, repo, "working")
+    Announcements(working.root).announce("implement", subject="docs/04-x.md")
+
+    assert standing_shown(capsys, "asking") == "implement"
+    assert standing_shown(capsys, "working") == "implement"
+
+
+def test_listing_shows_a_dash_for_a_run_with_no_recorded_start_and_no_announcement(
+    home, repo, capsys
+):
+    run_entry(home, repo, "legacy", start_state=None)
+
+    assert standing_shown(capsys, "legacy") == "-"
+
+
+def test_listing_pads_the_state_column_to_the_longest_state_and_gives_it_no_header(
+    home, repo, capsys
+):
+    run_entry(home, repo, "longer", start_state="implement")
+    add(repo)
+    capsys.readouterr()
+
+    assert main(["queue", "list"]) == 0
+
+    lines = capsys.readouterr().out.splitlines()
+    assert len(lines) == 2
+    assert any("  running  implement  " in line for line in lines)
+    assert any(f"  waiting  {'-':<9}  " in line for line in lines)
 
 
 def test_listing_tells_apart_two_repositories_that_share_a_name(home, repo, tmp_path, capsys):

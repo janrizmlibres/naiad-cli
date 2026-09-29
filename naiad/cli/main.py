@@ -1038,14 +1038,27 @@ def _queue_list(arguments: argparse.Namespace) -> int:
         return 0
 
     runs = RunStore(default_runs_root())
-    for entry in entries:
-        print(_queue_line(entry, runs))
+    standing = [_standing_shown(entry, runs) for entry in entries]
+    # Padded to the longest here rather than to a fixed width, because a State
+    # is named by the Workflow and Naiad knows no name in advance.
+    width = max(len(name) for name in standing)
+    for entry, state in zip(entries, standing):
+        print(_queue_line(entry, runs, state=f"{state:<{width}}"))
     return 0
 
 
-def _queue_line(entry: Entry, runs: RunStore) -> str:
-    """One Entry as one line: which, what became of it, where, on what branch,
-    and what the work is.
+def _standing_shown(entry: Entry, runs: RunStore) -> str:
+    """The State the Entry's Run stands in, as the Run recorded it — never
+    re-derived from a Workflow that may have been edited since. A dash where
+    there is none: a waiting Entry has no Run, and a Run written before kickoff
+    recorded its start has nothing to show until it announces."""
+    run = runs.load(entry.run_id) if entry.run_id is not None else None
+    return (standing_in(run) if run is not None else None) or "-"
+
+
+def _queue_line(entry: Entry, runs: RunStore, *, state: str) -> str:
+    """One Entry as one line: which, what became of it, the State it stands in,
+    where, on what branch, and what the work is.
 
     The repository in full rather than by its directory's name, because one
     Queue spans every repository and two checkouts of the same project — a
@@ -1053,7 +1066,7 @@ def _queue_line(entry: Entry, runs: RunStore) -> str:
     """
     became = status_of(entry, runs)
     line = (
-        f"{entry.id}  {became:<7}  {_shortened(entry.target_repo)}  "
+        f"{entry.id}  {became:<7}  {state}  {_shortened(entry.target_repo)}  "
         f"{_branch_shown(entry)}  {entry.task}"
     )
     return line if entry.run_id is None else f"{line}  ({entry.run_id})"
