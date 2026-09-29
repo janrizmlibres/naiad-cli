@@ -48,8 +48,8 @@ def default_library_root() -> Path:
     moves everything (ADR 0023).
 
     The one thing under the home a human writes as well as Naiad: `naiad
-    install` addresses the shipped Workflow from here, and refuses to replace
-    anything a human put here by hand (ADR 0037).
+    install --starter` copies the starter here, and refuses to replace a file
+    that differs from it (ADR 0049).
     """
     return naiad_home() / "workflows"
 

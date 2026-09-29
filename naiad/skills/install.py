@@ -10,19 +10,16 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from naiad.adapters.claude_config import default_skills_root
 from naiad.adapters.executable import naiad_command
 from naiad.runtime.atomic import write_atomically
 from naiad.skills.adopt import SKILL_NAME, installed_by_naiad, render_adopt_skill
-
-DEFAULT_SKILLS_ROOT = Path.home() / ".claude" / "skills"
 
 # Claude Code's own name for the file holding a skill.
 SKILL_FILE = "SKILL.md"
 
 
-def install_adopt_skill(
-    *, skills_root: Path = DEFAULT_SKILLS_ROOT, naiad: str | None = None
-) -> Path:
+def install_adopt_skill(*, skills_root: Path | None = None, naiad: str | None = None) -> Path:
     """Install the skill, leaving the rest of the operator's skills alone.
 
     Idempotent, because installing is something an operator will do again
@@ -34,8 +31,12 @@ def install_adopt_skill(
     A skill of the same name that Naiad did not write is refused rather than
     replaced: overwriting it would discard something the operator wrote by hand
     in order to install something they can reinstall at any time.
+
+    Without a root the skill goes where Claude Code reads its skills, which
+    `CLAUDE_CONFIG_DIR` moves.
     """
-    path = Path(skills_root) / SKILL_NAME / SKILL_FILE
+    root = default_skills_root() if skills_root is None else Path(skills_root)
+    path = root / SKILL_NAME / SKILL_FILE
     _refuse_to_overwrite_theirs(path)
     path.parent.mkdir(parents=True, exist_ok=True)
     write_atomically(path, render_adopt_skill(naiad=naiad or naiad_command()))
@@ -53,4 +54,4 @@ def _refuse_to_overwrite_theirs(path: Path) -> None:
         )
 
 
-__all__ = ["DEFAULT_SKILLS_ROOT", "install_adopt_skill"]
+__all__ = ["install_adopt_skill"]

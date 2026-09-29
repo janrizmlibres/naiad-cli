@@ -39,7 +39,7 @@ from naiad.cli.hold import HoldError, declare_hold
 from naiad.cli.library import (
     LibraryError,
     empty_library_message,
-    link_shipped_workflows,
+    install_starter,
     resolve_workflow,
     workflows_in,
 )
@@ -53,7 +53,7 @@ from naiad.domain.entry import Attachment, Entry
 from naiad.domain.listing import render_states
 from naiad.domain.protocol import ANNOUNCE_SUBCOMMAND
 from naiad.domain.workflow import WorkflowError, load_workflow
-from naiad.hooks.install import DEFAULT_SETTINGS_PATH, install_hooks
+from naiad.hooks.install import install_hooks
 from naiad.runtime.announcements import Announcements
 from naiad.runtime.log import RunLog
 from naiad.runtime.home import (
@@ -68,7 +68,7 @@ from naiad.runtime.records import Clears, EntryTurns, Turns
 from naiad.runtime.resolve import NoRunError, RunResolver, turn_recipient
 from naiad.runtime.run import Run, RunStore
 from naiad.runtime.submitted import judge
-from naiad.skills.install import DEFAULT_SKILLS_ROOT, install_adopt_skill
+from naiad.skills.install import install_adopt_skill
 
 Handler = Callable[[argparse.Namespace], int]
 
@@ -270,14 +270,26 @@ def build_parser() -> argparse.ArgumentParser:
     install.add_argument(
         "--settings",
         type=Path,
-        default=DEFAULT_SETTINGS_PATH,
-        help=f"which settings file to install the hooks into (default: {DEFAULT_SETTINGS_PATH})",
+        default=None,
+        help="which settings file to install the hooks into "
+        "(default: settings.json in $CLAUDE_CONFIG_DIR, else ~/.claude)",
     )
     install.add_argument(
         "--skills",
         type=Path,
-        default=DEFAULT_SKILLS_ROOT,
-        help=f"which skills directory to install into (default: {DEFAULT_SKILLS_ROOT})",
+        default=None,
+        help="which skills directory to install into "
+        "(default: skills in $CLAUDE_CONFIG_DIR, else ~/.claude)",
+    )
+    install.add_argument(
+        "--starter",
+        action="store_true",
+        help="also copy the starter workflow into the library as starter.toml",
+    )
+    install.add_argument(
+        "--force",
+        action="store_true",
+        help="with --starter, overwrite a starter.toml that differs from the shipped one",
     )
     install.set_defaults(handler=_install)
 
@@ -606,9 +618,9 @@ def _hook_source() -> str | None:
 
 
 def _install(arguments: argparse.Namespace) -> int:
-    """Everything one machine needs set up: the three hooks, the skill that turns
-    the operator's stated intent into `naiad adopt` (ADR 0028), and the library
-    entry addressing the Workflow that ships (ADR 0037).
+    """What one machine needs set up: the three hooks, the skill that turns the
+    operator's stated intent into `naiad adopt` (ADR 0028), and, on request, the
+    starter Workflow in the library (ADR 0049).
 
     Installed once for the machine rather than per Run: the hooks do nothing
     when no Run is attached to the session that fired them, and the skill is
@@ -619,40 +631,29 @@ def _install(arguments: argparse.Namespace) -> int:
     and each is reported as it lands, so that a refusal on the third is read
     against what the first two already did.
 
-    The library takes no option of its own. It moves with `NAIAD_HOME` as
-    everything under the home does, where the hooks and the skill live in a
-    configuration that is Claude Code's and needs naming.
+    The library is touched only when asked: install is re-run without thinking
+    and from scripts, and what it holds is the operator's. It takes no path of
+    its own and moves with `NAIAD_HOME` as everything under the home does,
+    where the hooks and the skill live in a configuration that is Claude Code's
+    and needs naming.
     """
+    if arguments.force and not arguments.starter:
+        print("naiad: --force applies to --starter, and --starter was not given", file=sys.stderr)
+        return 2
+
     try:
         settings = install_hooks(settings_path=arguments.settings)
         print(f"installed naiad's hooks into {settings}")
         skill = install_adopt_skill(skills_root=arguments.skills)
         print(f"installed the adopt skill into {skill}")
-        _link_workflows(default_library_root())
+        if arguments.starter:
+            starter = install_starter(library=default_library_root(), force=arguments.force)
+            print(f"installed the starter workflow into {starter}")
     except (OSError, ValueError) as error:
         print(f"naiad: {error}", file=sys.stderr)
         return 2
 
     return 0
-
-
-def _link_workflows(library: Path) -> None:
-    """Address each shipped Workflow from the library, or say why none was.
-
-    A distribution carries no Workflow — `workflows/` sits outside the package
-    — so nothing to link is the ordinary case away from a checkout rather than
-    a fault. Said in one sentence and carried on from: the hooks and the skill
-    have landed, and silence is the failure this decision is about (ADR 0037).
-    """
-    linked = link_shipped_workflows(library=library)
-    if not linked:
-        print(
-            f"no workflows directory beside this naiad, so {library} gained nothing; "
-            "link your own workflow files into it by hand"
-        )
-        return
-    for entry in linked:
-        print(f"linked {entry} to the workflow it names")
 
 
 def _watch(arguments: argparse.Namespace) -> int:

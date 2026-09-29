@@ -35,3 +35,16 @@ class RecordingSessions:
 @pytest.fixture
 def sessions():
     return RecordingSessions()
+
+
+@pytest.fixture(autouse=True)
+def isolated_machine(monkeypatch, tmp_path_factory):
+    """No test reaches the operator's real Claude configuration or Naiad home.
+
+    Both are read from the environment, so a test that forgets to name its own
+    would install hooks and a library into the machine it runs on. A test that
+    cares sets them again, and the later setting wins.
+    """
+    root = tmp_path_factory.mktemp("machine")
+    monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(root / "claude"))
+    monkeypatch.setenv("NAIAD_HOME", str(root / "naiad"))

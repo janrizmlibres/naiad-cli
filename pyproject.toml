@@ -17,6 +17,9 @@ dev = ["pytest>=8", "mypy>=1.11"]
 [tool.setuptools.packages.find]
 include = ["naiad*"]
 
+[tool.setuptools.package-data]
+"naiad.workflows" = ["*.toml"]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 

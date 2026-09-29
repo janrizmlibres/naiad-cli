@@ -13,11 +13,13 @@ import tempfile
 from pathlib import Path
 
 
-def write_atomically(path: Path, text: str) -> None:
+def write_atomically(path: Path, content: str | bytes) -> None:
+    """Bytes are written as given, which is what a copy that must stay
+    byte-identical needs; text is written in the platform's own encoding."""
     handle, temporary = tempfile.mkstemp(dir=str(path.parent), prefix=f".{path.name}.")
     try:
-        with os.fdopen(handle, "w") as file:
-            file.write(text)
+        with os.fdopen(handle, "wb" if isinstance(content, bytes) else "w") as file:
+            file.write(content)
         os.replace(temporary, path)
     except BaseException:
         Path(temporary).unlink(missing_ok=True)

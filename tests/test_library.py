@@ -97,3 +97,18 @@ def test_a_stray_local_file_never_shadows_the_library(library, monkeypatch, tmp_
     (tmp_path / "matt-pocock").write_text(WORKFLOW)
     resolved = resolve_workflow("matt-pocock", library=library)
     assert resolved == library / "matt-pocock.toml"
+
+
+def test_a_link_that_points_at_nothing_is_named_as_broken_not_as_missing(library, tmp_path):
+    """The library holds the name, so 'no workflow named' would send the
+    operator looking for a file they made. What is wrong is where it leads."""
+    (library / "feature.toml").symlink_to(tmp_path / "gone" / "feature.toml")
+
+    with pytest.raises(LibraryError) as refused:
+        resolve_workflow("feature", library=library)
+
+    message = str(refused.value)
+    assert "broken" in message
+    assert str(library / "feature.toml") in message
+    assert str(tmp_path / "gone" / "feature.toml") in message
+    assert "no workflow named" not in message

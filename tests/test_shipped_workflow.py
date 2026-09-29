@@ -1,6 +1,10 @@
-"""The one Workflow that ships, asserted only for what any Workflow file must
+"""The Workflow files that ship, asserted only for what any Workflow file must
 hold: it loads under its own name, its Prompts render with no slot left, every
 exit is named to the agent, and a Run can start from it (ADR 0043).
+
+Two files ship: the starter inside the package, and the personal Workflow in
+`workflows/`, which stays a tracked file anyone can read (ADR 0052). Every
+invariant runs over both, because none of them reads content.
 
 Nothing here reads the file's meaning — which States it declares, what its
 Prompts pin, which settings it chooses — so editing the file never breaks a
@@ -8,12 +12,13 @@ test. What the Workflow says is reviewed in the file itself, against the
 decisions docs/workflow-authoring.md indexes per State, and exercised by manual
 smoke (docs/smoke/matt-pocock.md).
 
-Every parametrised list below is derived from the loaded file rather than
+Every parametrised list below is derived from the loaded files rather than
 written out, which is what keeps a State added or removed from touching this
 file at all.
 """
 
 import re
+from importlib.resources import files
 from pathlib import Path
 
 import pytest
@@ -25,7 +30,10 @@ from naiad.domain.transitions import deviation, next_states
 from naiad.domain.workflow import load_workflow
 from naiad.runtime.run import RunStore
 
-WORKFLOW_PATH = Path(__file__).resolve().parents[1] / "workflows" / "matt-pocock.toml"
+SHIPPED_PATHS = (
+    Path(str(files("naiad.workflows").joinpath("starter.toml"))),
+    Path(__file__).resolve().parents[1] / "workflows" / "matt-pocock.toml",
+)
 
 # Sample interpolations, arbitrary by design: every assertion holds for any
 # values, so none of these encodes anything about the file's content.
@@ -46,114 +54,140 @@ PLACEHOLDER_SHAPED = re.compile(r"\{[a-z_]+\}")
 # Loaded at module level because the parametrised lists below are read at
 # collection time. A file that fails to load fails every test here at once,
 # which is the right size for that mistake.
-WORKFLOW = load_workflow(WORKFLOW_PATH)
-
-DELIVERING = [state.name for state in WORKFLOW.states if state.prompt is not None]
-CLEARING = [state.name for state in WORKFLOW.states if state.clear and state.prompt is not None]
-BRANCHING = [state.name for state in WORKFLOW.states if state.next_candidates]
-NEEDING_A_SUBJECT = [
-    state.name
-    for state in WORKFLOW.states
-    if state.prompt is not None and SUBJECT_PLACEHOLDER in state.prompt
-]
-STARTABLE_BARE = [name for name in DELIVERING if name not in NEEDING_A_SUBJECT]
+WORKFLOWS = {path: load_workflow(path) for path in SHIPPED_PATHS}
 
 
-def delivered(state_name, subject=SUBJECT, branch=BRANCH, predecessor=PREDECESSOR):
+def each_workflow():
+    return [pytest.param(path, id=path.stem) for path in SHIPPED_PATHS]
+
+
+def each_state(keep):
+    """Every (file, State name) the predicate keeps, derived from the loaded
+    files so that adding a State to either touches nothing here."""
+    return [
+        pytest.param(path, state.name, id=f"{path.stem}:{state.name}")
+        for path, workflow in WORKFLOWS.items()
+        for state in workflow.states
+        if keep(state)
+    ]
+
+
+def delivers(state):
+    return state.prompt is not None
+
+
+def names_a_subject(state):
+    return state.prompt is not None and SUBJECT_PLACEHOLDER in state.prompt
+
+
+DELIVERING = each_state(delivers)
+CLEARING = each_state(lambda state: state.clear and delivers(state))
+BRANCHING = each_state(lambda state: bool(state.next_candidates))
+NEEDING_A_SUBJECT = each_state(names_a_subject)
+STARTABLE_BARE = each_state(lambda state: delivers(state) and not names_a_subject(state))
+
+
+def delivered(path, state_name, subject=SUBJECT, branch=BRANCH, predecessor=PREDECESSOR):
     """A State's Prompt as the agent reads it, with the successors the Workflow
     resolves interpolated — which is what Naiad sends (naiad.runtime.loop).
 
     Every value is supplied to every State whether or not its Prompt has the
     slot: a Prompt without one is unaffected, and passing them everywhere means
     no assertion here silently depends on which States use which."""
+    workflow = WORKFLOWS[path]
     return render_prompt(
-        WORKFLOW.state(state_name).prompt,
+        workflow.state(state_name).prompt,
         task=TASK,
-        next_states=next_states(WORKFLOW, state_name),
+        next_states=next_states(workflow, state_name),
         subject=subject,
         branch=branch,
         predecessor=predecessor,
     )
 
 
-def test_the_declared_name_matches_the_files_stem():
+@pytest.mark.parametrize("path", each_workflow())
+def test_the_declared_name_matches_the_files_stem(path):
     """The library refuses a file whose declared name disagrees with its stem,
-    and this is the file Naiad makes the library entry for — so the mismatch
-    would be caught at install, which is later and further from the edit."""
-    assert WORKFLOW.name == WORKFLOW_PATH.stem
+    and a shipped file is one an operator puts there — so the mismatch would be
+    caught when it is first run by name, which is later and further from the
+    edit."""
+    assert WORKFLOWS[path].name == path.stem
 
 
-@pytest.mark.parametrize("state_name", DELIVERING)
-def test_every_slot_a_prompt_writes_is_one_the_renderer_fills(state_name):
+@pytest.mark.parametrize(("path", "state_name"), DELIVERING)
+def test_every_slot_a_prompt_writes_is_one_the_renderer_fills(path, state_name):
     """The renderer substitutes its closed set and leaves everything else
     alone, because a Prompt is prose that may carry code rather than a format
     string (naiad.domain.prompt). So a misspelled slot is an error nowhere at
     runtime — it reaches the agent verbatim — and is caught here instead."""
-    raw = WORKFLOW.state(state_name).prompt
+    raw = WORKFLOWS[path].state(state_name).prompt
 
     for token in PLACEHOLDER_SHAPED.findall(raw):
         assert token in PLACEHOLDERS, f"{state_name} writes {token}, which no renderer fills"
 
 
-@pytest.mark.parametrize("state_name", DELIVERING)
-def test_every_prompt_names_each_state_it_may_announce(state_name):
+@pytest.mark.parametrize(("path", "state_name"), DELIVERING)
+def test_every_prompt_names_each_state_it_may_announce(path, state_name):
     """The Workflow file owns the ordering, and the agent can only announce a
     name it has been given. Every successor, at a fork too: a Prompt naming one
     exit of two would decide the branch in the place that is least visible."""
-    prompt = delivered(state_name)
+    prompt = delivered(path, state_name)
 
-    for successor in next_states(WORKFLOW, state_name):
+    for successor in next_states(WORKFLOWS[path], state_name):
         assert successor in prompt
 
 
-def test_every_non_terminal_state_leads_somewhere():
+@pytest.mark.parametrize("path", each_workflow())
+def test_every_non_terminal_state_leads_somewhere(path):
     """A non-terminal State with nothing after it strands the Run: the agent
     announces, and the Protocol has no name to expect next. The loader refuses
     a file with no terminal State at all; where each State leads is only
     resolvable per State, so it is asserted here."""
-    for state in WORKFLOW.states:
+    workflow = WORKFLOWS[path]
+    for state in workflow.states:
         if state.terminal:
             assert state.next_candidates == ()
         else:
-            assert next_states(WORKFLOW, state.name) != ()
+            assert next_states(workflow, state.name) != ()
 
 
-@pytest.mark.parametrize("state_name", BRANCHING)
-def test_announcing_any_declared_candidate_is_never_a_deviation(state_name):
+@pytest.mark.parametrize(("path", "state_name"), BRANCHING)
+def test_announcing_any_declared_candidate_is_never_a_deviation(path, state_name):
     """Choosing correctly at a fork is not recorded as having left the path,
     whichever way the choice goes. The off-path case is asserted alongside it
     because an empty expectation also reports no Deviation: without it this
     passes just as well against a Workflow with no candidates anywhere."""
-    candidates = WORKFLOW.state(state_name).next_candidates
+    workflow = WORKFLOWS[path]
+    candidates = workflow.state(state_name).next_candidates
 
     for candidate in candidates:
-        assert deviation(WORKFLOW, announced=candidate, previous_state=state_name) == ()
+        assert deviation(workflow, announced=candidate, previous_state=state_name) == ()
     assert (
-        deviation(WORKFLOW, announced="a-state-this-file-never-declares", previous_state=state_name)
+        deviation(workflow, announced="a-state-this-file-never-declares", previous_state=state_name)
         == candidates
     )
 
 
-@pytest.mark.parametrize("state_name", CLEARING)
-def test_no_prompt_after_a_clear_refers_back_to_the_cleared_context(state_name):
+@pytest.mark.parametrize(("path", "state_name"), CLEARING)
+def test_no_prompt_after_a_clear_refers_back_to_the_cleared_context(path, state_name):
     """The symptom deferred issue 02 warns about, caught where it is cheap: a
     Prompt delivered into a wiped context that says 'you just' is naming
     something the agent can no longer remember."""
-    assert "you just" not in delivered(state_name)
+    assert "you just" not in delivered(path, state_name)
 
 
-def kickoff(tmp_path, sessions, **options):
+def kickoff(path, tmp_path, sessions, **options):
     repo = tmp_path / "repo"
     repo.mkdir()
 
     start_run(
-        workflow_path=WORKFLOW_PATH,
+        workflow_path=path,
         task=TASK,
         target_repo=repo,
         working_branch=BRANCH,
         store=RunStore(tmp_path / "runs"),
         sessions=sessions,
-        run_id="20260720-120000-matt-pocock",
+        run_id=f"20260720-120000-{path.stem}",
         claude_session_id="11111111-1111-1111-1111-111111111111",
         created_at="2026-07-20T12:00:00Z",
         **options,
@@ -163,48 +197,51 @@ def kickoff(tmp_path, sessions, **options):
     return spawn.initial_prompt
 
 
-def test_a_run_started_with_no_state_named_begins_at_the_first_state(tmp_path, sessions):
+@pytest.mark.parametrize("path", each_workflow())
+def test_a_run_started_with_no_state_named_begins_at_the_first_state(path, tmp_path, sessions):
     """The operator names nothing and receives the first State's Prompt,
     rendered exactly as `delivered` renders it — asserted as equality so the
     kickoff path and the rendering path cannot quietly disagree."""
-    first = WORKFLOW.states[0]
+    first = WORKFLOWS[path].states[0]
     if first.prompt is None or SUBJECT_PLACEHOLDER in first.prompt:
         pytest.skip("the file's first state does not deliver a bare prompt")
 
-    prompt = kickoff(tmp_path, sessions)
+    prompt = kickoff(path, tmp_path, sessions)
 
-    assert prompt == delivered(first.name, subject=None, predecessor=None)
+    assert prompt == delivered(path, first.name, subject=None, predecessor=None)
 
 
-@pytest.mark.parametrize("state_name", STARTABLE_BARE)
-def test_a_run_can_start_at_any_state_that_delivers(tmp_path, sessions, state_name):
+@pytest.mark.parametrize(("path", "state_name"), STARTABLE_BARE)
+def test_a_run_can_start_at_any_state_that_delivers(path, tmp_path, sessions, state_name):
     """The escape hatch for an operator who already knows where the work
     starts, held open for every delivering State rather than the ones some
     table blesses."""
-    prompt = kickoff(tmp_path, sessions, start_state=state_name)
+    prompt = kickoff(path, tmp_path, sessions, start_state=state_name)
 
-    assert prompt == delivered(state_name, subject=None, predecessor=None)
+    assert prompt == delivered(path, state_name, subject=None, predecessor=None)
 
 
-@pytest.mark.parametrize("state_name", NEEDING_A_SUBJECT)
+@pytest.mark.parametrize(("path", "state_name"), NEEDING_A_SUBJECT)
 def test_a_state_whose_prompt_names_a_subject_refuses_to_start_without_one(
-    tmp_path, sessions, state_name
+    path, tmp_path, sessions, state_name
 ):
     """Refused rather than rendered empty (ADR 0009): a Prompt with a Subject
     slot and nothing to fill it would tell the agent to trust a decision about
     an item that was never named."""
     with pytest.raises(MissingSubject):
-        kickoff(tmp_path, sessions, start_state=state_name)
+        kickoff(path, tmp_path, sessions, start_state=state_name)
 
     assert sessions.spawned == []
 
 
-@pytest.mark.parametrize("state_name", NEEDING_A_SUBJECT)
-def test_a_run_started_with_a_subject_is_delivered_that_subject(tmp_path, sessions, state_name):
+@pytest.mark.parametrize(("path", "state_name"), NEEDING_A_SUBJECT)
+def test_a_run_started_with_a_subject_is_delivered_that_subject(
+    path, tmp_path, sessions, state_name
+):
     """The other half of the refusal: named, the Subject reaches the Prompt,
     which is what makes refusing the bare form a correction rather than a
     removal."""
-    prompt = kickoff(tmp_path, sessions, start_state=state_name, subject=SUBJECT)
+    prompt = kickoff(path, tmp_path, sessions, start_state=state_name, subject=SUBJECT)
 
-    assert prompt == delivered(state_name, predecessor=None)
+    assert prompt == delivered(path, state_name, predecessor=None)
     assert SUBJECT in prompt

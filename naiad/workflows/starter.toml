@@ -1,0 +1,85 @@
+# The starter Workflow: a small feature or fix, planned, built, checked and
+# handed over, on any repository, with no custom skills. Every Prompt is prose.
+#
+# The file declares no model, effort or compaction point, so a Run uses what
+# your Claude Code already holds. Uncomment to choose:
+#
+# autocompact = "200k"   # where the Session summarises its own context
+# model = "opus"         # a file-level default; a State's own key overrides it
+# effort = "high"
+#
+# There is no [answerer] table, so a Question the agent asks parks the Run and
+# notifies you; you answer in the Session.
+
+name = "starter"
+
+[[states]]
+name = "plan"
+prompt = """
+Plan the following task against this repository. Do not build it yet.
+
+{task}
+
+First, put the work on its own branch.
+
+Working branch: {branch}
+
+If the Working branch line above names a branch, check it out if it exists, or create it from the repository's default branch if it does not. If the line is empty, derive a name from this repository's own conventions — recent branch names, the team's prefixes — falling back to `feat/` or `fix/` plus a short slug of the task; create it from the default branch, and in the same turn declare it with `naiad branch <name>`, which cannot know a name it was never told.
+
+Then read as much of the repository as you need to plan the task well: how it is laid out, how it is tested, and where the change belongs. Write the plan to `PLAN.md` at the repository root, committed on the Working branch, under exactly these four headings:
+
+- `## Goal` — what the task asks for, in one or two sentences.
+- `## Approach` — how the change fits the repository as it is, and what it deliberately leaves alone.
+- `## Steps` — the ordered changes to make, each naming the files it touches.
+- `## How to verify` — the commands that prove the change works: the repository's own tests, checks and any new test the change needs.
+
+The plan is the only thing the next phase will have. It starts from a cleared context and reads this file cold, so write down what it needs to know rather than what you already know.
+
+Commit `PLAN.md` on the Working branch, then announce {next_state}.
+"""
+
+[[states]]
+name = "review"
+
+[[states]]
+name = "implement"
+clear = true
+prompt = """
+Build what `PLAN.md` at the repository root describes.
+
+Read the plan first, then the parts of the repository its Steps name. Make the changes in the order the plan gives, on the branch that is already checked out, and commit as you go. Where the plan turns out to be wrong about the code, follow the code and note the difference under the plan's Approach heading.
+
+Write the tests the plan's How to verify section calls for, and run the commands it names before you finish. Do not remove `PLAN.md`.
+
+When every Step is done, announce {next_state}.
+"""
+
+[[states]]
+name = "verify"
+clear = true
+prompt = """
+Check the work on this branch against `PLAN.md` at the repository root.
+
+Read the plan, then the diff between this branch and the repository's default branch. Run every command the plan's How to verify section names, and any other check this repository defines — its tests, its linter, its type checker. Fix what fails, and fix anything the diff does that the plan's Goal did not ask for.
+
+If a check still cannot pass, do not hide it: add a `## Status` heading to `PLAN.md` saying what remains and why. If everything passes, add the same heading and say so.
+
+Commit your fixes, then announce {next_state}.
+"""
+
+[[states]]
+name = "ship"
+clear = true
+prompt = """
+Hand the work on this branch over.
+
+Read `PLAN.md` at the repository root, then remove it and commit its removal; the plan becomes the description below and does not ship. Write a description of the change from the plan and the diff against the repository's default branch: the Goal, what was done, how it was verified, and anything the plan's Status heading left open.
+
+If this repository has a remote and `gh` is installed and authenticated, push the branch and open a pull request with that description, using `gh pr create`. Otherwise commit and stop there.
+
+End with the branch name and, where one was opened, the pull request URL, as the last words of this session. Then announce {next_state}.
+"""
+
+[[states]]
+name = "done"
+terminal = true

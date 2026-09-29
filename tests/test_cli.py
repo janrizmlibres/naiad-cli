@@ -119,37 +119,111 @@ def test_installing_ships_the_adopt_skill_beside_the_hooks(tmp_path, capsys):
     assert str(skill) in capsys.readouterr().out
 
 
-def test_installing_addresses_the_shipped_workflow_from_the_library(
-    monkeypatch, tmp_path, capsys
-):
-    """The third thing one install sets up (ADR 0037): a library entry is an
-    address, and making it by hand is the act that let a copy rot."""
+def test_a_bare_install_leaves_the_library_alone(monkeypatch, tmp_path, capsys):
+    """The library is the operator's store (ADR 0049): install touches it only
+    when asked, so re-running install without thinking can never reach it."""
     monkeypatch.setenv("NAIAD_HOME", str(tmp_path / "naiad"))
-    entry = tmp_path / "naiad" / "workflows" / "matt-pocock.toml"
+    library = tmp_path / "naiad" / "workflows"
+    library.mkdir(parents=True)
+    (library / "mine.toml").write_text("their own workflow\n")
+    before = {path.name: path.read_bytes() for path in library.iterdir()}
 
     assert main(_install(tmp_path)) == 0
 
-    assert entry.is_symlink()
-    assert entry.readlink() == Path(__file__).resolve().parents[1] / "workflows" / "matt-pocock.toml"
+    assert {path.name: path.read_bytes() for path in library.iterdir()} == before
+    assert "workflow" not in capsys.readouterr().out
+
+
+def test_a_bare_install_does_not_create_the_library(monkeypatch, tmp_path):
+    monkeypatch.setenv("NAIAD_HOME", str(tmp_path / "naiad"))
+
+    assert main(_install(tmp_path)) == 0
+
+    assert not (tmp_path / "naiad" / "workflows").exists()
+
+
+def test_installing_the_starter_writes_a_regular_file_the_name_resolves(
+    monkeypatch, tmp_path, capsys, sessions
+):
+    monkeypatch.setenv("NAIAD_HOME", str(tmp_path / "naiad"))
+    monkeypatch.setattr("naiad.cli.main.TmuxSessions", lambda: sessions)
+    entry = tmp_path / "naiad" / "workflows" / "starter.toml"
+    repo = tmp_path / "repo"
+    repo.mkdir()
+
+    assert main(_install(tmp_path, "--starter")) == 0
+
+    assert entry.is_file() and not entry.is_symlink()
     assert str(entry) in capsys.readouterr().out
+    assert main(["queue", "add", "starter", "a task", "--repo", str(repo)]) == 0
 
 
-def test_installing_over_a_workflow_copy_in_the_library_is_reported_not_a_traceback(
+def test_installing_the_starter_over_an_edited_one_is_refused_and_says_how_to_go_on(
     monkeypatch, tmp_path, capsys
 ):
-    """The refusal that was missing while a copy sat four days behind the
-    Workflow it copied."""
     monkeypatch.setenv("NAIAD_HOME", str(tmp_path / "naiad"))
-    theirs = tmp_path / "naiad" / "workflows" / "matt-pocock.toml"
+    theirs = tmp_path / "naiad" / "workflows" / "starter.toml"
     theirs.parent.mkdir(parents=True)
-    theirs.write_text("a copy taken months ago\n")
+    theirs.write_text("my edits\n")
 
-    assert main(_install(tmp_path)) == 2
+    assert main(_install(tmp_path, "--starter")) == 2
 
     printed = capsys.readouterr()
-    assert "copy" in printed.err
+    assert "starter.toml differs from the shipped starter; pass --force" in printed.err
     assert "hooks" in printed.out
-    assert theirs.read_text() == "a copy taken months ago\n"
+    assert theirs.read_text() == "my edits\n"
+
+
+def test_force_overwrites_an_edited_starter(monkeypatch, tmp_path):
+    monkeypatch.setenv("NAIAD_HOME", str(tmp_path / "naiad"))
+    theirs = tmp_path / "naiad" / "workflows" / "starter.toml"
+    theirs.parent.mkdir(parents=True)
+    theirs.write_text("my edits\n")
+
+    assert main(_install(tmp_path, "--starter", "--force")) == 0
+
+    assert theirs.read_text() != "my edits\n"
+
+
+def test_force_without_the_starter_has_nothing_to_force(tmp_path, capsys):
+    assert main(_install(tmp_path, "--force")) == 2
+
+    printed = capsys.readouterr()
+    assert "--starter" in printed.err
+    assert not (tmp_path / ".claude" / "settings.json").exists()
+
+
+def test_install_follows_the_claude_config_dir_when_it_is_set(monkeypatch, tmp_path):
+    """The hooks and the skill land where Claude Code itself reads, which the
+    variable moves; naming neither option is the case this is about."""
+    configuration = tmp_path / "work-account"
+    monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(configuration))
+
+    assert main(["install"]) == 0
+
+    assert "hooks" in json.loads((configuration / "settings.json").read_text())
+    assert (configuration / "skills" / "naiad-adopt" / "SKILL.md").is_file()
+
+
+def test_install_without_the_variable_installs_under_dot_claude_in_the_home(
+    monkeypatch, tmp_path
+):
+    monkeypatch.delenv("CLAUDE_CONFIG_DIR", raising=False)
+    monkeypatch.setattr(Path, "home", classmethod(lambda cls: tmp_path))
+
+    assert main(["install"]) == 0
+
+    assert "hooks" in json.loads((tmp_path / ".claude" / "settings.json").read_text())
+    assert (tmp_path / ".claude" / "skills" / "naiad-adopt" / "SKILL.md").is_file()
+
+
+def test_the_settings_and_skills_options_still_win_over_the_variable(monkeypatch, tmp_path):
+    monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(tmp_path / "from-the-variable"))
+
+    assert main(_install(tmp_path)) == 0
+
+    assert (tmp_path / ".claude" / "settings.json").is_file()
+    assert not (tmp_path / "from-the-variable").exists()
 
 
 def test_installing_over_an_unreadable_settings_file_is_reported_not_a_traceback(
