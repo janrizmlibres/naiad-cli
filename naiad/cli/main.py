@@ -30,7 +30,7 @@ from naiad.adapters.lock import SupervisorLock
 from naiad.adapters.notify import configured_notifier
 from naiad.adapters.tmux import TmuxError, TmuxSessions
 from naiad.cli.adopt import NotInTmux, attachment_in, teaching_for
-from naiad.cli.announce import AnnounceError, announce_state
+from naiad.cli.announce import AnnounceError, announce_state, announcement_reply
 from naiad.cli.ask import AskError, ask_question
 from naiad.cli.batch import BatchError, enqueue_batch, load_batch
 from naiad.cli.branch import BranchError, declare_branch
@@ -405,11 +405,12 @@ def _announce(arguments: argparse.Namespace) -> int:
     try:
         run = _current_run()
         announcement = announce_state(arguments.name, run=run, subject=arguments.subject)
+        reply = announcement_reply(announcement, run=run)
     except FAILURES as error:
         print(f"naiad: {error}", file=sys.stderr)
         return 2
 
-    print(f"announced {announcement.state} ({announcement.seq})")
+    print(reply, end="")
     return 0
 
 

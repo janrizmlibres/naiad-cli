@@ -15,7 +15,9 @@ from typing import Literal
 from naiad.domain.announcement import Announcement
 from naiad.domain.answerer import Consultation, Escalated
 from naiad.domain.question import Question
+from naiad.domain.prompt import render_candidates
 from naiad.domain.transitions import next_states as resolve_next_states
+from naiad.domain.transitions import parks_on
 from naiad.domain.workflow import State, Workflow
 
 # How many Nudges an Announcement is worth before Naiad stops and the human is
@@ -528,7 +530,9 @@ def decide(workflow: Workflow, signals: Signals, *, skip_gates: bool = False) ->
             skip_gates=skip_gates,
         )
 
-    if announcement is not None and signals.stopped:
+    if announcement is not None and signals.stopped and not _resolved_past(
+        workflow, announcement, skip_gates=skip_gates
+    ):
         return _owed(
             workflow,
             signals,
@@ -619,8 +623,14 @@ def _owed(
     if state.prompt is None:
         # A Gate State: there is nothing to deliver and the human types into
         # the session directly. That is why the session must stay alive, and
-        # why there is no approve command.
-        return _notify(signals, f"state '{state.name}' is a Gate State and is waiting for you")
+        # why there is no approve command. What follows is named because the
+        # verdict they type is the agent's to act on, and they should know
+        # what it unlocks.
+        following = resolve_next_states(workflow, state.name, skip_gates=skip_gates)
+        waiting = f"state '{state.name}' is a Gate State and is waiting for you"
+        if following:
+            waiting = f"{waiting}; next: {render_candidates(following)}"
+        return _notify(signals, waiting)
 
     if state.clear and not signals.cleared:
         # The context must be discarded before the Prompt, and the discard
@@ -677,6 +687,23 @@ def _unhandled(signals: Signals) -> Announcement | None:
     if signals.handled_seq is not None and announcement.seq <= signals.handled_seq:
         return None
     return announcement
+
+
+def _resolved_past(workflow: Workflow, announcement: Announcement, *, skip_gates: bool) -> bool:
+    """A routine Gate the agent announced although the Run resolves past it.
+
+    It hands nothing to a human, so it is owed neither a notification nor a
+    Prompt: falling through leaves the silence rules to bring the agent back to
+    the path it was given, which is what the plain reply to that Announcement
+    left it to do. Decided by the predicate the announce reply is decided by.
+    """
+    state = workflow.state(announcement.state)
+    return (
+        state is not None
+        and state.is_gate_state
+        and not state.terminal
+        and not parks_on(workflow, state.name, skip_gates=skip_gates)
+    )
 
 
 def _clear(signals: Signals, state_name: str) -> Action:

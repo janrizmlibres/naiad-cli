@@ -162,6 +162,109 @@ def test_a_rejected_subjectless_announcement_names_the_correct_invocation(run):
     assert "naiad announce implement" in finished.stderr
 
 
+# A Workflow with a routine Gate in its declared order and a fork ending at
+# another, the two shapes the announce reply tells apart.
+GATED_WORKFLOW = """
+name = "feature"
+
+[[states]]
+name = "plan"
+prompt = "/plan {task}, then announce {next_state}"
+
+[[states]]
+name = "review"
+
+[[states]]
+name = "implement"
+prompt = "/implement, then announce {next_state}"
+next = ["ship", "no-repro"]
+
+[[states]]
+name = "no-repro"
+
+[[states]]
+name = "ship"
+prompt = "/ship"
+
+[[states]]
+name = "done"
+terminal = true
+"""
+
+GATE_REPLY = "is a Gate: a human takes it from here. End your turn and wait for them."
+
+
+def gated_run(tmp_path, *, skip_gates=False, workflow_text=GATED_WORKFLOW):
+    repo = tmp_path / "gated-repo"
+    repo.mkdir()
+    workflow = repo / "workflow.toml"
+    workflow.write_text(workflow_text)
+    return RunStore(tmp_path / "naiad" / "runs").create(
+        run_id="a-run",
+        workflow_path=workflow,
+        task="add dark mode",
+        target_repo=repo,
+        created_at="2026-07-19T12:00:00Z",
+        start_state="plan",
+        skip_gates=skip_gates,
+    )
+
+
+def test_announcing_a_gate_tells_the_agent_a_human_takes_over_and_what_follows(tmp_path):
+    finished = announce(gated_run(tmp_path), "review")
+
+    assert finished.returncode == 0, finished.stderr
+    assert finished.stdout == (
+        f"review {GATE_REPLY}\n\nWhen this phase is done, announce: implement\n"
+    )
+
+
+def test_announcing_a_gate_with_a_fork_after_it_says_whichever_applies(tmp_path):
+    forked = GATED_WORKFLOW.replace(
+        'name = "review"\n', 'name = "review"\nnext = ["ship", "implement"]\n'
+    )
+    finished = announce(gated_run(tmp_path, workflow_text=forked), "review")
+
+    assert finished.stdout.endswith(
+        "When this phase is done, announce whichever applies: ship or implement\n"
+    )
+
+
+def test_announcing_a_gate_with_nothing_after_it_says_nothing_is_expected(tmp_path):
+    ending = (
+        'name = "ending"\n\n[[states]]\nname = "plan"\nprompt = "/plan"\n\n'
+        '[[states]]\nname = "done"\nterminal = true\n\n[[states]]\nname = "review"\n'
+    )
+    finished = announce(gated_run(tmp_path, workflow_text=ending), "review")
+
+    assert finished.stdout == (
+        f"review {GATE_REPLY}\n\n"
+        "There is no State expected after this one. Announce whichever State the "
+        "workflow calls for; an unknown name is rejected with the valid ones listed.\n"
+    )
+
+
+def test_a_gate_a_skip_gates_run_resolves_past_gets_the_plain_reply(tmp_path):
+    finished = announce(gated_run(tmp_path, skip_gates=True), "review")
+
+    assert finished.returncode == 0, finished.stderr
+    assert finished.stdout.startswith("announced review (")
+    assert GATE_REPLY not in finished.stdout
+
+
+def test_a_gate_named_as_a_candidate_still_gets_the_gate_reply_when_gates_are_skipped(tmp_path):
+    finished = announce(gated_run(tmp_path, skip_gates=True), "no-repro")
+
+    assert GATE_REPLY in finished.stdout
+
+
+def test_an_ordinary_state_and_a_terminal_state_keep_the_plain_reply(tmp_path):
+    run = gated_run(tmp_path)
+
+    assert announce(run, "plan").stdout.startswith("announced plan (")
+    assert announce(run, "done").stdout.startswith("announced done (")
+
+
 def test_the_old_verb_is_no_longer_a_command_and_no_alias_is_kept(run):
     """`naiad state` is the authoring noun's, so the old spelling of an
     announcement must fail rather than quietly work."""

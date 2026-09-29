@@ -177,6 +177,38 @@ def render_answer(answer: str) -> str:
     return _ANSWER.format(answer=answer)
 
 
+def render_expectation(next_states: Sequence[str]) -> str:
+    """What the agent owes once its phase is done, for the States it may
+    announce next.
+
+    Three sentences rather than one plural sentence covering all three cases:
+    'announce whichever applies' offers a choice, and offering one where there
+    is a single successor invites the agent to look for the alternative it was
+    not given. Spoken by the Protocol and, word for word, by the reply to an
+    Announcement of a Gate, so the two cannot describe one State differently.
+    """
+    if not next_states:
+        return _NO_NEXT_STATE
+    if len(next_states) == 1:
+        return _NEXT_STATE.format(next_state=next_states[0])
+    return _NEXT_STATES.format(next_states=render_candidates(next_states))
+
+
+_GATE_REPLY = "{gate} is a Gate: a human takes it from here. End your turn and wait for them."
+
+
+def render_gate_reply(gate: str, *, next_states: Sequence[str]) -> str:
+    """What `naiad announce` answers when Naiad will park on the Gate just
+    announced.
+
+    A tool result the agent reads, not a delivery into the Session, so Naiad
+    still types nothing at a Gate. It is followed by the expectation because
+    nothing clears the context before the human arrives, and the agent that
+    takes their verdict then knows what to announce without being told a name.
+    """
+    return f"{_GATE_REPLY.format(gate=gate)}\n\n{render_expectation(next_states)}\n"
+
+
 def render_protocol(*, next_states: Sequence[str], naiad: str = DEFAULT_NAIAD) -> str:
     """The Protocol as the agent meets it, naming every State it may announce
     next. The Workflow file owns that ordering, so it is interpolated here
@@ -197,16 +229,7 @@ def render_protocol(*, next_states: Sequence[str], naiad: str = DEFAULT_NAIAD) -
         wait=f"{naiad} {WAIT_SUBCOMMAND}",
         hold=f"{naiad} {HOLD_SUBCOMMAND}",
     )
-    # Three sentences rather than one plural sentence covering all three
-    # cases: 'announce whichever applies' offers a choice, and offering one
-    # where there is a single successor invites the agent to look for the
-    # alternative it was not given.
-    if not next_states:
-        expectation = _NO_NEXT_STATE
-    elif len(next_states) == 1:
-        expectation = _NEXT_STATE.format(next_state=next_states[0])
-    else:
-        expectation = _NEXT_STATES.format(next_states=render_candidates(next_states))
+    expectation = render_expectation(next_states)
     return f"{preamble}\n\n{expectation}\n"
 
 
@@ -317,6 +340,8 @@ __all__ = [
     "render_adoption",
     "render_answer",
     "render_compaction",
+    "render_expectation",
+    "render_gate_reply",
     "render_nudge",
     "render_protocol",
 ]

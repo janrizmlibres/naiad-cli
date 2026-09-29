@@ -793,6 +793,89 @@ def test_a_gate_state_notifies_the_operator(workflow):
     assert isinstance(action, Notify)
 
 
+def test_a_gate_notification_names_the_state_that_follows(workflow):
+    """The human clearing a Gate is handed a verdict to give, and should know
+    what it unlocks without knowing the Workflow."""
+    reason = decide(workflow, signals("review")).reason
+
+    assert reason == "state 'review' is a Gate State and is waiting for you; next: implement"
+
+
+def test_a_gate_notification_joins_the_candidates_of_a_fork_as_the_protocol_does():
+    forking = parse_workflow(
+        """
+name = "triage"
+
+[[states]]
+name = "review"
+next = ["bug", "feature"]
+
+[[states]]
+name = "bug"
+prompt = "/bug"
+
+[[states]]
+name = "feature"
+prompt = "/feature"
+
+[[states]]
+name = "done"
+terminal = true
+"""
+    )
+
+    reason = decide(forking, signals("review")).reason
+
+    assert reason.endswith("; next: bug or feature")
+
+
+def test_a_gate_notification_adds_no_clause_when_nothing_follows():
+    ending = parse_workflow(
+        """
+name = "ending"
+
+[[states]]
+name = "build"
+prompt = "/build"
+
+[[states]]
+name = "done"
+terminal = true
+
+[[states]]
+name = "review"
+"""
+    )
+
+    reason = decide(ending, signals("review")).reason
+
+    assert reason == "state 'review' is a Gate State and is waiting for you"
+
+
+def test_an_adopted_run_parked_at_a_gate_names_what_follows_too(workflow):
+    parked = decide(workflow, signals(None, opening=Opening(state="review")))
+
+    assert parked.reason.endswith("; next: implement")
+
+
+def test_a_gate_the_run_resolves_past_does_not_park_when_announced_anyway(workflow):
+    """The agent was told to announce the State after it. Announcing the Gate
+    regardless is not a hand-off to a human, so nothing is said to one."""
+    assert not isinstance(decide(workflow, signals("review"), skip_gates=True), Notify)
+
+
+def test_a_gate_the_run_resolves_past_is_left_to_the_silence_rules_when_announced(workflow):
+    """Not parked and not delivered: the agent that announced it is Nudged back
+    to the path it was given, as any agent that stops without announcing is."""
+    action = decide(
+        workflow,
+        signals("review", stopped_since_action=True, idle_for=SILENCE_SECONDS),
+        skip_gates=True,
+    )
+
+    assert isinstance(action, Nudge)
+
+
 def test_a_notification_names_why_the_operator_is_needed(workflow):
     """A notification at 3am is useless if it does not say what it is about."""
     assert "review" in decide(workflow, signals("review")).reason

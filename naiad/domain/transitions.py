@@ -54,6 +54,31 @@ def next_states(workflow: Workflow, current: str, *, skip_gates: bool = False) -
     return ()
 
 
+def parks_on(workflow: Workflow, name: str, *, skip_gates: bool = False) -> bool:
+    """Whether announcing `name` hands the Run to a human: a Gate State, which
+    Naiad delivers nothing at and the human types into.
+
+    The one predicate behind both sides of that hand-off — the decision function
+    notifies on it and the announce reply tells the agent on it — so that the
+    agent is never told a human takes over where Naiad would not stop, nor left
+    unwarned where it would.
+
+    A Terminal State ends the Run rather than holding it, and a State the
+    Workflow does not declare is nobody's to hold. With Gates skipped a routine
+    Gate is one the Run resolves past, so announcing it anyway parks nothing;
+    a Gate some State names as a candidate is a destination the agent chose and
+    is never resolved past (ADR 0007). Read from the Workflow alone, so the
+    answer needs no standing State: a candidate is a candidate wherever the
+    agent stood when it announced.
+    """
+    state = workflow.state(name)
+    if state is None or not state.is_gate_state or state.terminal:
+        return False
+    if not skip_gates:
+        return True
+    return any(name in other.next_candidates for other in workflow.states)
+
+
 def start_state(workflow: Workflow, named: str | None) -> State:
     """Where a Run begins: the first State, or the one the operator named."""
     if named is None:
@@ -145,6 +170,7 @@ __all__ = [
     "deviation",
     "expected_next_states",
     "next_states",
+    "parks_on",
     "standing_state",
     "start_state",
 ]

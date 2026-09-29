@@ -12,6 +12,7 @@ from naiad.domain.transitions import (
     deviation,
     expected_next_states,
     next_states,
+    parks_on,
     standing_state,
     start_state,
 )
@@ -327,3 +328,38 @@ def test_a_state_with_nothing_after_it_expects_nothing(workflow):
 def test_a_run_that_began_at_a_state_the_workflow_no_longer_declares_expects_nothing(workflow):
     """A Workflow edited mid-Run costs the expectation, not the Run."""
     assert deviation(workflow, announced="grill", previous_state=None, started_at="gone") == ()
+
+
+FORK_TO_A_GATE = """
+name = "bug"
+
+[[states]]
+name = "diagnose"
+prompt = "/diagnosing-bugs"
+next = ["no-repro", "done"]
+
+[[states]]
+name = "no-repro"
+
+[[states]]
+name = "done"
+terminal = true
+"""
+
+
+def test_naiad_parks_on_a_gate_state():
+    assert parks_on(parse_workflow(WORKFLOW), "review")
+
+
+@pytest.mark.parametrize("name", ["grill", "done", "nowhere"])
+def test_naiad_does_not_park_on_a_prompt_a_terminal_or_an_undeclared_state(name):
+    assert not parks_on(parse_workflow(WORKFLOW), name)
+
+
+def test_naiad_does_not_park_on_a_routine_gate_when_gates_are_skipped():
+    assert not parks_on(parse_workflow(WORKFLOW), "review", skip_gates=True)
+
+
+def test_naiad_still_parks_on_a_gate_named_as_a_candidate_when_gates_are_skipped():
+    """ADR 0007: a destination the agent chose is not a checkpoint to decline."""
+    assert parks_on(parse_workflow(FORK_TO_A_GATE), "no-repro", skip_gates=True)

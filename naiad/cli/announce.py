@@ -13,8 +13,13 @@ from __future__ import annotations
 from naiad.cli.ask import unanswered_question
 from naiad.domain.announcement import Announcement
 from naiad.domain.prompt import BRANCH_PLACEHOLDER, SUBJECT_PLACEHOLDER
-from naiad.domain.protocol import ANNOUNCE_SUBCOMMAND
-from naiad.domain.transitions import UnknownState, start_state as resolve_start_state
+from naiad.domain.protocol import ANNOUNCE_SUBCOMMAND, render_gate_reply
+from naiad.domain.transitions import (
+    UnknownState,
+    next_states,
+    parks_on,
+    start_state as resolve_start_state,
+)
 from naiad.domain.workflow import Workflow, load_workflow
 from naiad.runtime.announcements import Announcements
 from naiad.runtime.answers import AnswerLog
@@ -81,6 +86,22 @@ def announce_state(state: str, *, run: Run, subject: str | None = None) -> Annou
     return announcement
 
 
+def announcement_reply(announcement: Announcement, *, run: Run) -> str:
+    """What the agent reads back after announcing.
+
+    Plain for every State but one Naiad will park on: an agent at an ordinary
+    State must wait for its Prompt, and a reply naming the next phase would
+    invite it to begin early. At a Gate Naiad delivers nothing, so the reply
+    is the only place the agent can learn that a human takes over and what to
+    announce once they have.
+    """
+    workflow = load_workflow(run.workflow_path)
+    if not parks_on(workflow, announcement.state, skip_gates=run.skip_gates):
+        return f"announced {announcement.state} ({announcement.seq})\n"
+    following = next_states(workflow, announcement.state, skip_gates=run.skip_gates)
+    return render_gate_reply(announcement.state, next_states=following)
+
+
 def _branch_prompt_delivered(run: Run, workflow: Workflow) -> bool:
     """Whether a Prompt carrying the branch placeholder has gone out, derived
     from the Workflow file and the delivery history rather than stored: the
@@ -100,4 +121,4 @@ def _branch_prompt_delivered(run: Run, workflow: Workflow) -> bool:
     return any(state and state.prompt and BRANCH_PLACEHOLDER in state.prompt for state in states)
 
 
-__all__ = ["AnnounceError", "announce_state"]
+__all__ = ["AnnounceError", "announce_state", "announcement_reply"]
