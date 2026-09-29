@@ -2,12 +2,11 @@
 
 ## Workflow files
 
-`workflows/*.toml` is configuration a human hand-edits, and it is shipped to
-projects that know nothing of this repository. Keep it that way: no ADR
-pointers and no explanation in its comments. Reasoning that needs writing down
-goes to `docs/adr/`, and `docs/workflow-authoring.md` indexes, per State, the
-decisions that shaped the shipped file, beside the Prompt conventions and this
-repository's own model choices.
+`naiad/workflows/starter.toml` and `workflows/*.toml` are configuration a human
+hand-edits, and they ship to projects that know nothing of this repository.
+Keep them that way: a comment in one holds no pointer to any document and no
+explanation of why. Reasoning that needs writing down goes in
+`docs/workflow-authoring.md`, beside the Prompt conventions.
 
 ## Agent skills
 
