@@ -1,168 +1,426 @@
-# Writing a Workflow file
+# Writing a Workflow
 
-A Workflow file is configuration. It holds a Workflow's States, their Prompts,
-and the models they run on. It holds no explanation of why.
+A Workflow is a TOML file: an ordered list of States, each with a Prompt Naiad
+types into the agent's session, plus the few settings that say which model runs
+them. This guide teaches it by task. You change the starter with the verbs, then
+build a Workflow from nothing, then learn what the kinds, marks and slots mean,
+how to write a Prompt, and what the file looks like by hand. The last section
+explains why the starter is shaped as it is, so you know which parts to keep.
 
-Decisions about Naiad live in `docs/adr/`. The vocabulary lives in
-`CONTEXT.md`. This file holds two things those do not: the conventions that
-govern how a Prompt is written, and the tuning choices
-`workflows/matt-pocock.toml` makes for itself.
+Every verb here edits the file for you and refuses a change the loader would
+reject, so the file on disk always loads. `naiad workflow check` is the net for
+anything you edit by hand.
 
-## Rules for any Workflow file
+Workflows live in your library, `~/.naiad/workflows` unless `NAIAD_HOME` says
+otherwise. A bare name such as `starter` resolves there, and every verb also
+takes a path.
+
+## 1. Start from the starter and change it
+
+`naiad install --starter` puts the starter in the library, and reinstalling with
+`--force` overwrites it. Copy it under your own name and change the copy:
+
+```
+naiad workflow new mine --from starter
+naiad workflow show mine
+```
+
+`show` prints the file's own settings and each State's kind and marks:
+
+```text
+name  mine
+
+  plan       prompt    questions: human
+  review     gate
+  implement  prompt    clears  questions: human
+  verify     prompt    clears  questions: human
+  ship       prompt    clears  questions: human
+  done       terminal
+```
+
+`questions: human` says a Question asked from that State goes to you, because the
+starter declares no Answerer (Part 6 covers it).
+
+Now change it. Choose a model and effort for the whole file, or for one State:
+
+```
+naiad workflow set mine model opus
+naiad state set mine verify effort high
+```
+
+Set where the Session summarises its own context, which is a property of the
+file and never of a State:
+
+```
+naiad workflow set mine autocompact 200k
+```
+
+Ask to hear about a milestone, without stopping the Run (see
+[Marks](#marks) below):
+
+```
+naiad state set mine ship report true
+```
+
+Add a State, place it, and give it its Prompt from a file, from `--prompt`, or
+from your editor when you give neither:
+
+```
+naiad state add mine lint --after implement --from lint-prompt.md
+naiad state move mine lint --before verify
+```
+
+Change a Prompt, or where a State can lead:
+
+```
+naiad state set-prompt mine plan --from plan-prompt.md
+naiad state next mine verify implement ship
+```
+
+`state next` declares the successors in order, replacing what was there. Without
+any it opens a picker, and `--none` clears them. Every verb has `--help`, and `naiad state unset` and
+`naiad workflow unset` take a setting back off, so the State or file has no
+opinion again.
+
+Check the result and queue it:
+
+```
+naiad workflow check mine
+naiad queue add mine "Add a --dry-run flag to the export command" --repo .
+```
+
+## 2. Build a Workflow from scratch
+
+`naiad workflow new` creates a Workflow with one State, the terminal `done`:
+
+```
+naiad workflow new fix
+```
+
+Add States one at a time. Each lands before the terminal State unless you place
+it. This one reproduces a bug, fixes it in a clean context, then waits for you:
+
+```
+naiad state add fix reproduce --prompt "Reproduce this bug and write a failing test for it: {task}. When it fails for the right reason, announce {next_state}."
+naiad state add fix patch --clear --from patch-prompt.md
+naiad state add fix approve --gate
+naiad state list fix
+```
+
+```text
+  reproduce  prompt    questions: human
+  patch      prompt    clears  questions: human
+  approve    gate
+  done       terminal
+```
+
+Then check it the way a Run would load it, and queue it:
+
+```
+naiad workflow check fix
+naiad queue add fix "Exports crash on an empty date range" --repo .
+```
+
+`workflow check` loads the file exactly as a Run does and says what is wrong. It
+finds an unknown key, a `next` naming a State that does not exist, a duplicate
+name, a Workflow with no terminal State, and a `report` on a State where it is
+refused. Run it after every hand edit.
+
+A Run starts at the first State unless `queue add --at <state>` names another.
+It ends when the agent announces a terminal State.
+
+## 3. State kinds and marks
+
+### Kinds
+
+A State is one of three kinds:
+
+- **Prompt.** It has a `prompt`. When the agent announces it, Naiad types the
+  Prompt into the session and the agent works.
+- **Gate.** It has no `prompt`. Naiad types nothing, parks the Run and tells
+  you. A Gate is where a human decides.
+- **Terminal.** `terminal = true`, and no Prompt. Announcing it ends the Run.
+
+The agent, not Naiad, decides when a State is finished: it runs
+`naiad announce <state>` for the State it is entering, and that is what moves
+the Run.
+
+A Gate's hand-off is a verdict. Attach to the session, read what the Gate is
+about, and type your answer: "go ahead", or what you want changed. The agent acts
+on it and announces the next State itself. There is no command to approve.
+Naiad has told the agent, when it announced the Gate, which State follows, so it
+carries on when you answer. [Running Naiad](running.md#gates) has the walk-through.
+
+A Gate is a sensible place for the first human judgement. The starter puts one
+after `plan`, when a wrong direction is still cheap to correct.
+
+### Marks
+
+Marks are optional keys on a State:
+
+- **`clear = true`** enters the State in a fresh context: Naiad sends `/clear`
+  first, confirms it landed, and only then types the Prompt. The agent knows
+  nothing but what is in the Prompt and in the repository.
+- **`report = true`** tells you `entered <state>` each time the agent announces
+  it, plus the Subject when the Announcement carries one, and hands nothing
+  over. The Run does not park.
+- **`model`** and **`effort`** switch the Session before the Prompt is typed.
+- **`questions`** decides whose a Question asked from this State is: `"answerer"`
+  or `"human"` (see [Part 6](#6-the-file-by-hand)).
+- **`next`** lists the successors, and makes a State branch when it lists more
+  than one.
+
+`report` is easiest to see on the starter's `ship`, the State that hands the
+work over. Give it `report = true`:
+
+```
+naiad state set mine ship report true
+```
+
+Now a Run announcing `ship` sends `entered ship` down every notification leg
+Naiad has, at push priority 2: quiet enough that a milestone never sounds like a
+Gate. You learn the branch has been built and checked while the pull request is
+still being opened, and the Run carries on. `done`, the Terminal State, already
+tells you when the Run ends, so `ship` is the milestone worth a second word.
+
+A Report fires when an Announcement of the State is seen, before that State's
+Clear. It never fires for the State a Run starts at, and never for a Question
+asked from the State. It goes on a Prompt State only. On a Gate or a Terminal
+State the loader refuses it, because each already tells you on entry. Take it off
+again with `naiad state unset mine ship report`.
+
+## 4. The slots
+
+A Prompt is prose, and five slots in it are filled in when it is typed. Only
+these five are substituted. Anything else that looks like a placeholder, such as
+JSON in a Prompt, is left alone.
+
+| Slot | Renders as | Empty when |
+|---|---|---|
+| `{task}` | The task text given to `queue add`. Every Prompt of the Run gets it, including after a Clear. | Never: a Run without a task must have a `--subject`, which stands in for it. |
+| `{branch}` | The Working branch: the one `queue add --branch` named, or the one the agent declared with `naiad branch <name>`. | Until a branch is named or declared. An empty line is the Prompt's cue to derive a name and declare it. Once a Prompt with `{branch}` has gone out, an Announcement is refused until a branch is declared. |
+| `{predecessor}` | The branch the work stands on, from `queue add --base`. Naiad does not check that it exists, so the Prompt decides what to do with it. | No `--base` was given, which is ordinary. |
+| `{subject}` | What the agent said its last Announcement was about: `naiad announce <state> --subject <value>`. For the State a Run starts at, the `--subject` given to `queue add`. | The Announcement carried none. A Prompt with `{subject}` in it refuses an Announcement of its State that has none, so the agent corrects itself in its own turn. |
+| `{next_state}` | The States the agent may announce next, read as a phrase: `verify`, or `no-repro or pull-request`. It is the State's `next` list when it has one, otherwise the next State in declared order. | Nothing follows: a Terminal State, the last State, or only skipped Gates. |
+
+`{branch}` and `{predecessor}` are facts of the Run, like the task, so they reach
+every Prompt, and a State that has forgotten everything can still name the branch
+it is on. `{subject}` belongs to one Announcement.
+
+With `--skip-gates` the declared order steps past Gates, so `{next_state}` names
+the State after the Gate. A Gate that some State names in its `next` is a
+destination the agent chose, and is never stepped past.
+
+## 5. Prompt conventions
+
+These keep a Prompt short and stop it fighting the tools around it.
 
 ### A Prompt that runs a skill opens with its slash command
 
-Claude Code reads a slash command only at the start of a message. Prose in
-front of the command sends the skill's name as chat. So the command comes
-first, before any other word.
+Claude Code reads a slash command only at the start of a message. Prose in front
+of the command sends the skill's name as chat. So the command comes first,
+before any other word:
 
-Opening with the command is necessary. It is not sufficient. The Prompt must
-also arrive as typed input, which is the adapter's work and ADR 0011's
-decision.
+```text
+/deploy-checklist staging, for the release branch named below
+```
 
-This is a rule about Prompts that invoke a skill. It is not a rule that each
-State must invoke one. A State that runs no skill opens with prose instead.
-The `classify` State is one example. The `pull-request` State is a second: it
-opens the pull request through the host's MCP server and runs no skill.
+Naiad types the Prompt into the session, so the command arrives as typed input
+and is read as one. This is a rule about Prompts that invoke a skill, not a rule
+that each State must invoke one. A State that runs no skill opens with prose. The
+starter runs no skill at all.
 
 ### What follows the command is an argument, never a procedure
 
-Write what the human would have typed after the command. Name the work. Name
-the input. Do not write the steps.
-
-A skill's own logic stays in the skill. Logic copied into a Prompt is
-maintained in two places, and the two drift. ADR 0033 covers the one
-exception: a Prompt pins what a skill leaves loose.
-
-One procedure is written out anyway, and it is not a skill's. The scan that
-reads the issue tracker and routes on what it finds belongs to no skill, so
-there is nowhere else for it to live. It ends both the `implement` and the
-`triage` Prompt, in identical words, and a test asserts the two copies stay
-identical. ADR 0010 and ADR 0034 give the reasoning, and 0034 records the
-rejected alternative — a State whose whole job is the scan.
+Write what you would have typed after the command. Name the work. Name the
+input. Do not write the steps. A skill's own logic stays in the skill: logic
+copied into a Prompt is kept in two places, and the two drift.
 
 ### A Prompt never restates the Protocol
 
-Naiad injects the Protocol into every fresh context. This includes each
-context a Clearing State creates. A Prompt that repeats the Protocol adds a
-second copy to maintain.
+Naiad injects the Protocol, which is how the agent learns to announce and ask,
+into every fresh context, including each one a Clearing State creates. A Prompt
+that repeats it adds a second copy to maintain. A Prompt says what to do and
+which State to announce when it is done, and no more.
 
 ### A State declares a setting only where it changes one
 
-The Session keeps its Model and its Effort until something changes them. A
-State that declares neither runs on what the State before it set, and Naiad
-types nothing for it. So declare a setting where a phase needs a different one,
-and nowhere else. A file-level default is optional, and a State's own key
-overrides it. ADR 0040 gives the reasoning.
+The Session keeps its Model and Effort until something changes them. A State that
+declares neither runs on what the State before it set, and Naiad types nothing
+for it. So declare a setting where a phase needs a different one, and nowhere
+else. A file-level default is optional, and a State's own key overrides it.
 
-### The compaction point is the file's, not a State's
+One caution: a Run may start at any State, with `queue add --at`. A State that
+declares nothing, entered that way, takes whatever your Claude Code holds. If a
+State must run on a particular model, declare it on that State.
+
+### The compaction point is the file's key
 
 `autocompact` at the top of the file names the point at which the Session
-summarises its own context, in the platform's own syntax (`"200k"`). It rides
-the launch of a spawned Session and is never typed after, so it belongs to the
-file and no State may declare one. Leave it out and the Session compacts where
-the platform would anyway. ADR 0047 gives the reasoning.
-
-### A State reports only where a milestone is worth hearing
-
-`report = true` on a State tells the operator `entered <state>`, plus the
-Subject when the Announcement has one, each time an Announcement of it is seen.
-It goes down every leg (ntfy at priority 2) and hands nothing over: the Run does
-not park and the Belief stands. It fires before the State's Clear, and never for
-a Question asked from the State or for the State a Run starts at. Declare it on
-a Prompt State only. On a Gate State or a Terminal State it is refused at load,
-because each already tells the operator on entry. ADR 0055 gives the reasoning.
+summarises its own context, in Claude Code's own syntax (`"200k"`). It rides the
+launch of a Session and is never typed afterwards, so it belongs to the file and
+no State may declare one. Leave it out and the Session compacts where Claude
+Code would anyway.
 
 ### A branching State writes its successors out
 
-`{next_state}` renders every candidate as one joined phrase. Use the
-placeholder where a Prompt says only "announce what comes next". Write the
-names out where each exit carries a different condition. ADR 0010 and ADR 0017
-give the reasoning.
+`{next_state}` renders every candidate as one phrase. Use it where a Prompt only
+says "announce what comes next". Where each exit carries a different condition,
+write the names out with their conditions instead:
 
-## The choices `workflows/matt-pocock.toml` makes
+```text
+If the bug reproduces, announce fix. If it does not, announce no-repro.
+```
 
-These are tuning rather than decisions. Change them when the work changes.
+### No "you just…" after a Clear
 
-### Models and effort
+A State with `clear = true` starts in an empty context. "You just finished the
+plan" is false there, and an agent will invent the plan it believes it wrote. Say
+what the work is and where to find it.
 
-The file declares no file-level default. Every State that delivers a Prompt
-declares its own pair instead, and for now every one of them declares the same
-pair: `opus` at `medium`. `spec` and `tickets` declare nothing and run on what
-the State before them set.
+### Name the hand-off Artifact by path
 
-The phases that interview, diagnose, triage and write specs ran on `fable`
-until the Fable credit balance ran out mid-Run, which reaches a State as a
-non-zero exit and the Answerer as an Escalation. Putting every phase on one
-model is the stopgap, not the considered split; restore a per-phase pair when
-the balance is back.
+What one State leaves for the next must be somewhere the next can open: a file
+in the repository, committed on the branch. Name it by path in both Prompts,
+`PLAN.md` at the repository root, not "the plan". The Prompt that writes it says
+what it must hold. The Prompt that reads it says to read it first, because it
+starts cold.
 
-Each delivering State carries its own pair because an Entry may name the State
-it starts at: a batch of known bugs enters at `diagnose`, because the operator
-has already made the judgement `classify` exists to make. A pair declared on
-`classify` alone would never reach those Runs, and they would take the
-platform's own setting with nothing in this file to say so (ADR 0040).
+## 6. The file by hand
 
-### The compaction point
+One annotated file with each key once. Top-level keys come first, then
+`[answerer]`, then the States. Copy from it and delete what you do not need. A
+key you misspell is refused at load rather than ignored.
 
-The file declares `autocompact = "200k"`. A long `implement` pass on a 1M
-window otherwise runs far past that, and past it the work is worse and every
-turn re-sends the whole context. The Answerer session is untouched: it is not
-the one that grows.
+```toml
+# The Workflow's name. It is the file's stem in the library, and
+# `naiad workflow rename` keeps the two together.
+name = "example"
 
-### The Answerer
+# The Model and Effort every State asks for unless it names its own. Absent
+# means no opinion: the Session runs on what your Claude Code holds.
+model = "opus"
+effort = "medium"
 
-The `[answerer]` table declares `opus` at `medium` effort. It has to declare
-something to run on either, because a headless session starts clean each time
-and inherits nothing the States set.
+# Where the Session summarises its own context, in Claude Code's own syntax.
+autocompact = "200k"
 
-The Answerer replies from the Run's own record rather than reasoning fresh.
-Naiad invokes it on every Question, so its cost recurs, and this file used to
-discount that recurring spend with `fable` where it did not discount the
-States'. It runs on the same pair as the States for now, for the reason under
-Models and effort above.
+# Declaring this table, even empty, sends every State's Questions to an
+# Answerer: a separate headless Claude that answers from the repository. With
+# no table, every Question parks the Run and goes to you.
+[answerer]
+# The Answerer starts clean each time, so it declares its own settings.
+model = "sonnet"
+effort = "medium"
+# The Models it may degrade to when its own is unavailable, comma-separated.
+fallback = "haiku"
 
-The `fallback` key is the Answerer's alone. ADR 0031 gives the reasoning and
-the syntax. It names `sonnet` alone: a fallback repeating the primary is a
-retry on the model that just declined.
+[[states]]
+# A State's name is what the agent announces.
+name = "plan"
+# A State with a Prompt is a Prompt State. The slots are described in Part 4.
+prompt = """
+Plan the following task. Do not build it yet.
 
-The table is also the file's default for whose Questions are whose. A file
-that declares `[answerer]`, even an empty table, sends every State's Questions
-to the Answerer; a file that declares none sends them all to the human. Either
-default gives way to a State's own `questions = "human"` or
-`questions = "answerer"`, and a State that opts in within a table-less file
-consults the Answerer on the platform's defaults (ADR 0050).
+{task}
 
-A Question that is the human's is never consulted: the Run parks as it does on
-an Escalation, the notification carries the Question's text, and the human
-answers in the Session. The reason ahead of the text says why: "no Answerer is
-declared" where the file's default put it with the human, and "state X reserves
-its Questions for you" where the State asked. `wayfind` declares
-`questions = "human"`, because a Wayfinder map's tickets are the decisions a
-human is meant to make (ADR 0046). Every other State says nothing and follows the
-file's default, which here is the Answerer this file declares.
+Write the plan to `PLAN.md`, commit it, then announce {next_state}.
+"""
+# Whose a Question asked from this State is; it overrides the file's default,
+# which is "answerer" where [answerer] is declared and "human" where it is not.
+questions = "human"
 
-## Where each State's shape was decided
+[[states]]
+name = "review"
+# No prompt makes this a Gate: Naiad types nothing and you decide.
 
-The shipped file carries no ADR pointers, because it is shipped to projects
-that have never seen this repository. This table is the index its comments
-used to be. Read the ADRs named for a State before reshaping it.
+[[states]]
+name = "implement"
+# Enter in a fresh context.
+clear = true
+# This State's own Model and Effort, over the file's.
+model = "sonnet"
+effort = "high"
+# The successors, in order. Without it, the next State in declared order. Two
+# or more make the State branch, and its Prompt writes out when each applies.
+next = ["implement", "ship"]
+prompt = """
+Build what `PLAN.md` at the repository root describes. When every Step is done,
+announce ship. If a Step is left, announce implement.
+"""
 
-| State | Decided in |
-|---|---|
-| file as a whole | ADR 0040 (a State without a setting has no opinion), ADR 0043 (its tests assert invariants, not content), ADR 0047 (the compaction point rides the launch) |
-| `[answerer]` | ADR 0026 (model and effort ride the Workflow file), ADR 0031 (fallback rides the invocation) |
-| `classify` | ADR 0005 (classification is a State, not a router), ADR 0041 (fewer pins) |
-| `diagnose` | ADR 0008 (the bug branch is one State), ADR 0015 (branch names, not git knowledge), ADR 0022 (a Working branch is given or derived) |
-| `no-repro` | ADR 0007 (Gate skipping follows the declared order), ADR 0008 |
-| `grill` | ADR 0015, ADR 0022 |
-| `review` | ADR 0007, ADR 0045 (the Wayfinder loop re-enters here) |
-| `spec` | ADR 0033 (a Prompt pins what a skill leaves loose), ADR 0041 |
-| `tickets` | ADR 0010 (the implement loop triages), ADR 0033, ADR 0041 |
-| `implement` | ADR 0009 (an Announcement carries a Subject), ADR 0010, ADR 0027 (wontfix is closed), ADR 0033, ADR 0034 (needs-triage is triaged), ADR 0041 |
-| `triage` | the same six as `implement`; ADR 0034 is the one that created it |
-| `handover` | ADR 0007, ADR 0010, ADR 0034 |
-| `pull-request` | ADR 0015, ADR 0016 (the tail is project-neutral), ADR 0018 (how the tail ends is read from the project), ADR 0048 (a companion repository gets its own pull request), ADR 0051 (a companion is a repository, not a checkout) |
-| `wayfind` | ADR 0009, ADR 0045 (a Wayfinder map is walked AFK-first and stops at a Gate), ADR 0046 (a State may reserve its Questions for the human) |
-| `chart` | ADR 0045 |
-| `map-spec` | ADR 0045 |
+[[states]]
+name = "ship"
+clear = true
+# Tell the operator `entered ship` without parking the Run. Refused on a Gate
+# and on a Terminal State.
+report = true
+prompt = "Open the pull request for this branch, then announce {next_state}."
+
+[[states]]
+name = "done"
+# Announcing this State ends the Run. Give it no Prompt. A Workflow needs at
+# least one.
+terminal = true
+```
+
+`naiad workflow check` loads a file exactly as a Run does, so run it after every
+edit:
+
+```
+naiad workflow check example
+```
+
+## Why the starter is shaped this way
+
+The starter is a small feature or fix on any repository, with no custom skills:
+plan it, look at the plan, build it, check it, hand it over. Each choice in it
+answers something that goes wrong otherwise. Keep the reasons when you change
+the shape.
+
+**Every Prompt is prose.** A Workflow that opens with a skill's slash command
+runs only where that skill is installed. The starter has to run on a machine that
+has nothing but Claude Code, so it asks for the work in words.
+
+**`plan` writes a file, and the file is the hand-off.** `implement`, `verify`
+and `ship` each start from a cleared context. Nothing survives a Clear but the
+repository, so `PLAN.md` is where the plan goes: written with four fixed
+headings, committed on the branch, named by path in every Prompt that reads it.
+The Prompt that writes it says the next reader starts cold.
+
+**`review` is a Gate straight after `plan`.** A wrong plan is the cheapest thing
+to catch and the most expensive thing to build. The Gate is the one place the
+starter stops for you. Everything after it can run unattended, and `--skip-gates`
+takes the Gate out when you would rather not stop.
+
+**`implement`, `verify` and `ship` clear.** A fresh context makes each phase
+judge the repository as it is, not as the agent remembers it. `verify` in
+particular reads the diff cold and checks it against the plan's Goal, so it
+catches what `implement` believed it had done. `plan` does not clear: a Run
+begins in a clean session already, and a Clear at the start of the first State
+would only delay it.
+
+**`plan` derives and declares the branch, and later States do not.** Only `plan`
+names `{branch}`. It checks the Working branch out, or derives a name and runs
+`naiad branch` to tell Naiad. Later States say "the branch that is already
+checked out", which stays true across a Clear because git holds it, not the
+context.
+
+**`verify` never hides a failure.** If a check still fails after the agent has
+tried, the Prompt tells it to write a `## Status` heading into `PLAN.md` saying
+what remains. `ship` reads that heading and puts it in the pull request, so an
+open problem reaches a reviewer.
+
+**`ship` removes `PLAN.md`.** The plan becomes the pull request description and
+does not ship. Removing it is a commit, so the branch's history shows it.
+
+**No model, effort or compaction point.** The starter has no opinion, so a Run
+uses what your Claude Code holds. A model you did not choose in a file you
+copied is a bill you did not expect. Choose in your own copy, as Part 1 shows.
+
+**No `[answerer]` table.** With none, every Question the agent asks parks the Run
+and reaches you. That is the safe default for a Workflow you have not tuned:
+nothing is decided for you until you opt in by declaring an Answerer.
+
+**No `report`.** A Report is a choice about what you want to hear, and the
+starter cannot know. Part 3 shows how to add one.

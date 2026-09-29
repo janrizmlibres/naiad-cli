@@ -24,22 +24,39 @@ CITATION = re.compile(
 )
 
 
-def test_no_python_file_cites_the_maintainers_record() -> None:
-    offenders = [
+def matching_lines(paths: list[Path], pattern: re.Pattern[str]) -> list[str]:
+    """Each line of the files that the pattern finds, as `path:number: text`."""
+    return [
         f"{path.relative_to(ROOT)}:{number}: {line.strip()}"
-        for folder in ("naiad", "tests")
-        for path in sorted((ROOT / folder).rglob("*.py"))
+        for path in paths
         for number, line in enumerate(path.read_text().splitlines(), start=1)
-        if CITATION.search(line)
+        if pattern.search(line)
     ]
-    assert offenders == []
+
+
+# Only the guides directly under docs/ ship: a subfolder there holds the
+# maintainer's own notes, which may cite what a shipped document may not.
+SHIPPED_DOCUMENTS = [
+    ROOT / "README.md",
+    ROOT / "CONTRIBUTING.md",
+    *sorted((ROOT / "docs").glob("*.md")),
+]
+
+# The maintainer's own Workflow is unoffered, so no shipped document names it.
+# Spelt in two pieces so that this file does not name what it forbids.
+PERSONAL_WORKFLOW = re.compile("matt" + "-pocock", re.IGNORECASE)
+
+
+def test_no_python_file_cites_the_maintainers_record() -> None:
+    python_files = [
+        path for folder in ("naiad", "tests") for path in sorted((ROOT / folder).rglob("*.py"))
+    ]
+    assert matching_lines(python_files, CITATION) == []
 
 
 def test_no_shipped_document_cites_the_maintainers_record() -> None:
-    offenders = [
-        f"{name}:{number}: {line.strip()}"
-        for name in ("README.md", "CONTRIBUTING.md")
-        for number, line in enumerate((ROOT / name).read_text().splitlines(), start=1)
-        if CITATION.search(line)
-    ]
-    assert offenders == []
+    assert matching_lines(SHIPPED_DOCUMENTS, CITATION) == []
+
+
+def test_no_shipped_document_names_the_personal_workflow() -> None:
+    assert matching_lines(SHIPPED_DOCUMENTS, PERSONAL_WORKFLOW) == []
