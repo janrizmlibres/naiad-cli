@@ -1,4 +1,4 @@
-"""The one function holding Naiad's rules (ADR 0004).
+"""The one function holding Naiad's rules.
 
 Signals in, Action out. Nothing here reads a file, runs a subprocess, or looks
 at a clock: the tick loop gathers the signals, calls this, and carries out what
@@ -23,11 +23,11 @@ from naiad.domain.workflow import State, Workflow
 # How many Nudges an Announcement is worth before Naiad stops and the human is
 # told. The bound is the point: an agent that is genuinely stuck will not
 # recover from being asked a third time, and unbounded nudging is Naiad
-# fighting the agent rather than driving it (PRD, 'Recovery').
+# fighting the agent rather than driving it.
 NUDGE_LIMIT = 2
 
 # How long a typed /clear may go unconfirmed before Naiad reads it as dropped
-# and types it again (ADR 0019). Longer than a Clear that lands takes to report
+# and types it again. Longer than a Clear that lands takes to report
 # itself — so a Clear merely in flight is not re-typed — and short enough that a
 # genuinely dropped one is caught within a few ticks.
 CLEAR_CONFIRM_SECONDS = 8.0
@@ -39,7 +39,7 @@ CLEAR_CONFIRM_SECONDS = 8.0
 CLEAR_RETRY_LIMIT = 3
 
 # How long a typed Prompt may go without the UserPromptSubmit hook reporting it
-# before Naiad reads it as never having reached the Session (ADR 0053). The
+# before Naiad reads it as never having reached the Session. The
 # Clear's window, for the Clear's reason: a Prompt that reaches the Session is
 # reported at once, so the window is only ever spent on one that did not.
 DELIVERY_CONFIRM_SECONDS = CLEAR_CONFIRM_SECONDS
@@ -60,7 +60,7 @@ SILENCE_SECONDS = 120.0
 # will ever arrive and the wall clock is the only thing left to go on.
 HANG_SECONDS = 1800.0
 
-# What a Wait claims when the agent names no duration (ADR 0021). The order of
+# What a Wait claims when the agent names no duration. The order of
 # a background review's runtime, so the common case ends by wake rather than by
 # expiry.
 WAIT_DEFAULT_SECONDS = 600.0
@@ -73,8 +73,7 @@ WAIT_BUDGET_SECONDS = 1800.0
 
 @dataclass(frozen=True)
 class Opening:
-    """The Prompt a Run has been given a session for and has not been given
-    (ADR 0028).
+    """The Prompt a Run has been given a session for and has not been given.
 
     An Adoption alone has one. A Run that spawned its session was handed its
     first Prompt as that session launched, so it is owed nothing before it
@@ -82,8 +81,7 @@ class Opening:
     and what it is owed is the Prompt of the State it was adopted at.
 
     The Subject rides along because there is no Announcement to carry it: it
-    was named when the Entry was made, and the State adopted at may name it
-    (ADR 0009).
+    was named when the Entry was made, and the State adopted at may name it.
     """
 
     state: str
@@ -116,25 +114,25 @@ class Signals:
     in rather than read, so every rule below is testable as data in, Action out.
 
     finished says the Run is already over — because it reached a Terminal
-    State, or because the operator removed its Entry and cancelled it (ADR
-    0036). Which of the two is not the core's business: both mean the same
-    thing here, that nothing further is to be decided. It is a fact about the
-    Run rather than about an Announcement, and the only one: nothing re-arms
-    it, because nothing that arrives afterwards is Naiad's business.
+    State, or because the operator removed its Entry and cancelled it. Which of
+    the two is not the core's business: both mean the same thing here, that
+    nothing further is to be decided. It is a fact about the Run rather than
+    about an Announcement, and the only one: nothing re-arms it, because nothing
+    that arrives afterwards is Naiad's business.
 
     consultation is what the Answerer has said about the Question currently
     announced, or None if it has not been asked yet. It is a signal rather than
     something fetched here for the reason resolving a Question takes two
     decisions at all: the Answerer returns either an answer or an Escalation,
     and choosing between those is a rule. Branching on it where the Answerer is
-    called would put that rule in the adapter layer (ADR 0004).
+    called would put that rule in the adapter layer.
 
     waiting says a declared Wait is in force — unexpired at the moment the
     signals were gathered — and wait_reason is what the latest Wait of this
     Announcement said it was for, expired or not. Two signals rather than one,
     because they answer different questions: waiting decides whether the
     silence rule runs at all, and wait_reason lets the Nudge that follows an
-    expiry name what was waited on (ADR 0021). Both are facts about the
+    expiry name what was waited on. Both are facts about the
     current Announcement, re-armed by the next one like nudges.
 
     holding says a Hold is in force — the agent has declared, on the human's
@@ -142,7 +140,7 @@ class Signals:
     it said when it did. A Hold has no clock, so unlike waiting there is no
     expired counterpart to read: it stands until the agent signals again, and
     the next Announcement re-arms it like everything else kept per
-    Announcement (ADR 0025).
+    Announcement.
 
     opening is the Prompt the Run is owed before it has announced anything, set
     for an Adoption between the moment it joins its session and that Prompt
@@ -150,7 +148,7 @@ class Signals:
     than about an Announcement — there is no Announcement yet — and what
     re-arms it is the delivery itself.
 
-    cleared and clear_attempts are the Clear handshake as signals (ADR 0019).
+    cleared and clear_attempts are the Clear handshake as signals.
     cleared says this Announcement's /clear has been confirmed by the
     SessionStart hook; clear_attempts is how many times it has been typed. They
     are facts about the current Announcement, like nudges, and the next one
@@ -158,35 +156,35 @@ class Signals:
     the State after it.
 
     switches is how many of this State's Switches have been typed, one per tick
-    ahead of its Prompt (ADR 0038). A count rather than a flag each, because
+    ahead of its Prompt. A count rather than a flag each, because
     what the rule asks is how far along the sequence is; and per Announcement
     like the Clear, so the next Announcement counts from zero again.
 
-    deliveries and submission are the Prompt's own handshake (ADR 0053).
+    deliveries and submission are the Prompt's own handshake.
     deliveries is how many times this Announcement's Prompt has been typed;
     submission is what the UserPromptSubmit hook made of the latest of them —
     landed whole, turned away cut short, or None while it has said nothing.
     Per Announcement like the Clear's pair, and re-armed by the next one.
 
-    belief and handed_over are the two facts a Switch is decided over (ADR
-    0039). belief is what Naiad last typed into the Session, by setting, and is
-    what a State's own settings are compared against — so a State asking for
-    what is already there spends no Tick on it. handed_over says a human has
-    been given the keyboard since that was typed.
+    belief and handed_over are the two facts a Switch is decided over. belief is
+    what Naiad last typed into the Session, by setting, and is what a State's
+    own settings are compared against — so a State asking for what is already
+    there spends no Tick on it. handed_over says a human has been given the
+    keyboard since that was typed.
 
     A belief and not a reading: Claude Code fires no hook on a Switch, and
-    reading the session back is what ADR 0002 forbids, so what Naiad put there
+    Naiad never reads the session back, so what Naiad put there
     is the only evidence there is. handed_over is when that evidence is worth
     nothing — past a Notify a human may have typed a `/model` of their own, and
     Naiad cannot know — which is why it is carried beside the belief rather
     than folded into it: emptying the belief where it is read would put the
-    rule in the reader (ADR 0004).
+    rule in the reader.
 
     Both are facts about the Run rather than the current Announcement, and
     nothing re-arms them: what the Session holds does not change because the
     agent spoke again.
 
-    reported says the current Announcement has been Reported (ADR 0055). Kept
+    reported says the current Announcement has been Reported. Kept
     apart from notified because nothing that decides parking or the hand-off
     may be able to see it; per Announcement like nudges and cleared, and re-armed
     by the next one.
@@ -226,20 +224,20 @@ class Signals:
 @dataclass(frozen=True)
 class Clear:
     """Discard this State's context, and wait for the discard to be confirmed
-    before its Prompt is delivered (ADR 0019). The /clear can be dropped by the
+    before its Prompt is delivered. The /clear can be dropped by the
     terminal, so it is typed again if the confirmation does not come; attempt is
     carried like a Nudge's, so a retry reads apart from the first try in the log.
 
     A first-class Action rather than a step hidden inside Deliver, so the
     waiting and the retrying are the decision's — elapsed time in, an Action out
-    — and the loop keeps no rule of its own (ADR 0004)."""
+    — and the loop keeps no rule of its own."""
 
     state: str
     attempt: int
 
 
 # What the UserPromptSubmit hook made of the latest typed Prompt, or None while
-# it has said nothing (ADR 0053).
+# it has said nothing.
 Submission = Literal["landed", "rejected"] | None
 
 
@@ -250,22 +248,22 @@ Setting = Literal["model", "effort"]
 @dataclass(frozen=True)
 class Switch:
     """Type one of this State's settings into the session, ahead of its Prompt
-    and one to a tick (ADR 0038).
+    and one to a tick.
 
     setting is what the session calls it and value is the State's effective one.
     The pair is carried rather than two Actions, because the two settings differ
-    in nothing a rule cares about: they are one judgment about the phase's work
-    (ADR 0026), and the session merely takes them as two commands.
+    in nothing a rule cares about: they are one judgment about the phase's work,
+    and the session merely takes them as two commands.
 
     The setting is spelled as a closed set while the value stays an opaque
     string, and the asymmetry is the point: what the session calls its commands
     is Naiad's own vocabulary, where what names a model is the session's to
-    judge and any list Naiad kept would rot (ADR 0026).
+    judge and any list Naiad kept would rot.
 
     A first-class Action for the reason Clear is one: what has been typed and
     what is left is the decision's business, so the loop keeps no rule of its
-    own (ADR 0004). Unlike a Clear it is never confirmed and never re-typed
-    within one Announcement — it stays the best-effort switch ADR 0026 chose,
+    own. Unlike a Clear it is never confirmed and never re-typed
+    within one Announcement — it stays a best-effort switch,
     with the Ticks between doing the work a confirmation would have done.
     """
 
@@ -279,7 +277,7 @@ class Deliver:
     """Send this State's Prompt into the session.
 
     The context has already been discarded when the State asked for it: a Clear
-    Action does that and is confirmed before this follows (ADR 0019), so a
+    Action does that and is confirmed before this follows, so a
     delivery never Clears — by the time one is returned there is nothing left to
     discard.
 
@@ -295,17 +293,17 @@ class Deliver:
 
     subject is what the announcing agent said this Announcement was about,
     carried through unread so the Prompt can name it after the Clear has
-    discarded the context that chose it (ADR 0009).
+    discarded the context that chose it.
 
     The State's Model and Effort are not here. Each is typed on its own tick
     ahead of this one, as a Switch, because the session discards what arrives
-    while it is handling a slash command (ADR 0038). Reaching this Action says
-    both were typed, and no more than that: whether either took is what ADR 0026
+    while it is handling a slash command. Reaching this Action says
+    both were typed, and no more than that: whether either took is what Naiad
     declines to find out.
 
     Typing it is not delivering it. The Session can take the typing with
     keystrokes missing, so the Prompt is confirmed by the UserPromptSubmit hook
-    and a Confirm settles the Announcement once it has (ADR 0053). attempt is
+    and a Confirm settles the Announcement once it has. attempt is
     carried like a Clear's, so a retry reads apart from the first try."""
 
     state: str
@@ -319,12 +317,12 @@ class Deliver:
 class Confirm:
     """The State's Prompt reached the Session whole, as the UserPromptSubmit
     hook reported: the Announcement is handled, and the agent is working on
-    what it was given (ADR 0053).
+    what it was given.
 
     Sends nothing. It is an Action rather than a bookkeeping step inside the
     loop because it is the terminal one of the delivery — the one that marks
     the Announcement handled — and which Action is terminal is the decision's
-    to say (ADR 0004). attempt is which typing it was that landed."""
+    to say. attempt is which typing it was that landed."""
 
     state: str
     attempt: int
@@ -337,7 +335,7 @@ class Nudge:
     the Protocol's business, not a rule.
 
     expired_wait is what the agent's lapsed Wait said it was waiting on, when
-    the silence being answered followed one (ADR 0021). Carried so the wording
+    the silence being answered followed one. Carried so the wording
     can send the agent to look at that thing first, rather than reading as an
     accusation of forgetting it did not commit."""
 
@@ -370,7 +368,7 @@ class Notify:
     Run, which is why this is not Finish.
 
     question is set when what needs a human is a Question — one the Answerer
-    escalated, or one the Workflow gave the human (ADR 0046, 0050) — so that
+    escalated, or one the Workflow gave the human — so that
     the Answer log records what became of it beside the ones that were
     answered. An Escalation is not a separate Action — a Gate reached, an
     Answerer escalating, an agent gone silent and an agent hung are one
@@ -389,7 +387,7 @@ class Notify:
 class Report:
     """Tell the operator the Run entered a State the Workflow marked for it, and
     hand nothing over. The Run does not park and the Belief stands, because
-    nobody took the keyboard (ADR 0055).
+    nobody took the keyboard.
 
     The Subject rides along so the message can tell one Announcement of the
     State from the next, since a State announced for a fifth ticket reports a
@@ -444,7 +442,7 @@ def decide(workflow: Workflow, signals: Signals, *, skip_gates: bool = False) ->
     """skip_gates is an option of the Run rather than a signal of it — it does
     not change from tick to tick — so it is a parameter rather than a Signal.
     It only ever changes which State is interpolated into the Prompt; Naiad
-    still never writes the State file (ADR 0001).
+    still never writes the State file.
     """
     if signals.finished:
         # The Run ended. Nothing that arrives now is Naiad's business: the
@@ -478,12 +476,12 @@ def decide(workflow: Workflow, signals: Signals, *, skip_gates: bool = False) ->
         if asked_from is not None and asked_from.questions == "human":
             # The Workflow gave this State's Questions to the human, so the
             # Answerer is never consulted: the Run parks exactly as it does on
-            # an Escalation, and the human answers in the session (ADR 0046).
+            # an Escalation, and the human answers in the session.
             # The Question rides along for the Answer log, which records what
             # became of it; the reason carries its text because no Answerer
             # has phrased one and the notification is all the human sees
             # before they sit down. It says who put the Question with them:
-            # the State, or a file that declared no Answerer (ADR 0050).
+            # the State, or a file that declared no Answerer.
             whose = (
                 f"state '{asked_from.name}' reserves its Questions for you"
                 if asked_from.questions_explicit
@@ -509,7 +507,7 @@ def decide(workflow: Workflow, signals: Signals, *, skip_gates: bool = False) ->
         # A Report sends nothing into the session, so like a Consultation it
         # waits on no turn ending and cannot type over an agent still writing;
         # the operator hears "entered" when the agent says it. It comes before
-        # the Clear, and costs one Tick (ADR 0055).
+        # the Clear, and costs one Tick.
         #
         # Only an Announcement reports. A Question names the State the agent
         # is standing in without arriving at it, and the State a Run starts at
@@ -575,12 +573,12 @@ def decide(workflow: Workflow, signals: Signals, *, skip_gates: bool = False) ->
         # declared Wait says that silence is deliberate — the agent is waiting
         # on something that will come back — so nothing is owed until it
         # expires; expiry re-arms this same rule rather than a new one, with
-        # the Nudge naming what was waited on (ADR 0021). Undeclared, the
+        # the Nudge naming what was waited on. Undeclared, the
         # session has most likely forgotten to announce, which a reminder
         # fixes.
         # A Hold is a park the human asked for: the Run parks deliberately,
         # notified once and calmly, and nothing here runs again until the
-        # agent signals — no expiry, no budget, no Nudges (ADR 0025). Checked
+        # agent signals — no expiry, no budget, no Nudges. Checked
         # before waiting because the wait command releases any Hold, so both
         # standing means the Hold is the newer declaration.
         if signals.holding:
@@ -615,9 +613,9 @@ def _owed(
     to come first, or why there is nothing to send at all.
 
     One copy of those rules, reached from both entrances to delivery — the
-    State the agent announced, and the State an Adoption was adopted at
-    (ADR 0028) — so that the two cannot come to disagree about what is
-    deliverable, the discipline naiad.cli.refusals keeps for what is startable.
+    State the agent announced, and the State an Adoption was adopted at — so
+    that the two cannot come to disagree about what is deliverable, the
+    discipline naiad.cli.refusals keeps for what is startable.
 
     A State the Workflow does not declare leaves nothing to deliver, and a Gate
     State is the human's to answer: both say so rather than going quiet, since
@@ -629,8 +627,8 @@ def _owed(
     diverges from kickoff. Kickoff ignores its first State's flag because the
     session it is about to open holds nothing to discard; the session an
     Adoption joins holds everything, and a Workflow declaring a clean start is
-    not Naiad's to overrule (ADR 0028). The discard is confirmed rather than
-    assumed, retries and all (ADR 0019).
+    not Naiad's to overrule. The discard is confirmed rather than
+    assumed, retries and all.
     """
     state = workflow.state(state_name)
     if state is None:
@@ -650,14 +648,14 @@ def _owed(
     if state.clear and not signals.cleared:
         # The context must be discarded before the Prompt, and the discard
         # confirmed rather than assumed. Until then delivery waits, exactly as
-        # it waits on a turn ending (ADR 0019).
+        # it waits on a turn ending.
         return _clear(signals, state.name)
 
     pending = _switches(state, signals.belief, handed_over=signals.handed_over)
     if signals.switches < len(pending):
         # One Switch a tick, the Prompt behind them. The session drops whatever
         # arrives while it is handling a slash command, so typing the two
-        # settings and the Prompt in one go loses one of the three (ADR 0038).
+        # settings and the Prompt in one go loses one of the three.
         # The Ticks between are the whole of the fix: nothing is confirmed, and
         # nothing needs to be.
         return pending[signals.switches]
@@ -684,7 +682,7 @@ def terminal_state(workflow: Workflow, announcement: Announcement | None) -> Sta
     than arriving at it, and it is waiting on an answer.
 
     Public because the resolution seam asks it too: a Run that has ended
-    releases its Session (ADR 0035), and whether it has ended is this same
+    releases its Session, and whether it has ended is this same
     question. A second copy would drift on exactly the Question clause above.
     """
     if announcement is None or announcement.question is not None:
@@ -723,7 +721,7 @@ def _resolved_past(workflow: Workflow, announcement: Announcement, *, skip_gates
 
 def _clear(signals: Signals, state_name: str) -> Action:
     """Get this State's context discarded before its Prompt, catching a dropped
-    /clear rather than hoping (ADR 0019).
+    /clear rather than hoping.
 
     The silence-then-Nudge shape applied to a Clear that may be dropped: the
     first /clear goes at once, a confirm window is waited before one is judged
@@ -743,8 +741,7 @@ def _clear(signals: Signals, state_name: str) -> Action:
 
 def _deliver(signals: Signals, delivery: Deliver) -> Action:
     """Get this State's Prompt into the Session whole, catching one the Session
-    took cut short rather than letting the agent work from part of it
-    (ADR 0053).
+    took cut short rather than letting the agent work from part of it.
 
     The Clear's handshake with one difference, and the difference is the
     point. A Prompt the hook turned away is typed again at once, because the
@@ -785,16 +782,16 @@ def _switches(
     pair, so a Workflow naming one key does not spend a tick on the other, and
     one naming neither goes straight to its Prompt as it always did.
 
-    Narrowed again to the ones the Session is not believed to hold already
-    (ADR 0039). The settings are sticky, so a State asking for what is there
-    buys nothing by asking twice and pays two Ticks for it. Compared per
-    setting rather than over the pair, so a State moving one of the two spends
-    one Tick and not both.
+    Narrowed again to the ones the Session is not believed to hold already. The
+    settings are sticky, so a State asking for what is there buys nothing by
+    asking twice and pays two Ticks for it. Compared per setting rather than
+    over the pair, so a State moving one of the two spends one Tick and not
+    both.
 
     A hand-off to a human discards the belief entirely, and every setting the
     State declares is typed again. That is what the narrowing gives up and this
-    gives back: ADR 0026 bought the healing of a dropped Switch with an
-    every-delivery retype, and past a Notify is the one moment Naiad knows its
+    gives back: retyping the settings on every delivery healed a dropped
+    Switch, and past a Notify is the one moment Naiad knows its
     belief may be wrong — because a human has had the keyboard, and may have
     set the Model themselves.
 
@@ -819,8 +816,7 @@ def _notify(
 ) -> Action:
     """Notification is once per Announcement, not once per tick. Every
     condition reaching here persists with identical signals until a human acts,
-    so without this the operator is woken every couple of seconds until they do
-    (PRD, 'The Answerer')."""
+    so without this the operator is woken every couple of seconds until they do."""
     return (
         NOTHING
         if signals.notified

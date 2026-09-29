@@ -11,7 +11,7 @@ reaching for the singular one would silently drop a branch.
 
 Both operator options that bend the ordering live here. Neither writes the
 State file — Naiad only ever interpolates a different value, which is what
-keeps the agent its single writer (ADR 0001).
+keeps the agent its single writer.
 """
 
 from __future__ import annotations
@@ -39,9 +39,9 @@ def next_states(workflow: Workflow, current: str, *, skip_gates: bool = False) -
     what the agent announced. Nothing asks a successor what it is, so handing
     back States would leave every caller unwrapping them the same way.
 
-    Gate-skipping applies to the declared order alone (ADR 0007). A Gate State
+    Gate-skipping applies to the declared order alone. A Gate State
     named as a candidate is a destination the agent chose rather than a routine
-    checkpoint, and deleting it would overrule the judgment ADR 0001 gives away.
+    checkpoint, and deleting it would overrule the judgment that the agent, not Naiad, owns.
     """
     state = workflow.state(current)
     if state is not None and state.next_candidates:
@@ -67,7 +67,7 @@ def parks_on(workflow: Workflow, name: str, *, skip_gates: bool = False) -> bool
     Workflow does not declare is nobody's to hold. With Gates skipped a routine
     Gate is one the Run resolves past, so announcing it anyway parks nothing;
     a Gate some State names as a candidate is a destination the agent chose and
-    is never resolved past (ADR 0007). Read from the Workflow alone, so the
+    is never resolved past. Read from the Workflow alone, so the
     answer needs no standing State: a candidate is a candidate wherever the
     agent stood when it announced.
     """

@@ -49,7 +49,7 @@ LOG_FILENAME = "log.json"
 ANNOUNCEMENT_KINDS = ("announced", "asked")
 
 # The kinds that end a Run: the Finish Naiad carried out, and the cancellation
-# the operator's removal of the Entry wrote (ADR 0036). Two kinds rather than
+# the operator's removal of the Entry wrote. Two kinds rather than
 # one because the log is a narrative a human reads, and a Run called off must
 # not read back as one that completed.
 ENDING_KINDS = ("finished", "cancelled")
@@ -103,7 +103,7 @@ class LogLine:
 
 class RunLog:
     """A Run's log. Constructed with the Run's directory rather than reading a
-    module-level path, so a second Run is a second log (ADR 0004)."""
+    module-level path, so a second Run is a second log."""
 
     def __init__(self, run_root: Path) -> None:
         self.path = Path(run_root) / LOG_FILENAME
@@ -138,7 +138,7 @@ class RunLog:
 
         Named for the ending rather than for the Finish, because a Run ends two
         ways: Naiad carried out its Finish, or the operator removed its Entry
-        and cancelled it (ADR 0036). Every caller asks the one question, so the
+        and cancelled it. Every caller asks the one question, so the
         second ending needed no second reader.
 
         Read back from the log rather than kept as a flag of its own, because
@@ -153,7 +153,7 @@ class RunLog:
         Deviation is measured from.
 
         Read back from the log because the State file keeps only the latest
-        Announcement — deliberately, so that it stays single-writer (ADR 0001)
+        Announcement — deliberately, so that it stays single-writer
         — and this is the one place the ones before it are written down.
 
         None before anything has been announced. Where a Run begins is the
@@ -178,8 +178,8 @@ class RunLog:
 
     def opened(self) -> bool:
         """Whether the Prompt an adopted Run was owed when it joined its
-        session has gone out (ADR 0028) — landed, not merely typed, since a
-        typing the Session took cut short is typed again (ADR 0053).
+        session has gone out — landed, not merely typed, since a
+        typing the Session took cut short is typed again.
 
         A Confirm with no Announcement to tie it to is that one and no other:
         every delivery after it answers something the agent said and carries
@@ -191,17 +191,17 @@ class RunLog:
 
     def belief(self, announcement: Announcement | None) -> tuple[dict[str, str], bool]:
         """What Naiad last typed into the Session, by setting, and whether a
-        human has been handed the keyboard since (ADR 0039).
+        human has been handed the keyboard since.
 
         The two facts a Switch is decided over, read together in one pass for
         the reason `Notices.of` returns its pair that way. Both are reports and
         neither is a rule: what they mean for a State's Switches is
-        naiad.domain.decide's to say (ADR 0004).
+        naiad.domain.decide's to say.
 
         The settings are what Naiad typed rather than what the Session holds,
         and the gap between those is the point. Claude Code fires no hook on a
-        Switch and reading the session's state back is what ADR 0002 forbids,
-        so what Naiad put there is the only evidence there is. Read back from
+        Switch and Naiad never reads the session's state back (it reads no Claude Code
+        internals), so what Naiad put there is the only evidence there is. Read back from
         the log rather than kept as a record of its own, for the reason `ended`
         and `opened` are: every Switch is already written here, and one fact
         deserves one home.
@@ -214,13 +214,13 @@ class RunLog:
         between the Notify and the delivery cannot swallow it.
 
         This Announcement's own Switches count for neither, which is what holds
-        both still while they are typed one to a Tick (ADR 0038). Were they
+        both still while they are typed one to a Tick. Were they
         counted, the settings would fill in as the sequence ran and the second
         setting would read as already typed — the Prompt would go out with it
         never sent — and the hand-off would read as answered by the first
         Switch of the very delivery it is there to arm. An adopted Run's first
         delivery answers no Announcement and is kept against no seq, like its
-        Clear (ADR 0028); it can never confuse its own Switches with the
+        Clear; it can never confuse its own Switches with the
         seq-less pair `record_launch` writes, because a Run either joins a
         Session or opens one, and never both.
         """
@@ -241,7 +241,7 @@ class RunLog:
 
         Read here rather than by callers scanning entries, because 'delivered'
         is a kind this module writes: the one asking it — whether a Prompt
-        carrying the branch placeholder has gone out (ADR 0022) — should not
+        carrying the branch placeholder has gone out — should not
         have to know how a delivery is spelled.
 
         Kickoff's delivery of the first Prompt is not among them: it rides the
@@ -249,7 +249,7 @@ class RunLog:
         at is the Run's own fact to answer with. What kickoff does write is the
         pair of Switches its flags stood for, which are not deliveries either.
         An adopted Run's first Prompt is among them, since it goes out from the
-        tick loop like every other delivery (ADR 0028).
+        tick loop like every other delivery.
         """
         return [
             entry.state
@@ -274,7 +274,7 @@ class RunLog:
         A Subject is recorded for the same reason, and matters most in the same
         case: a Gate State has no Prompt to substitute it into, so the log is
         the only place it is written down, and it is what tells the operator
-        which item they have been handed (ADR 0009).
+        which item they have been handed.
         """
         if announcement is None or self._holds(announcement.seq):
             return
@@ -294,7 +294,7 @@ class RunLog:
 
     def record_adoption(self, *, pane: str) -> None:
         """That this Run joined a Session that was already running, rather than
-        opening one of its own (ADR 0028).
+        opening one of its own.
 
         The first line of an adopted Run's narrative, where a spawned Run's
         begins with the Switches its launch flags stood for: nothing else in the
@@ -312,8 +312,8 @@ class RunLog:
         autocompact: str | None = None,
     ) -> None:
         """What the flags on a spawn set the Session to, written down as the
-        Switches they are (ADR 0039) — and, apart from them, the point at which
-        the Session was told to summarise itself (ADR 0047).
+        Switches they are — and, apart from them, the point at which
+        the Session was told to summarise itself.
 
         A flag read as the process starts sets the Session as surely as a
         `/model` typed into a running one, and what every later State compares
@@ -353,7 +353,7 @@ class RunLog:
 
     def record_compaction(self, *, state: str | None) -> None:
         """That the Session summarised its own context, as the SessionStart
-        hook reported it (ADR 0047).
+        hook reported it.
 
         Written here rather than as an Action, like `record_adoption`: no tick
         decided it, and Naiad neither asked for it nor could have. The State is
@@ -365,7 +365,7 @@ class RunLog:
         self._append(LogLine(kind="compacted", state=state))
 
     def record_branch(self, name: str) -> None:
-        """The agent's declaration of the Run's Working branch (ADR 0022).
+        """The agent's declaration of the Run's Working branch.
 
         Recorded like the other received protocol acts, so that a human asking
         "where did this branch name come from" reads the answer in the
@@ -375,7 +375,7 @@ class RunLog:
 
     def record_cancellation(self, *, state: str | None) -> None:
         """That the operator removed this Run's Entry, which ends the Run and
-        releases its Session (ADR 0036).
+        releases its Session.
 
         Written here rather than as an Action, like `record_adoption` and
         `record_branch`, because no tick decided it: it is the operator's own
@@ -435,7 +435,7 @@ def _entry_for(action: Action) -> LogLine | None:
         detail = f"next: {successors}" if successors else None
         if action.attempt > 1:
             # Only a retry is worth the number, as with a Clear: it is the
-            # Prompt the Session took cut short, typed again (ADR 0053).
+            # Prompt the Session took cut short, typed again.
             detail = f"attempt {action.attempt}" + (f", {detail}" if detail else "")
         return LogLine(kind="delivered", state=action.state, detail=detail)
     if isinstance(action, Confirm):
@@ -447,14 +447,14 @@ def _entry_for(action: Action) -> LogLine | None:
     if isinstance(action, Clear):
         # The attempt is always carried, but only a retry is worth a word: a
         # first Clear is the ordinary case and its number would be noise, while
-        # a second reads as the dropped-Clear it records (ADR 0019).
+        # a second reads as the dropped-Clear it records.
         return LogLine(
             kind="cleared",
             state=action.state,
             detail=f"attempt {action.attempt}" if action.attempt > 1 else None,
         )
     if isinstance(action, Switch):
-        # What was typed, not what took: a Switch is never confirmed (ADR 0026),
+        # What was typed, not what took: a Switch is never confirmed,
         # so the line records Naiad's side of it and no more. Worth a line at
         # all because a State that ran at the wrong price is diagnosed from
         # here — the log is the only place the sequence is written down.
@@ -477,7 +477,7 @@ def _entry_for(action: Action) -> LogLine | None:
         return LogLine(kind="notified", detail=action.reason)
     if isinstance(action, Report):
         # Its own kind, so that nothing reading `notified` — the belief, the
-        # hand-off — can mistake it for a human being needed (ADR 0055).
+        # hand-off — can mistake it for a human being needed.
         return LogLine(kind="reported", state=action.state, detail=action.subject)
     if isinstance(action, Finish):
         return LogLine(kind="finished", state=action.state)

@@ -3,7 +3,7 @@
 There is deliberately no rule here. Whether to deliver, whether to Clear first,
 which State comes next, whether the agent has been quiet long enough to be
 nudged and whether the operator has already been told were all decided in
-naiad.domain.decide (ADR 0004); what is left is reading a few files, one call,
+naiad.domain.decide; what is left is reading a few files, one call,
 and a dispatch. If a condition ever needs adding to this module, it belongs in
 the decision function instead.
 """
@@ -122,13 +122,13 @@ def tick(
     reference = entry_id or run.id
     # Read out of the log rather than out of a record of its own, for the reason
     # `finished` is: every Switch and every Notify is already written there, and
-    # one fact deserves one home (ADR 0039). Both come back from one pass, and
+    # one fact deserves one home. Both come back from one pass, and
     # what they mean for a State's Switches is the decision's to say.
     belief, handed_over = log.belief(announcement)
     # The Wait and Hold counts key the Notices record: a fresh Wait re-arms
-    # the nudge allowance the way a fresh Announcement does (ADR 0021), and a
+    # the nudge allowance the way a fresh Announcement does, and a
     # fresh Hold re-arms the notification an earlier alarm would otherwise
-    # swallow (ADR 0025).
+    # swallow.
     wait_count = waits.count(announcement)
     hold_count = holds.count(announcement)
     notified, nudges = notices.of(announcement, wait_count=wait_count, hold_count=hold_count)
@@ -176,18 +176,17 @@ def tick(
         # Type /clear and record the attempt against the current Clear count,
         # so a landing after this can be told from one before it. The Prompt
         # does not follow yet: a later tick delivers it, once the SessionStart
-        # hook has confirmed the discard (ADR 0019).
+        # hook has confirmed the discard.
         #
         # An adopted Run's Clear answers no Announcement, as its first delivery
         # answers none: the attempt is kept against no seq, which is the key the
-        # next tick reads it back under while nothing has been announced
-        # (ADR 0028).
+        # next tick reads it back under while nothing has been announced.
         session.clear(_pane(run))
         clearing.record_attempt(announcement, landed=clears.count())
     elif isinstance(action, Switch):
         # One of the State's settings, and only one: the Prompt and the other
         # Switch follow on later ticks, because the session discards whatever
-        # arrives while it is handling a slash command (ADR 0038). Nothing is
+        # arrives while it is handling a slash command. Nothing is
         # waited for here — the tick interval is the pause, which is what keeps
         # this loop free of a sleep that would stall every other Lane.
         #
@@ -211,14 +210,14 @@ def tick(
         # Recorded before it is typed, because the UserPromptSubmit hook fires
         # while it is being typed and judges the submission against this. The
         # Announcement is not handled yet: a Confirm does that once the hook has
-        # seen the Prompt land whole (ADR 0053).
+        # seen the Prompt land whole.
         deliveries.record_attempt(announcement, prompt=prompt, turns=turns.count(), at=moment)
         session.send(_pane(run), prompt)
     elif isinstance(action, Confirm):
         # An adopted Run's first delivery answers no Announcement, so there is
         # no seq to record against it — only the turn baseline, which is what
         # keeps the agent working on what it was just given from reading as a
-        # silent one (ADR 0028). The baseline is the one taken when the Prompt
+        # silent one. The baseline is the one taken when the Prompt
         # that landed was typed, so a Turn the agent ended since then counts.
         handled.record(
             announcement.seq if announcement is not None else None,
@@ -253,7 +252,7 @@ def tick(
     elif isinstance(action, Report):
         # Nothing is sent into the session and nothing is parked: the Report
         # goes to the operator and is recorded apart from the Notices, so no
-        # reader of a hand-off can see it (ADR 0055). The Task is left out
+        # reader of a hand-off can see it. The Task is left out
         # because the run id already names the Run and a Task can swamp a
         # banner.
         message = f"entered {action.state}"
@@ -270,7 +269,7 @@ def tick(
         notices.record_notified(announcement, wait_count=wait_count, hold_count=hold_count)
         if action.question is not None and announcement is not None:
             # A Question the human is answering: one the Answerer escalated,
-            # or one the Workflow gave the human (ADR 0046, 0050). Recorded here rather
+            # or one the Workflow gave the human. Recorded here rather
             # than at the consultation so that the log holds what became of
             # it, not merely what was said about it — and once, because a
             # second notification for the same Announcement never arrives.
@@ -294,7 +293,7 @@ def _with_answered(message: str, answered: int, reference: str) -> str:
 
 
 def _opening(run: Run, workflow: Workflow, log: RunLog) -> Opening | None:
-    """The Prompt this Run is owed and has not been given (ADR 0028).
+    """The Prompt this Run is owed and has not been given.
 
     Only an adopted Run is ever owed one — a spawned Run was handed its first
     Prompt as its session launched — and only until it goes out, which the log
@@ -318,9 +317,9 @@ def _opening(run: Run, workflow: Workflow, log: RunLog) -> Opening | None:
 def _deviation(
     run: Run, workflow: Workflow, log: RunLog, announcement: Announcement | None
 ) -> tuple[str, ...]:
-    """Whether this Announcement left the expected path, asked of the domain
-    (ADR 0004). Where the agent stood before it is read back from the log,
-    which is the only place the Announcements before the latest are kept."""
+    """Whether this Announcement left the expected path, asked of the domain.
+    Where the agent stood before it is read back from the log, which is the only
+    place the Announcements before the latest are kept."""
     if announcement is None:
         return ()
     return deviation(

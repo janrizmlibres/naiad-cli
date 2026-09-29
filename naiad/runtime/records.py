@@ -1,7 +1,7 @@
 """What Naiad records about a Run, as distinct from what the agent records.
 
 A few facts, a file each. The State file is the agent's and Naiad never writes
-it (ADR 0001), so Naiad's own bookkeeping lives beside it rather than in it.
+it, so Naiad's own bookkeeping lives beside it rather than in it.
 The records are also written by different processes — a Stop hook fires while
 the tick loop is running — so they stay separate files rather than racing over
 one.
@@ -39,7 +39,7 @@ WAITS_FILENAME = "waits.json"
 HOLDS_FILENAME = "holds.json"
 
 # Beside the Entry in the queue directory, under the Entry's id. Not `.json`,
-# which the Queue reads as an Entry file (ADR 0042).
+# which the Queue reads as an Entry file.
 ENTRY_TURNS_SUFFIX = ".turns"
 
 # Every file whose writing means something happened. The Run's own metadata is
@@ -95,7 +95,7 @@ def _current(path: Path, announcement: Announcement | None) -> Document:
 
 def idle_seconds(run_root: Path, *, now: float) -> float:
     """How long since the last signal of any kind, handed to the decision
-    function so that no rule reads a clock (ADR 0004).
+    function so that no rule reads a clock.
 
     Measured from the records rather than from a timestamp Naiad keeps, because
     the signals are written by three processes and their arrival is exactly
@@ -162,7 +162,7 @@ class Turns:
 
 class EntryTurns:
     """A Turn end that arrived before an Adoption's Run existed, kept beside
-    the Entry that will become it (ADR 0042).
+    the Entry that will become it.
 
     Written by the Stop hook alone, in its own file rather than on the Entry,
     so the hook and the Supervisor's attach never race over one rewrite. The
@@ -183,12 +183,12 @@ class EntryTurns:
 
     def relocate_into(self, run_root: Path) -> None:
         """Move the record into the Run at attach — a move rather than a copy,
-        so the fact keeps one home (ADR 0013).
+        so the fact keeps one home.
 
         Write-if-absent: a Stop that fired after the Run was created wrote a
         fresher record there already, and the sidecar is then deleted unread.
         The opening only ever asks whether the count is above zero, so no merge
-        is owed (ADR 0042)."""
+        is owed."""
         count = self.count()
         turns = Turns(run_root)
         if count and not turns.path.exists():
@@ -199,7 +199,7 @@ class EntryTurns:
 class Clears:
     """How many times a Clear has landed, written by the SessionStart hook when
     a fresh context is one a /clear made — read from the hook's own `source`,
-    rather than a startup or a compaction (ADR 0019).
+    rather than a startup or a compaction.
 
     The counterpart to Turns. A Stop hook says a turn ended and counts them; a
     SessionStart(clear) hook says a Clear landed and counts them. A count rather
@@ -270,17 +270,17 @@ class ClearAttempts:
 
 class Switches:
     """How many of a State's Switches the loop has typed for the current
-    Announcement (ADR 0038).
+    Announcement.
 
     Kept against the Announcement it belongs to and read as nothing for any
     other, like ClearAttempts and Notices: the next Announcement re-arms it, so
     a delivery counts its own Switches from zero however far the delivery before
     it got. How many it owes at all is another question, and not this one — a
-    Switch carries only what the Session is not believed to hold (ADR 0039),
+    Switch carries only what the Session is not believed to hold,
     and that belief is read from the Run log.
 
     A count and nothing else. There is no baseline to hold and no landing to
-    compare against, because a Switch is never confirmed (ADR 0026) — what the
+    compare against, because a Switch is never confirmed — what the
     count buys is a tick between one Switch and the next, which is the whole of
     what the session needs.
     """
@@ -314,7 +314,7 @@ class Deliveries:
     """What the loop has typed to get a State's Prompt into the Session: how
     many times for the current Announcement, the rendered Prompt the hook
     judges a submission against, when it was typed, and how many Turns had
-    ended then — the baseline the Confirm hands to Handled (ADR 0053).
+    ended then — the baseline the Confirm hands to Handled.
 
     The Clear's ClearAttempts, for the Prompt, and kept against the
     Announcement like it: the next one re-arms the count. Written by the loop
@@ -366,8 +366,7 @@ class Deliveries:
 
 class Submissions:
     """What the UserPromptSubmit hook made of the latest typed Prompt — landed
-    or turned away — keyed by the Announcement and the attempt it judged
-    (ADR 0053).
+    or turned away — keyed by the Announcement and the attempt it judged.
 
     Written by the hook alone, apart from Deliveries, as Clears is apart from
     ClearAttempts. Keyed by the attempt as well as the Announcement because a
@@ -415,7 +414,7 @@ class Handled:
 
     def record(self, seq: int | None, *, turns: int = 0) -> None:
         """A seq of None is an adopted Run's first Prompt, which answers no
-        Announcement (ADR 0028): nothing has been acted on, and what is being
+        Announcement: nothing has been acted on, and what is being
         recorded is the turn baseline the next silence is measured against."""
         _write(self.path, {"seq": seq, "turns": turns})
 
@@ -440,14 +439,14 @@ class Notices:
         """wait_count is how many Waits the Announcement has declared, and a
         mismatch re-arms the record exactly as a new Announcement does: a
         re-declared Wait after a wake answers a new silence, so it earns a
-        fresh allowance rather than inheriting the count an earlier one ran up
-        (ADR 0021). hold_count re-arms it the same way, because the likeliest
-        Hold arrives after a notification — silence, Nudges, the operator told,
-        and only then the human's 'pause' relayed — and a Hold whose own
-        notification the earlier alarm swallowed would park the Run silently,
-        the exact failure its notification is load-bearing against (ADR 0025).
-        Every reader must pass the counts the writer keyed with — Waits.count
-        and Holds.count — or a parked Run reads as running."""
+        fresh allowance rather than inheriting the count an earlier one ran up.
+        hold_count re-arms it the same way, because the likeliest Hold arrives
+        after a notification — silence, Nudges, the operator told, and only then
+        the human's 'pause' relayed — and a Hold whose own notification the
+        earlier alarm swallowed would park the Run silently, the exact failure
+        its notification is load-bearing against. Every reader must pass the
+        counts the writer keyed with — Waits.count and Holds.count — or a parked
+        Run reads as running."""
         document = _current(self.path, announcement)
         if int(document.get("wait", 0) or 0) != wait_count:
             return False, 0
@@ -498,7 +497,7 @@ class Notices:
 
 class Reports:
     """Whether the operator has been told the Run entered the current
-    Announcement's State (ADR 0055).
+    Announcement's State.
 
     Kept against the Announcement it belongs to and read as nothing for any
     other one, like Notices: the next Announcement re-arms it, so a State
@@ -520,7 +519,7 @@ class Reports:
 
 class Waits:
     """The agent's declared Wait — what it said it was waiting on, until when,
-    and how much of the Announcement's wait budget has gone (ADR 0021).
+    and how much of the Announcement's wait budget has gone.
 
     Written by the wait command in the agent's process and read by the loop,
     like the State file — and like it, single-writer. Kept against the
@@ -531,11 +530,11 @@ class Waits:
     declaration until it is replaced or expires, capped at what it claimed.
     Several background tasks finishing at different moments is the honest
     pattern the verb exists for, and charging each full claim would exhaust
-    the budget in a few wakes. The wake itself is invisible to Naiad
-    (ADR 0002), so time the woken agent spends working before re-declaring is
-    charged as waited — an over-charge, accepted as the price of not reading
-    the session. An expired Wait charges no more than it claimed: silence past
-    the deadline is the silence rule's to spend.
+    the budget in a few wakes. The wake itself is invisible to Naiad, so time
+    the woken agent spends working before re-declaring is charged as waited — an
+    over-charge, accepted as the price of not reading the session. An expired
+    Wait charges no more than it claimed: silence past the deadline is the
+    silence rule's to spend.
     """
 
     def __init__(self, run_root: Path) -> None:
@@ -599,7 +598,7 @@ class Waits:
 
 class Holds:
     """The agent's declared Hold — the human's instruction to park the Run,
-    and what the agent said when relaying it (ADR 0025).
+    and what the agent said when relaying it.
 
     Written by the hold command in the agent's process and read by the loop,
     like Waits, and single-writer for the same reason. Kept against the
@@ -627,8 +626,7 @@ class Holds:
     def count(self, announcement: Announcement | None) -> int:
         """How many Holds this Announcement has declared. It keys the Notices
         record the way Waits.count does: a declared Hold is a fresh signal, so
-        its notification is owed even where an earlier alarm already fired
-        (ADR 0025)."""
+        its notification is owed even where an earlier alarm already fired."""
         return int(_current(self.path, announcement).get("count", 0) or 0)
 
     def record(self, announcement: Announcement | None, *, reason: str) -> None:

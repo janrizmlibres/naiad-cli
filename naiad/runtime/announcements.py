@@ -1,6 +1,6 @@
 """The State file — the agent's Announcements.
 
-The agent is its only writer and Naiad only ever reads it (ADR 0001), so
+The agent is its only writer and Naiad only ever reads it, so
 progress is always a record of the agent's own judgment rather than a
 blackboard the two parties race over.
 
@@ -31,7 +31,7 @@ STATE_FILENAME = "state.json"
 
 class Announcements:
     """A Run's State file. Constructed with the Run's directory rather than
-    reading a module-level path, so a second Run is a second object (ADR 0004)."""
+    reading a module-level path, so a second Run is a second object."""
 
     def __init__(self, run_root: Path) -> None:
         self.path = Path(run_root) / STATE_FILENAME

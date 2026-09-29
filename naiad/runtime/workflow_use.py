@@ -2,9 +2,9 @@
 moved.
 
 An Entry stores the path it was queued with, and a Run the path it started
-from, so a file taken from under either is one the Queue can no longer read
-(ADR 0023, 0049). Paths are compared after resolving, so a library link and the
-file behind it are one file: an Entry queued by either spelling addresses both.
+from, so a file taken from under either is one the Queue can no longer read.
+Paths are compared after resolving, so a library link and the file behind it are
+one file: an Entry queued by either spelling addresses both.
 """
 
 from __future__ import annotations

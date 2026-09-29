@@ -3,7 +3,7 @@
 The rules about a session — that it runs in bypass permissions mode, that its
 Claude session id is pinned rather than discovered, that it is named after its
 Run, and what it is first asked to do — are decided here, over plain data. The
-adapter turns this into a command and holds no rules of its own (ADR 0004).
+adapter turns this into a command and holds no rules of its own.
 """
 
 from __future__ import annotations
@@ -33,10 +33,10 @@ class SessionSpec:
 
     model and effort are the first State's, riding at launch as flags for the
     same reason the first Prompt does: a Switch precedes Prompt delivery, and at
-    spawn delivery happens on the command line (ADR 0026). Kickoff is therefore
+    spawn delivery happens on the command line. Kickoff is therefore
     the one entrance that spends no Tick on them and cannot lose one — the flags
     are read as the process starts, where a session in mid-conversation drops
-    what arrives while it is handling a slash command (ADR 0038).
+    what arrives while it is handling a slash command.
 
     None when the delivering State has neither key — a Gate State first among
     them, which delivers nothing and so carries nothing.
@@ -44,7 +44,7 @@ class SessionSpec:
     autocompact is the Workflow's, not a State's: where the Session summarises
     its own context is set once as it opens and rides whatever State comes
     first, Gate State included, because it precedes no Prompt. None means no
-    flag (ADR 0047).
+    flag.
     """
 
     name: str

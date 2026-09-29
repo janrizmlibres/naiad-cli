@@ -12,9 +12,9 @@ from collections.abc import Sequence
 # The placeholders something asks a Prompt about rather than merely
 # substituting, which is what earns a placeholder a name here: the askers must
 # be asking about the same string as the substitution below. Three guards
-# refuse work whose Prompt names a Subject with none given (ADR 0009), and the
+# refuse work whose Prompt names a Subject with none given, and the
 # announce command refuses a branchless Run once a Prompt carrying the branch
-# placeholder has gone out (ADR 0022).
+# placeholder has gone out.
 SUBJECT_PLACEHOLDER = "{subject}"
 BRANCH_PLACEHOLDER = "{branch}"
 
@@ -58,7 +58,7 @@ def render_prompt(
 
     subject is whatever the agent said its Announcement was about, substituted
     without being read: that it names a ticket is known to the Workflow and to
-    the agent, and to nothing here (ADR 0009).
+    the agent, and to nothing here.
 
     A missing Subject renders as nothing rather than raising. The Prompt that
     needed one is unrenderable either way, and the useful place to say so is
@@ -83,12 +83,12 @@ def render_prompt(
 
     Both are opaque. The Predecessor especially is substituted without being
     read — Naiad neither asks git whether that branch exists nor decides
-    whether the Run should stand on it, which is the Prompt's judgment to make
-    (ADR 0015). An absent Predecessor is ordinary, being what the first Entry
-    for a repository has, and renders as nothing. So does an absent Working
-    branch, and rendering empty is the Prompt's cue to derive and declare one
-    (ADR 0022); a declaration then forgotten is refused at the next
-    Announcement, where the agent can still correct it, rather than here.
+    whether the Run should stand on it, which is the Prompt's judgment to make.
+    An absent Predecessor is ordinary, being what the first Entry for a
+    repository has, and renders as nothing. So does an absent Working branch,
+    and rendering empty is the Prompt's cue to derive and declare one; a
+    declaration then forgotten is refused at the next Announcement, where the
+    agent can still correct it, rather than here.
     """
     return (
         prompt.replace("{task}", task)

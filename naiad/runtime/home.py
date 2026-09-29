@@ -45,11 +45,11 @@ def default_queue_root() -> Path:
 
 def default_library_root() -> Path:
     """Where the Workflow library lives, kept here so that moving the home still
-    moves everything (ADR 0023).
+    moves everything.
 
     The one thing under the home a human writes as well as Naiad: `naiad
     install --starter` copies the starter here, and refuses to replace a file
-    that differs from it (ADR 0049).
+    that differs from it.
     """
     return naiad_home() / "workflows"
 

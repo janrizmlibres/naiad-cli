@@ -13,7 +13,7 @@ agent is standing in, because that is where it will carry on once answered.
 A Subject is what the Announcement is about — the item a repeating State is
 repeating over. It belongs here rather than to the Prompt because the Prompt is
 only one of its readers: a Gate State substitutes nothing and its Subject is
-read by the human out of the Run log (ADR 0009).
+read by the human out of the Run log.
 """
 
 from __future__ import annotations

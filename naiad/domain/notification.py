@@ -7,7 +7,7 @@ and each adapter maps that onto whatever its service understands.
 
 Three members and no more: two reasons to interrupt a human, and one to inform
 them. The Run needs them, or the Run is over; or a State the Workflow marked
-has been entered and nobody is needed (ADR 0055).
+has been entered and nobody is needed.
 """
 
 from __future__ import annotations

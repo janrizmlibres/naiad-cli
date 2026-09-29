@@ -3,7 +3,7 @@
 The operator names a phase in their own words — "spec this out" — and the
 State is called `spec` while the Prompt that runs it opens with `/to-spec`.
 Nothing joined those two until this listing did, and an agent guessing at
-States it has not read is what it exists to prevent (ADR 0032).
+States it has not read is what it exists to prevent.
 
 Pure: a Workflow in, a block of text out. Which Workflows to render, and where
 the text goes, belong to the command (naiad.cli.main).
@@ -88,7 +88,7 @@ def _heading(workflow: Workflow) -> str:
     has to relay: the point at which the Workflow wants the Session to
     summarise itself. An Adoption types nothing into the human's Session, so
     the human is told what it wants instead, and this is where the adopt skill
-    reads it (ADR 0047)."""
+    reads it."""
     if workflow.autocompact is None:
         return workflow.name
     return f"{workflow.name}{GAP}(autocompact {workflow.autocompact})"

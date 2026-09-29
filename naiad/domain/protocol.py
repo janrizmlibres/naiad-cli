@@ -92,11 +92,11 @@ _NO_NEXT_STATE = (
 # the bound is decided in naiad.domain.decide and an agent that is genuinely
 # stuck will not recover from being asked again. The first teaches the wait
 # verb — it arrives precisely when an undeclared wait is being misread as
-# silence, which is the moment the lesson lands (ADR 0021) — and the second
+# silence, which is the moment the lesson lands — and the second
 # does not, because a wait declared only to buy off a final warning is the
 # evasion the bound exists to stop. The hold verb is taught beside it, for
 # the same reason at the same moment: a human's pause answered with silence
-# is misread exactly like an undeclared wait (ADR 0025).
+# is misread exactly like an undeclared wait.
 _NUDGES = (
     "You have stopped without announcing a State, so the run is waiting on you"
     " and nothing further will happen. If the phase you were given is finished,"
@@ -136,7 +136,7 @@ def render_nudge(
     run leaves it just as stuck as the silence did.
 
     expired_wait is what the agent's lapsed Wait said it was for, when the
-    silence followed one (ADR 0021); the wording then points at that thing
+    silence followed one; the wording then points at that thing
     rather than at a Protocol the agent did not forget.
 
     There is one wording per attempt Naiad is willing to make and no clamping,
@@ -168,7 +168,7 @@ def render_answer(answer: str) -> str:
     on would say nothing it does not already know, being mid-State when the
     reply arrives.
 
-    The closing line is the serial-ask protocol's memory-free half (ADR 0044):
+    The closing line is the serial-ask protocol's memory-free half:
     questions are asked one at a time, so an agent whose later questions were
     refused re-asks on each answer's arrival, triggered rather than remembered.
     Sent whether or not any were held back, because Naiad cannot know — it is
@@ -216,7 +216,7 @@ def render_protocol(*, next_states: Sequence[str], naiad: str = DEFAULT_NAIAD) -
 
     Plural because of the fork: naming a single candidate at a Branching State
     would bias the agent toward whichever the Workflow author happened to list
-    first, in precisely the case where its judgment is the point (ADR 0001).
+    first, in precisely the case where its judgment is the point.
     This matters most after a Clear, when the Protocol is all the agent has.
 
     naiad is the command the agent must type. The caller passes the absolute
@@ -234,7 +234,7 @@ def render_protocol(*, next_states: Sequence[str], naiad: str = DEFAULT_NAIAD) -
 
 
 # What only an Adoption has to say, after the Protocol the agent has just been
-# taught (ADR 0028). Three things it cannot work out for itself: that nothing
+# taught. Three things it cannot work out for itself: that nothing
 # arrives until its turn ends, that the Prompt waits on the Lane, and — where
 # the Entry queued branchless — that settling the branch is its job here,
 # because both of the Workflow's branch heads were skipped by starting
@@ -244,7 +244,8 @@ This run is queued and is not driving you yet. Its work belongs on the branch
 `{working_branch}`, which the human already made: check it out if you are not
 standing on it, then end your turn."""
 
-# The branchless wording. The ADR 0022 discipline in as many words, because the
+# The branchless wording. The rule that a Working branch is given or derived, never invented by
+# Naiad, in as many words, because the
 # State that would ordinarily have prepared the branch is behind this start.
 _ADOPTION_CLOSING_BRANCHLESS = """\
 This run is queued and is not driving you yet. It has no working branch: derive
@@ -267,7 +268,7 @@ A supervisor is running and will take this entry in its turn."""
 
 
 # What only a Compaction has to say, after the Protocol the fresh context has
-# just been taught (ADR 0047). A summary can lose the phase the agent was in and
+# just been taught. A summary can lose the phase the agent was in and
 # the Question it had open, and the Protocol alone — "when this phase is done
 # announce X" — invites a fresh start on a half-done ticket, which is the Clear
 # failure in different clothes. Three things Naiad knows and the summary may
@@ -284,7 +285,7 @@ Do not ask it again; end your turn and the answer comes back into this session."
 def render_compaction(*, state: str, subject: str | None, question: str | None) -> str:
     """What the SessionStart hook adds after the Protocol when its source is a
     compaction, and after no other source: a startup has nothing to have lost,
-    and a Clear discards on purpose (ADR 0047).
+    and a Clear discards on purpose.
 
     The Question is the one still unanswered, if there is one. Repeated with
     the instruction not to ask it again, because a second Question while one
@@ -311,7 +312,7 @@ def render_adoption(
     The Protocol arrives here rather than by being typed into the pane, because
     typing would be a second delivery with ordering rules of its own — and the
     agent has to learn the verbs before the Prompt it will answer with them
-    arrives (ADR 0028).
+    arrives.
 
     The branch instruction is written for the case it is in rather than
     covering both: an agent whose Entry already claims a branch and is told to

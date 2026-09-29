@@ -49,7 +49,7 @@ class Answer:
 
 class AnswerLog:
     """A Run's Answer log. Constructed with the Run's directory rather than
-    reading a module-level path, so a second Run is a second log (ADR 0004)."""
+    reading a module-level path, so a second Run is a second log."""
 
     def __init__(self, run_root: Path) -> None:
         self.path = Path(run_root) / ANSWERS_FILENAME

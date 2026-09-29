@@ -1,4 +1,4 @@
-"""The UserPromptSubmit hook's work over a Run's records (ADR 0053).
+"""The UserPromptSubmit hook's work over a Run's records.
 
 Gathers what the loop typed last and whether the hook has already judged it,
 asks naiad.domain.submission for the verdict, and keeps the verdict for the loop

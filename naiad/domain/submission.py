@@ -1,8 +1,7 @@
-"""Whether a prompt the Session is about to take is the Prompt Naiad typed
-(ADR 0053).
+"""Whether a prompt the Session is about to take is the Prompt Naiad typed.
 
 The UserPromptSubmit hook asks this of every prompt submitted in a Run's
-Session, and it is a rule, so it lives here rather than in the hook (ADR 0004):
+Session, and it is a rule, so it lives here rather than in the hook:
 the hook gathers what Naiad typed and when, and carries out the verdict.
 """
 

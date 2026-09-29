@@ -40,7 +40,7 @@ def add_state(
 ) -> None:
     """Insert a State. Before the first terminal State unless placed with
     `after` or `before`, and at the end when it is itself terminal. A key not
-    given is not written, because a State's silence is no opinion (ADR 0040)."""
+    given is not written, because a State's silence is no opinion."""
     states = _states(document)
     _check_placeable(_title(document), _names(states), name, (after, before))
 
@@ -94,7 +94,7 @@ def set_prompt(document: tomlkit.TOMLDocument, state: str, text: str) -> None:
 
 def set_next(document: tomlkit.TOMLDocument, state: str, successors: Sequence[str]) -> None:
     """Replace a State's successors. None deletes the key: a State without
-    `next` hands over to the one declared after it (ADR 0007)."""
+    `next` hands over to the one declared after it."""
     table = _find(document, state)[1]
     if successors:
         _put(table, "next", list(successors))

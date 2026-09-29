@@ -6,11 +6,11 @@ process that already exists, so adopting a running session later must remain
 possible. Every caller — hooks, agent-facing commands, the wiring layer — asks
 here, and here alone, which Run it belongs to.
 
-And when it belongs to none. A Run that has ended releases its Session
-(ADR 0035). Stopping the answer here is the whole of the release: every caller
-that comes through this seam already has a no-Run-attached path. So the hooks
-print and record nothing, the Protocol verbs refuse with 'no run is attached to
-this session', and the Session is free for the Run that adopts it next.
+And when it belongs to none. A Run that has ended releases its Session. Stopping
+the answer here is the whole of the release: every caller that comes through
+this seam already has a no-Run-attached path. So the hooks print and record
+nothing, the Protocol verbs refuse with 'no run is attached to this session',
+and the Session is free for the Run that adopts it next.
 """
 
 from __future__ import annotations
@@ -86,13 +86,13 @@ def turn_recipient(
     claude_session_id: str | None = None,
 ) -> Run | Entry | None:
     """Who a Turn end belongs to: the live Run, or the Entry that will become
-    one (ADR 0042).
+    one.
 
     The second question the seam answers, and answered here so the order is
     fixed in one place: a live Run by the session's keys first, and only then
     a queued Entry awaiting attachment to the same Session. The Entry stands in
     for its Run only through the gap — once a Run is recorded on it the Run is
-    resolvable by pane, and an ended one has released the Session (ADR 0035) —
+    resolvable by pane, and an ended one has released the Session —
     and only the first such Entry in Queue order, because that is the next Run
     for the pane. With neither, the Turn end belongs to nobody and is not
     recorded, which is what keeps the hooks installable machine-wide.
@@ -114,7 +114,7 @@ def _ended(run: Run) -> bool:
     """Whether this Run is over, and so no longer answers for its Session.
 
     Read from the agent's own last Announcement, because the agent owns
-    workflow progress (ADR 0001): the Session is released the moment the agent
+    workflow progress: the Session is released the moment the agent
     says the work is over, not the moment Naiad notices. Naiad's own record
     lags by a tick, and never arrives at all when nothing was watching.
 
@@ -139,7 +139,7 @@ def _ended(run: Run) -> bool:
 
     Not the reading naiad.runtime.queue._run_status takes, which is the log
     line alone. The two still part over a Run that announced its Terminal
-    State and was never ticked. Taken knowingly (ADR 0035): a Session belongs
+    State and was never ticked. Taken knowingly: a Session belongs
     to the agent working in it, and the Queue records what Naiad did.
     """
     if RunLog(run.root).ended():

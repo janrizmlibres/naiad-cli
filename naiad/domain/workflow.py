@@ -17,7 +17,7 @@ DEFAULT_SOURCE = "<workflow>"
 
 # Whose a State's Questions are. The file decides the default: the Answerer's
 # where it declares an `[answerer]` table, the human's where it does not, and a
-# State's own key overrides either (ADR 0050).
+# State's own key overrides either.
 QuestionsTo = Literal["answerer", "human"]
 QUESTIONS_TO: tuple[QuestionsTo, ...] = ("answerer", "human")
 
@@ -58,23 +58,22 @@ class State:
     next_candidates: tuple[str, ...] = ()
     # The Model and Effort this State asks for, file-level default already
     # applied. None where neither the State nor the file names the key, which
-    # is what lets delivery leave the session's settings alone (ADR 0026) and
+    # is what lets delivery leave the session's settings alone and
     # what makes a State's silence an absent opinion rather than a value to
-    # find (ADR 0040).
+    # find.
     model: str | None = None
     effort: str | None = None
     # Who answers a Question asked from this State, the file's default already
     # applied. "human" means the Answerer is never consulted and the Run parks
-    # as it does on an Escalation, with the human answering in the Session
-    # (ADR 0046).
+    # as it does on an Escalation, with the human answering in the Session.
     questions: QuestionsTo = "answerer"
     # Whether the State wrote the `questions` key itself. It picks the reason a human
     # Question is parked with: a State that asked for the human reserves its
     # Questions, while one the file's default gave them to names the missing
-    # Answerer (ADR 0050).
+    # Answerer.
     questions_explicit: bool = False
     # Whether an Announcement of this State is Reported: the operator is told
-    # the Run entered it and nothing is handed over (ADR 0055). Never set on a
+    # the Run entered it and nothing is handed over. Never set on a
     # Gate State or a Terminal State, which already tell on entry.
     report: bool = False
 
@@ -91,17 +90,17 @@ class Workflow:
     # The Answerer's model and effort, passed as flags on its headless
     # invocation. Absence means no opinion here as it does on a State, but
     # resolves elsewhere: a headless session starts clean every time, so it
-    # inherits nothing and the platform's own default answers (ADR 0040).
+    # inherits nothing and the platform's own default answers.
     answerer_model: str | None = None
     answerer_effort: str | None = None
     # Models the platform may degrade to when the Answerer's is unavailable,
     # forwarded as --fallback-model and never parsed: a comma-separated list is
-    # the flag's own syntax, not Naiad's (ADR 0031).
+    # the flag's own syntax, not Naiad's.
     answerer_fallback: str | None = None
     # Where the Session summarises its own context, handed to the launch as
     # `--autocompact` and never read: the value is the platform's syntax, not
     # Naiad's. File-level and never per State because it is a property of the
-    # Session, set once as it opens. None means no flag (ADR 0047).
+    # Session, set once as it opens. None means no flag.
     autocompact: str | None = None
     # The file-level Model and Effort, kept beside the States that already have
     # them applied so that a reader of the file (`naiad workflow show`) can say
@@ -259,7 +258,7 @@ def _parse_state(
     # A State's own key needs no file-level default beneath it. Absence is no
     # opinion: the State gets None, delivery types no Switch, and it runs on
     # what the session holds — the previous State's setting, since a session's
-    # settings are sticky (ADR 0040). Effort behaves identically.
+    # settings are sticky. Effort behaves identically.
     own_model = _optional_string(raw, "model", bad)
     own_effort = _optional_string(raw, "effort", bad)
 

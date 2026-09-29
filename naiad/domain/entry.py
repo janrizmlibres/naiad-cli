@@ -1,7 +1,7 @@
 """An Entry: a Run that does not exist yet.
 
 Plain data, in the domain layer beside the Announcement, because the Queue's
-rules are decided over Entries and those rules are pure (ADR 0004). The Queue
+rules are decided over Entries and those rules are pure. The Queue
 that keeps them on disk lives in naiad.runtime.queue, which is the same split
 an Announcement and the Announcements that hold it already make.
 """
@@ -15,7 +15,7 @@ from pathlib import Path
 @dataclass(frozen=True)
 class Attachment:
     """The live Session an Adoption's Run joins instead of one being opened for
-    it (ADR 0028).
+    it.
 
     The pane is the whole of what delivery needs and is why an Adoption is tmux
     only: a session Naiad cannot type into is one it cannot drive. The Claude
@@ -34,7 +34,7 @@ class Entry:
     """One piece of work waiting to be run.
 
     Carries everything kickoff would otherwise be told, and one field recording
-    what became of it. No status (ADR 0013) and no position: the id is a
+    what became of it. No status and no position: the id is a
     sortable timestamp, so sorting by id *is* Queue order.
 
     Frozen, because everything it carries was decided when it was made. The one
@@ -48,9 +48,9 @@ class Entry:
     task: str
     target_repo: Path
     # Given verbatim or absent, never invented: Naiad derives no branch name
-    # from a repository's conventions (ADR 0015). Absent means the agent at the
+    # from a repository's conventions. Absent means the agent at the
     # head of the Run derives one there and declares it on the Run, so the
-    # Entry's own record stays as the work was described (ADR 0022).
+    # Entry's own record stays as the work was described.
     working_branch: str | None
     created_at: str
     # Optional and opaque: recorded and passed on without being read.
@@ -61,7 +61,7 @@ class Entry:
     # Which Session this Entry's Run attaches to, absent for the ordinary Entry
     # whose Run is spawned one of its own. Nothing else about the Entry changes
     # for being marked: it takes its place in the Lane, is claim-checked, listed
-    # and removed exactly as any other (ADR 0028).
+    # and removed exactly as any other.
     attachment: Attachment | None = None
     # What became of it: absent until the Entry starts, and the only field that
     # says anything about the Run. Everything else is asked of the Run itself.

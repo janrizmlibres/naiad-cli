@@ -13,7 +13,7 @@ so answering them would be invention dressed as inference. Those it escalates,
 and an Escalation is mechanically the notify-and-wait of a Gate State.
 
 Everything here is text in and data out: the adapter runs the session and holds
-no rules of its own (ADR 0004).
+no rules of its own.
 """
 
 from __future__ import annotations
@@ -39,7 +39,7 @@ CAVEAT_PREFIX = "The Answerer also flagged, for a human: "
 # because a consultation that never returns stalls the whole Run in silence,
 # and an operator woken by an Escalation can act where one woken by nothing
 # cannot. It lives here beside the other bounds Naiad decides by, rather than
-# in the adapter that happens to enforce it (ADR 0004).
+# in the adapter that happens to enforce it.
 CONSULTATION_TIMEOUT_SECONDS = 300.0
 
 
@@ -74,7 +74,7 @@ class ConsultationSpec:
 
     resume says whether the session already exists. The id is pinned by Naiad
     rather than discovered afterwards, for the same reason the Run's own session
-    id is — discovering it would mean reading Claude Code's internals (ADR 0002).
+    id is — discovering it would mean reading Claude Code's internals.
     """
 
     cwd: Path
@@ -83,13 +83,13 @@ class ConsultationSpec:
     resume: bool
     # The Workflow's [answerer] model and effort, passed as flags on the invocation.
     # None means no flags: a headless session starts clean, so absence has no
-    # stickiness to be ambiguous about (ADR 0026).
+    # stickiness to be ambiguous about.
     model: str | None = None
     effort: str | None = None
     # The [answerer] fallback, forwarded as --fallback-model. Headless, an
     # unavailable model exits 0 with error text — a wrong answer, not a loud
     # failure — and the platform's flag does the detection and the degrading
-    # so Naiad builds neither (ADR 0031).
+    # so Naiad builds neither.
     fallback: str | None = None
 
 

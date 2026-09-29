@@ -1,7 +1,7 @@
 """What the agent could not decide alone, as data.
 
 A Question carries its own text and every option the agent was weighing.
-Naiad reads no Claude Code internals (ADR 0002), so a Question it cannot see
+Naiad reads no Claude Code internals, so a Question it cannot see
 does not exist — there is no conversation to lift one out of.
 
 The options are carried for two reasons beyond that. Whoever answers should be

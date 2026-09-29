@@ -2,11 +2,10 @@
 
 Everything Naiad tracks about a Run is reached through the Run object — its
 paths, its session, its task. Nothing here is module-global, so a second
-concurrent Run is a second object rather than a rewrite (ADR 0004).
+concurrent Run is a second object rather than a rewrite.
 
 A Run's directory lives outside the target repository, so nothing Naiad owns
-can be committed into a pull request, and the record outlives the working copy
-(PRD, 'Storage').
+can be committed into a pull request, and the record outlives the working copy.
 """
 
 from __future__ import annotations
@@ -34,11 +33,11 @@ class Run:
     # The git branch this Run's work belongs on, and what that work stands on.
     # Facts of the Run like the task, so that every Prompt it delivers can name
     # them and a Cleared State still knows its branch. Opaque strings: Naiad
-    # runs no git and reads neither of them (ADR 0015).
+    # runs no git and reads neither of them.
     #
-    # A Working branch is given or derived, never invented by Naiad (ADR
-    # 0022): a Run created from a branchless Entry starts with none, and the
-    # agent at its head derives a name and declares it with `naiad branch`.
+    # A Working branch is given or derived, never invented by Naiad: a Run
+    # created from a branchless Entry starts with none, and the agent at its
+    # head derives a name and declares it with `naiad branch`.
     working_branch: str | None = None
     predecessor: str | None = None
     # How this Run resolves its next State. Options of the Run rather than of
@@ -51,12 +50,12 @@ class Run:
     # before kickoff recorded it.
     start_state: str | None = None
     # What the Run's first Prompt is to say it is about, when the State it
-    # begins at names a Subject (ADR 0009). Kept on the Run rather than passed
+    # begins at names a Subject. Kept on the Run rather than passed
     # to the delivery, because an adopted Run's first Prompt goes out in a later
     # tick — in a process that may not be the one that started it.
     start_subject: str | None = None
     # Whether this Run joined a Session that already existed instead of opening
-    # one (ADR 0028). It changes one thing: an adopted Run is owed the Prompt of
+    # one. It changes one thing: an adopted Run is owed the Prompt of
     # the State it began at, delivered once a Turn has ended, where a spawned
     # Run was handed it as its session launched.
     adopted: bool = False
@@ -67,7 +66,7 @@ class Run:
     # so that its later answers cannot contradict its earlier ones. Recorded
     # here rather than held in the loop because it must survive a watch that is
     # interrupted and restarted, and because nothing about a Run may be
-    # module-global (ADR 0004).
+    # module-global.
     answerer_session_id: str | None = None
 
     @property
@@ -186,7 +185,7 @@ class RunStore:
 
         Destructive where every other method here is not, and asked for by one
         caller alone: a Prune, which takes a done Entry and the Run it became
-        together (ADR 0029). Nothing is checked before the directory goes,
+        together. Nothing is checked before the directory goes,
         because whether a Run is done is read from its files by the Queue, and
         a second reading here could disagree with the first.
         """

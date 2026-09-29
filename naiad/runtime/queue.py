@@ -5,12 +5,12 @@ naiad.domain.entry's to say; this is where they are kept.
 
 No status is stored, because whether an Entry is waiting, running, parked or
 done is already recorded inside its Run by the party that observed it, and a
-second copy the Queue keeps can disagree with the first (ADR 0013). `status_of`
+second copy the Queue keeps can disagree with the first. `status_of`
 therefore asks the Run rather than reading a field.
 
 No position is stored either, because the id is a sortable timestamp: sorting
 by id *is* the Queue order, so removing an Entry renumbers nothing and stepping
-over one later remains possible (ADR 0012).
+over one later remains possible.
 
 One file per Entry, beside the Runs under the same Naiad-owned home, so that
 adding one is a write nothing else has to be locked for.
@@ -33,7 +33,7 @@ from naiad.runtime.run import Run, RunStore
 
 ENTRY_SUFFIX = ".json"
 
-# What became of an Entry, derived from its Run and never stored (ADR 0013).
+# What became of an Entry, derived from its Run and never stored.
 # The four the glossary names and no fifth: a word the Queue invented would be
 # a claim about a Run that the Run had not made — which is why the type is
 # closed rather than a bare string.
@@ -83,7 +83,7 @@ class Queue:
 
         Written before the Run is watched, because that is what a restarted
         Supervisor reads to find the same Entry again rather than starting a
-        second Run for it (ADR 0013).
+        second Run for it.
         """
         attached = replace(entry, run_id=run_id)
         self._write(attached)
@@ -108,12 +108,12 @@ class Queue:
 
         The primitive rather than the whole act: what becomes of the Run the
         Entry produced is decided by the caller, because a Prune deletes that
-        Run (ADR 0029) and a removal by name cancels it (ADR 0036). False when
+        Run and a removal by name cancels it. False when
         there was no such Entry, so that the caller can say so rather than
         guess.
 
         A Turn end recorded beside the Entry through an Adoption's gap goes
-        with it (ADR 0042): the sidecar is the Entry's, and left behind it
+        with it: the sidecar is the Entry's, and left behind it
         would wait for a Run that will never come.
         """
         try:
@@ -180,7 +180,7 @@ class Queue:
 def status_of(entry: Entry, runs: RunStore) -> Status:
     """What became of an Entry, asked of its Run.
 
-    Read rather than stored (ADR 0013), and in the order the four answers
+    Read rather than stored, and in the order the four answers
     exclude one another: no Run at all is waiting; a Run whose log records an
     ending is done however loudly it asked for a human on the way; a Run
     notified about the Announcement it is still standing in is parked, since a
@@ -205,10 +205,10 @@ def status_of(entry: Entry, runs: RunStore) -> Status:
 def _run_status(root: Path) -> Status:
     """What a Run's directory records, never waiting: a directory exists, so the
     Run does too. One reading shared by an Entry's status and a Prune's judgment
-    of an orphan (ADR 0030), so the two cannot come apart."""
+    of an orphan, so the two cannot come apart."""
     if RunLog(root).ended():
         return DONE
-    # Read with the same Wait key the loop wrote it under (ADR 0021), or a Run
+    # Read with the same Wait key the loop wrote it under, or a Run
     # parked after its Waits ran out would show as running.
     latest = Announcements(root).latest()
     notified, _nudges = Notices(root).of(latest, wait_count=Waits(root).count(latest))
@@ -227,7 +227,7 @@ class Cancelled:
 
     The Run comes back rather than only its id, because the one thing the
     operator needs afterwards is which Session is now theirs, and the pane is
-    on the Run (ADR 0036).
+    on the Run.
     """
 
     entry: Entry
@@ -235,7 +235,7 @@ class Cancelled:
 
 
 def cancel(queue: Queue, runs: RunStore, entry_id: str) -> Cancelled | None:
-    """Remove an Entry by name, and end the Run it became (ADR 0036).
+    """Remove an Entry by name, and end the Run it became.
 
     Ending the Run is what releases its Session: `naiad.runtime.resolve` stops
     answering for it, so the Protocol is injected into no fresh context there
@@ -244,7 +244,7 @@ def cancel(queue: Queue, runs: RunStore, entry_id: str) -> Cancelled | None:
     Supervisor has already dropped.
 
     The ending is written before the Entry is removed, which inverts the order
-    a Prune takes (ADR 0029). The two are chosen against opposite failures: a
+    a Prune takes. The two are chosen against opposite failures: a
     Prune's Run must not outlive its Entry as a lie in the listing, while here
     an Entry must not outlive its release. So a cancellation that cannot be
     written refuses the whole act and leaves the Entry in the Queue, where the
@@ -313,7 +313,7 @@ class Pruned:
 
     removed: list[Entry]
     failures: list[str]
-    # The Orphaned Runs (ADR 0030): the ids of those taken, and the paths of
+    # The Orphaned Runs: the ids of those taken, and the paths of
     # those left because they read as running — which only the operator, who can
     # see the session, is placed to judge.
     orphans: list[str]
@@ -325,19 +325,19 @@ def prune(queue: Queue, runs: RunStore) -> Pruned:
 
     Done is asked of `status_of` rather than decided again here, so what the
     listing calls done and what a Prune removes cannot come apart. The other
-    three are left where they are (ADR 0029).
+    three are left where they are.
 
     The Queue is read whole before anything is deleted, so an Entry nobody can
     read stops the Prune with the file named rather than partway through work
     that cannot be taken back.
 
-    Per Entry the file goes first and the Run second, which is the order ADR
-    0029 turns on: a Run gone while its Entry stayed would read as running for
+    Per Entry the file goes first and the Run second, which is the order that
+    matters: a Run gone while its Entry stayed would read as running for
     ever, and a done Entry showing as running is a listing that lies. A refusal
     is recorded and the next Entry is taken anyway, so one stuck directory
     cannot spare the whole backlog.
 
-    After the Entries, the Orphaned Runs (ADR 0030): every Run directory no
+    After the Entries, the Orphaned Runs: every Run directory no
     Entry names is judged by the same reading and taken when it is done or
     parked, left and named when it reads as running.
     """
@@ -381,7 +381,7 @@ def _take_orphans(
     """Take every Orphaned Run that reads done or parked, and name the rest.
 
     A Run no Entry names can never be ticked, answered or advanced, so done and
-    parked alike are finished history without a line (ADR 0030). Running is the
+    parked alike are finished history without a line. Running is the
     one reading that cannot tell a live Session from a dead one, and Naiad never
     looks at tmux to find out — so a running orphan is left and named by path,
     every Prune, until the operator who can look removes it.
@@ -419,12 +419,12 @@ def branch_of(entry: Entry, runs: RunStore) -> str | None:
     """The Working branch an Entry claims, resolved through its Run when the
     Entry's own record carries none.
 
-    Read rather than copied back onto the Entry, for the reason status is
-    (ADR 0013): a second copy could disagree with the first. An Entry queued
-    without a branch starts a Run with none, and the agent at its head declares
-    the name it derived on the Run — so the Run is where the fact lives, and
-    until it is declared (or for a Run whose directory has gone) there is no
-    name and nothing is claimed.
+    Read rather than copied back onto the Entry, for the reason status is: a
+    second copy could disagree with the first. An Entry queued without a branch
+    starts a Run with none, and the agent at its head declares the name it
+    derived on the Run — so the Run is where the fact lives, and until it is
+    declared (or for a Run whose directory has gone) there is no name and
+    nothing is claimed.
     """
     if entry.working_branch is not None:
         return entry.working_branch
