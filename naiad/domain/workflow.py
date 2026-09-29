@@ -21,6 +21,15 @@ QuestionsTo = Literal["answerer", "human"]
 QUESTIONS_TO: tuple[QuestionsTo, ...] = ("answerer", "human")
 
 
+# The keys each place in a Workflow file accepts. Anything else is refused at
+# load, so a misspelt key cannot load as if it were absent and a file written
+# for a newer Naiad fails loudly on an older one instead of losing its new keys
+# without a word. This is the whole of the format's versioning.
+FILE_KEYS = ("name", "model", "effort", "autocompact", "answerer", "states")
+STATE_KEYS = ("name", "prompt", "clear", "terminal", "next", "model", "effort", "questions")
+ANSWERER_KEYS = ("model", "effort", "fallback")
+
+
 class WorkflowError(Exception):
     """A Workflow file that cannot be run, rejected before a Run exists."""
 
@@ -98,6 +107,8 @@ def parse_workflow(text: str, *, source: str = DEFAULT_SOURCE) -> Workflow:
     except tomllib.TOMLDecodeError as error:
         raise reject(f"not valid TOML ({error})") from error
 
+    _refuse_unknown_keys(document, FILE_KEYS, "the file", reject)
+
     name = document.get("name")
     if not isinstance(name, str) or not name:
         raise reject("has no name")
@@ -146,6 +157,14 @@ def parse_workflow(text: str, *, source: str = DEFAULT_SOURCE) -> Workflow:
     )
 
 
+def _refuse_unknown_keys(
+    table: dict[str, Any], allowed: tuple[str, ...], place: str, reject: Reject
+) -> None:
+    for key in table:
+        if key not in allowed:
+            raise reject(f"unknown key '{key}' in {place}; allowed: {', '.join(allowed)}")
+
+
 def _optional_string(
     table: dict[str, Any], key: str, reject: Reject, *, owner: str = ""
 ) -> str | None:
@@ -163,6 +182,7 @@ def _parse_answerer(
         return None, None, None
     if not isinstance(raw, dict):
         raise reject("answerer must be a table")
+    _refuse_unknown_keys(raw, ANSWERER_KEYS, "[answerer]", reject)
     return (
         _optional_string(raw, "model", reject, owner="answerer "),
         _optional_string(raw, "effort", reject, owner="answerer "),
@@ -179,6 +199,10 @@ def _parse_state(
     default_effort: str | None,
 ) -> State:
     name = raw.get("name")
+    # Checked before the name is demanded, so a State whose `name` is misspelt
+    # is told which key is unknown rather than that it has no name.
+    place = f"state '{name}'" if isinstance(name, str) and name else f"state {position}"
+    _refuse_unknown_keys(raw, STATE_KEYS, place, reject)
     if not isinstance(name, str) or not name:
         raise reject(f"state {position} has no name")
 

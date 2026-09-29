@@ -1,6 +1,6 @@
 import pytest
 
-from naiad.domain.workflow import WorkflowError, parse_workflow
+from naiad.domain.workflow import WorkflowError, load_workflow, parse_workflow
 
 WELL_FORMED = """
 name = "feature"
@@ -385,3 +385,50 @@ def test_a_compaction_point_that_is_not_a_string_is_rejected():
             terminal = true
             """
         )
+
+
+@pytest.mark.parametrize(
+    ("source", "expected"),
+    [
+        pytest.param(
+            'name = "w"\nquestons = "human"\n[[states]]\nname = "b"\nterminal = true',
+            "unknown key 'questons' in the file; allowed: "
+            "name, model, effort, autocompact, answerer, states",
+            id="top level",
+        ),
+        pytest.param(
+            'name = "w"\n[[states]]\nname = "a"\nquestons = "human"\n[[states]]\nname = "b"\nterminal = true',
+            "unknown key 'questons' in state 'a'; allowed: "
+            "name, prompt, clear, terminal, next, model, effort, questions",
+            id="state",
+        ),
+        pytest.param(
+            'name = "w"\n[[states]]\nnmae = "a"\n[[states]]\nname = "b"\nterminal = true',
+            "unknown key 'nmae' in state 1; allowed: "
+            "name, prompt, clear, terminal, next, model, effort, questions",
+            id="misspelt name",
+        ),
+        pytest.param(
+            'name = "w"\n[answerer]\nmodle = "s"\n[[states]]\nname = "b"\nterminal = true',
+            "unknown key 'modle' in [answerer]; allowed: model, effort, fallback",
+            id="answerer",
+        ),
+    ],
+)
+def test_an_unknown_key_is_refused_naming_the_key_its_place_and_the_allowed_keys(
+    source, expected
+):
+    with pytest.raises(WorkflowError) as caught:
+        parse_workflow(source, source="w.toml")
+
+    assert f"workflow w.toml: {expected}" in str(caught.value)
+
+
+def test_a_workflow_file_with_an_unknown_key_fails_to_load(tmp_path):
+    path = tmp_path / "w.toml"
+    path.write_text(
+        'name = "w"\n[[states]]\nname = "a"\nquestons = "human"\n[[states]]\nname = "b"\nterminal = true'
+    )
+
+    with pytest.raises(WorkflowError, match=f"workflow {path}: unknown key 'questons'"):
+        load_workflow(path)

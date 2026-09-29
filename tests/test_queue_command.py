@@ -166,6 +166,20 @@ def test_adding_an_entry_starting_at_an_undeclared_state_is_refused(home, repo, 
     assert queue_of(home).all() == []
 
 
+def test_adding_a_workflow_with_an_unknown_key_is_refused_in_a_sentence(home, repo, capsys):
+    (repo / "workflow.toml").write_text(
+        WORKFLOW.replace('name = "grill"', 'name = "grill"\nquestons = "human"')
+    )
+
+    assert add(repo, "--branch", "MC-AGENT-8546") == 2
+
+    err = capsys.readouterr().err
+    assert "unknown key 'questons' in state 'grill'" in err
+    assert "allowed: name, prompt, clear, terminal, next, model, effort, questions" in err
+    assert "Traceback" not in err
+    assert queue_of(home).all() == []
+
+
 def test_adding_by_bare_name_queues_the_library_file_of_that_stem(home, repo, capsys):
     """A bare name is entrance-side shorthand: the Entry stores the resolved
     library path exactly as it stores one typed explicitly (ADR 0023)."""
