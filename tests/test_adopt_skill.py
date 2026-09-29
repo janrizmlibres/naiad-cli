@@ -58,7 +58,7 @@ def test_every_intent_it_triggers_on_names_naiad(skill):
     """"spec this out" is also the most ordinary way to ask any agent for a
     spec. An intent naming a phase and nothing else would queue a takeover of
     the session on an everyday request, so Naiad named is what separates the
-    two (ADR 0032)."""
+    two."""
     intents = quoted_intents(skill)
 
     assert intents
@@ -121,14 +121,14 @@ def test_it_says_the_workflow_and_the_start_state_are_named(skill):
 
 def test_it_says_the_task_is_distilled_from_the_conversation(skill):
     """The agent is the one party holding that conversation, and `--task` is
-    required (ADR 0028)."""
+    required."""
     assert "--task" in skill
     assert "conversation" in skill.lower()
 
 
 def test_it_carries_both_halves_of_settling_the_working_branch(skill):
     """A branch the human made is passed and never second-guessed; absent one,
-    the agent derives, creates and declares it (ADR 0022) — and an agent told
+    the agent derives, creates and declares it — and an agent told
     only 'settle the branch' has to guess which case it stands in."""
     assert "--branch" in skill
     assert f"{COMMAND} branch" in skill

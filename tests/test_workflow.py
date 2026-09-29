@@ -115,7 +115,7 @@ def test_a_workflow_mentioning_neither_key_gives_every_state_none():
 
 
 def test_a_state_may_declare_a_setting_with_no_file_level_default():
-    """Absence is no opinion rather than an error (ADR 0040). A State declaring
+    """Absence is no opinion rather than an error. A State declaring
     nothing gets None, so delivery types no Switch and the State runs on what
     the Session holds — which stickiness makes the Model the State before it
     set."""
@@ -166,7 +166,7 @@ def test_model_and_effort_default_independently():
 
 
 def test_an_empty_state_key_is_kept_rather_than_read_as_absent():
-    """Values are opaque (ADR 0026): an empty string is a value the session
+    """Values are opaque: an empty string is a value the session
     will refuse, not an absence for Naiad to interpret a default into."""
     workflow = parse_workflow(
         """
@@ -188,7 +188,7 @@ def test_an_empty_state_key_is_kept_rather_than_read_as_absent():
 
 
 def test_a_workflow_with_no_answerer_table_gives_every_state_to_the_human():
-    """The human is the default (ADR 0050): nothing is decided for an adopter
+    """The human is the default: nothing is decided for an adopter
     who declared nothing."""
     workflow = parse_workflow(
         """
@@ -258,7 +258,7 @@ def test_a_state_may_reserve_its_questions_for_the_human_in_a_file_with_the_tabl
 
 def test_a_state_may_opt_in_to_the_answerer_in_a_file_without_the_table():
     """The table carries settings and moves the default; the Answerer does not
-    need it to exist. It runs on the platform's defaults (ADR 0050)."""
+    need it to exist. It runs on the platform's defaults."""
     workflow = parse_workflow(
         """
         name = "w"
@@ -327,7 +327,7 @@ def test_the_answerer_table_is_parsed_with_both_keys_optional():
 
 def test_the_answerers_fallback_is_parsed_as_an_opaque_string():
     """A comma-separated list the platform walks, never parsed by Naiad —
-    the same opacity model and effort already have (ADR 0031)."""
+    the same opacity model and effort already have."""
     workflow = parse_workflow(
         """
         name = "w"
@@ -442,7 +442,7 @@ def test_the_error_names_the_source_of_the_workflow():
 def test_the_compaction_point_is_a_file_level_key_parsed_as_an_opaque_string():
     """Where the Session summarises itself is a property of the Session, set
     once at launch, so the key is the file's and never a State's. The value is
-    handed to the launch verbatim and judged there, as a Model is (ADR 0047)."""
+    handed to the launch verbatim and judged there, as a Model is."""
     workflow = parse_workflow(
         """
         name = "w"
@@ -459,7 +459,7 @@ def test_the_compaction_point_is_a_file_level_key_parsed_as_an_opaque_string():
 
 def test_a_workflow_that_names_no_compaction_point_has_no_opinion():
     """Absent means no flag, so a Workflow written before the key existed runs
-    exactly as it did (ADR 0040, ADR 0047)."""
+    exactly as it did."""
     workflow = parse_workflow(WELL_FORMED)
 
     assert workflow.autocompact is None

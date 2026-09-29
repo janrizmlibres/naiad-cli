@@ -112,7 +112,7 @@ def test_an_entry_joins_the_queue_carrying_what_kickoff_would_be_told(repo, queu
 def test_work_marked_to_attach_becomes_an_entry_carrying_the_mark(repo, queue):
     """An Adoption reaches the Queue through this one enqueue rather than a
     path of its own, so that nothing it can queue is something the other
-    entrances would have refused (ADR 0028)."""
+    entrances would have refused."""
     attachment = Attachment(tmux_pane="%42", claude_session_id="a-session")
 
     add(repo, queue, attachment=attachment)
@@ -137,7 +137,7 @@ def test_adding_an_entry_supervises_nothing(repo, queue, tmp_path):
 
 
 def test_an_entry_with_no_working_branch_joins_the_queue(repo, queue):
-    """Omission is intent (ADR 0022): the agent at the head of the Run derives
+    """Omission is intent: the agent at the head of the Run derives
     a name there, so work described without one is queued rather than turned
     away."""
     add(repo, queue, working_branch=None)
@@ -195,7 +195,7 @@ def test_the_same_repository_reached_by_another_path_still_claims_its_branch(rep
 def test_a_branch_a_branchless_entrys_run_has_recorded_is_claimed(repo, queue):
     """An Entry with no recorded branch but a Run that holds one claims that
     branch. The claim resolves through the Run rather than being copied back
-    onto the Entry (the `status_of` pattern, ADR 0013), so a Derived branch
+    onto the Entry (the `status_of` pattern), so a Derived branch
     cannot be collided with invisibly."""
     branchless = add(repo, queue, entry_id="one", working_branch=None)
     runs_beside(queue).create(
@@ -272,7 +272,7 @@ def test_a_start_state_whose_prompt_names_no_subject_needs_none(repo, queue):
 
 
 def test_a_subject_stands_in_for_an_absent_task(repo, queue):
-    """ADR 0024: an operator who gave only a Subject has said the Subject
+    """An operator who gave only a Subject has said the Subject
     describes the work, so the Entry's task is total without being typed
     twice — `--at implement --subject <ticket>` needs no task beside it."""
     add(repo, queue, task=None, start_state="implement", subject="docs/ticket.md")
@@ -283,7 +283,7 @@ def test_a_subject_stands_in_for_an_absent_task(repo, queue):
 
 
 def test_the_stand_in_is_unconditional_about_the_start_state(repo, queue):
-    """ADR 0024: even a start State whose Prompt renders {task} takes the
+    """Even a start State whose Prompt renders {task} takes the
     Subject — an operator who gave only a Subject has said the Subject
     describes the work, and refusing would be second-guessing that."""
     add(repo, queue, task=None, start_state="grill", subject="docs/ticket.md")
@@ -293,7 +293,7 @@ def test_the_stand_in_is_unconditional_about_the_start_state(repo, queue):
 
 
 def test_work_naming_no_task_and_no_subject_is_refused(repo, queue):
-    """The one refusal the stand-in keeps (ADR 0024): with neither, nothing
+    """The one refusal the stand-in keeps: with neither, nothing
     says what the work is — not to the Queue listing, not to the Answerer."""
     with pytest.raises(MissingTask) as caught:
         add(repo, queue, task=None, start_state="grill")

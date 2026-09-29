@@ -3,7 +3,7 @@
 Run as a real subprocess against a temporary Naiad directory, like the wait
 command. The failure here would otherwise be the worst kind — a human who
 asked for a pause, an agent that relayed it, and a Run that got nudged into
-the very interruption the human ordered against (ADR 0025).
+the very interruption the human ordered against.
 """
 
 import json

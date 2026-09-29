@@ -1,6 +1,6 @@
 """The UserPromptSubmit hook as a Session meets it: a Prompt Naiad typed that
 arrived whole is let through and confirmed, one that arrived cut short is
-turned away, and anything else passes untouched (ADR 0053)."""
+turned away, and anything else passes untouched."""
 
 import io
 import json

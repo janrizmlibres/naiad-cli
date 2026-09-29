@@ -1,11 +1,10 @@
 """The ntfy adapter: the one request it builds, and what it does when it fails.
 
-Every rule about *whether* to notify was decided in naiad.domain.decide (ADR
-0004). What is left here is a request — a URL, three headers and a body — and
-an adapter holding nothing else. It is tested rather than smoked because the
-request is data: a wrong header name is a notification that never arrives on a
-phone nobody is watching, which is the one failure this whole feature exists
-to remove.
+Every rule about *whether* to notify was decided in naiad.domain.decide. What is
+left here is a request — a URL, three headers and a body — and an adapter
+holding nothing else. It is tested rather than smoked because the request is
+data: a wrong header name is a notification that never arrives on a phone nobody
+is watching, which is the one failure this whole feature exists to remove.
 """
 
 
@@ -141,7 +140,7 @@ def test_the_variables_name_the_service_they_configure():
 
 def test_a_report_is_sent_at_a_lower_priority_than_a_gate():
     """A milestone is low enough that it never sounds like a request for the
-    operator (ADR 0055)."""
+    operator."""
     reported, needed = RecordingPost(), RecordingPost()
 
     notify(reported, kind=Notification.REPORT)

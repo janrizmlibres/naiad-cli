@@ -1,7 +1,7 @@
 """The Queue on disk: what an Entry carries, the order they come back in, and
 what is read of the Run rather than stored.
 
-An Entry records no status of its own (ADR 0013), so the four things an
+An Entry records no status of its own, so the four things an
 operator wants to know about one are asked of its Run here.
 """
 
@@ -89,7 +89,7 @@ def test_an_entry_that_has_not_started_records_no_run(queue, repo):
 
 
 def test_an_adoption_records_the_session_its_run_attaches_to(queue, repo):
-    """An Adoption is an Entry marked to attach rather than spawn (ADR 0028),
+    """An Adoption is an Entry marked to attach rather than spawn,
     and the mark is the session it joins."""
     queue.add(entry(repo, attachment=Attachment(tmux_pane="%42", claude_session_id="a-session")))
 
@@ -146,7 +146,7 @@ def test_removing_an_entry_that_is_not_there_is_reported(queue, repo):
 
 def test_an_entry_records_the_run_it_became(queue, repo):
     """The one thing that changes about an Entry, and the only field on it that
-    says anything about a Run (ADR 0013)."""
+    says anything about a Run."""
     queued = queue.add(entry(repo))
 
     attached = queue.attach_run(queued, run_id="a-run")
@@ -212,7 +212,7 @@ def test_an_entry_file_that_cannot_be_read_is_reported_and_names_itself(queue, r
     assert str(document) in str(caught.value)
 
 
-# What became of an Entry is read of its Run (ADR 0013): no Run means waiting,
+# What became of an Entry is read of its Run: no Run means waiting,
 # a finished Run log means done, a notice against the current Announcement
 # means parked, and anything else is running.
 
@@ -247,9 +247,9 @@ def test_an_entry_whose_run_has_been_notified_for_its_announcement_is_parked(run
 
 
 def test_an_entry_parked_after_its_waits_ran_out_is_still_read_as_parked(runs, repo):
-    """The notification is recorded against the Announcement's latest Wait
-    (ADR 0021), and the Queue must read it with the same key or a parked Run
-    shows as running."""
+    """The notification is recorded against the Announcement's latest Wait, and
+    the Queue must read it with the same key or a parked Run shows as
+    running."""
     run = started(runs, repo)
     announcement = Announcements(run.root).announce("handover")
     Waits(run.root).record(announcement, reason="a check", now=0.0, seconds=60.0)
@@ -300,7 +300,7 @@ def test_a_finished_run_that_was_notified_along_the_way_is_done_rather_than_park
 
 # Pruning. What a Prune takes is read through `status_of` rather than decided
 # again here, so that what the listing calls done and what a Prune removes can
-# never come apart (ADR 0029).
+# never come apart.
 
 
 def finished(runs, repo, run_id="a-run"):
@@ -371,7 +371,7 @@ def test_pruning_takes_only_the_done_entries_out_of_a_mixed_queue(queue, runs, r
 def test_pruning_takes_the_entry_before_the_run_so_a_failure_leaves_no_lie(
     queue, runs, repo, monkeypatch
 ):
-    """The order ADR 0029 turns on, seen from the failure it is chosen for. The
+    """The order that matters, seen from the failure it is chosen for. The
     Entry still counts as removed, because it was: one that vanished with no
     line naming it would be a removal the operator was never told about, and
     the orphan left behind is the separate fact the refusal states.
@@ -435,7 +435,7 @@ def test_pruning_a_queue_holding_a_damaged_entry_refuses_before_taking_anything(
 
 # Orphaned Runs. A Run directory no Entry names is taken by a Prune when it
 # reads done or parked, skipped and named when it reads running, and reported
-# as a failure when it cannot be read at all (ADR 0030).
+# as a failure when it cannot be read at all.
 
 
 def test_pruning_takes_a_done_orphaned_run(queue, runs, repo):
@@ -536,7 +536,7 @@ def test_an_entry_that_was_already_gone_is_not_claimed_as_taken(queue, runs, rep
 
 
 # Cancelling. Removing an Entry by name ends the Run it became, which releases
-# that Run's Session (ADR 0036). The Run directory stays: it is the diagnostic,
+# that Run's Session. The Run directory stays: it is the diagnostic,
 # and only a Prune ever deletes one.
 
 
@@ -650,8 +650,7 @@ def test_cancelling_an_entry_that_is_not_there_answers_nothing(queue, runs, repo
 
 def test_removing_an_entry_takes_its_turn_sidecar_with_it(queue, repo):
     """The sidecar is owned by the Entry's lifecycle: an Entry removed before
-    its Run started leaves no record waiting for a Run that will never come
-    (ADR 0042)."""
+    its Run started leaves no record waiting for a Run that will never come."""
     added = queue.add(entry(repo))
     EntryTurns(queue.root, added.id).record_end()
 

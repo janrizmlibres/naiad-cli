@@ -180,7 +180,7 @@ def test_a_marked_answer_with_nothing_after_it_escalates():
 
 def test_the_first_consultation_pins_a_new_session_id(tmp_path):
     """Pinned rather than discovered afterwards: discovering it would mean
-    reading Claude Code's internals (ADR 0002)."""
+    reading Claude Code's internals."""
     argv = command_for(
         ConsultationSpec(cwd=tmp_path, claude_session_id="an-id", text="ask", resume=False)
     )
@@ -192,7 +192,7 @@ def test_the_first_consultation_pins_a_new_session_id(tmp_path):
 
 def test_the_answerers_model_and_effort_ride_as_flags(tmp_path):
     """Declared in the Workflow's [answerer] table and passed at invocation —
-    a headless session starts clean, so flags are the whole delivery (ADR 0026)."""
+    a headless session starts clean, so flags are the whole delivery."""
     argv = command_for(
         ConsultationSpec(
             cwd=tmp_path,
@@ -212,7 +212,7 @@ def test_the_answerers_model_and_effort_ride_as_flags(tmp_path):
 def test_the_answerers_fallback_rides_as_the_platforms_own_flag(tmp_path):
     """An unavailable model otherwise comes back as error text with exit 0 —
     a wrong answer, not a loud failure. The platform's --fallback-model does
-    the detection and the degrading, so Naiad builds neither (ADR 0031)."""
+    the detection and the degrading, so Naiad builds neither."""
     argv = command_for(
         ConsultationSpec(
             cwd=tmp_path,

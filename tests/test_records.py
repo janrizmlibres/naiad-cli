@@ -173,8 +173,7 @@ def test_a_new_wait_replaces_the_last_and_is_counted(waits):
 def test_the_budget_is_charged_for_time_waited_rather_than_time_claimed(waits):
     """An agent woken early and re-declaring — several background tasks
     finishing at different moments — is the honest pattern the verb exists
-    for, and charging each full claim would exhaust it in a few wakes
-    (ADR 0021)."""
+    for, and charging each full claim would exhaust it in a few wakes."""
     waits.record(GRILL, reason="first", now=0.0, seconds=600.0)
     waits.record(GRILL, reason="second", now=120.0, seconds=600.0)
 
@@ -205,7 +204,7 @@ def test_the_budget_belongs_to_the_announcement(waits):
 
 def test_a_wait_re_arms_the_nudge_count(notices, waits):
     """A re-declared Wait after a wake is the honest signal, not an evasion:
-    the silence it answers is new, so the allowance is too (ADR 0021)."""
+    the silence it answers is new, so the allowance is too."""
     notices.record_nudge(GRILL)
     notices.record_nudge(GRILL, wait_count=1)
 
@@ -233,7 +232,7 @@ def test_no_hold_is_in_force_before_one_is_declared(holds):
 
 
 def test_a_declared_hold_stands_and_names_its_reason(holds):
-    """No deadline to read against: a Hold has no clock (ADR 0025)."""
+    """No deadline to read against: a Hold has no clock."""
     holds.record(GRILL, reason="user typed 'pause'")
 
     assert holds.holding(GRILL) is True
@@ -242,7 +241,7 @@ def test_a_declared_hold_stands_and_names_its_reason(holds):
 
 def test_a_hold_is_kept_against_its_announcement(holds):
     """The agent signalling again is what ends a Hold: the next Announcement
-    re-arms it, like every per-Announcement fact (ADR 0025)."""
+    re-arms it, like every per-Announcement fact."""
     holds.record(GRILL, reason="user typed 'pause'")
 
     assert holds.holding(IMPLEMENT) is False
@@ -250,7 +249,7 @@ def test_a_hold_is_kept_against_its_announcement(holds):
 
 
 def test_releasing_a_hold_lifts_it(holds):
-    """A fresh Wait supersedes a Hold (ADR 0025), which the wait command does
+    """A fresh Wait supersedes a Hold, which the wait command does
     by releasing it — only the held flag drops, so nothing reads as held."""
     holds.record(GRILL, reason="user typed 'pause'")
     holds.release(GRILL)
@@ -268,9 +267,8 @@ def test_a_hold_re_arms_the_notified_flag(notices, holds):
     """The likeliest Hold arrives after a notification: silence, two Nudges,
     the operator told, and only then the human's 'pause' relayed. Gated on the
     shared flag, that Hold would notify nobody and the Run would park silently
-    — the exact failure ADR 0025 calls the notification load-bearing to
-    prevent. A declared Hold is a fresh signal, so it re-arms the record the
-    way a fresh Wait does (ADR 0021)."""
+    — the exact failure the notification exists to prevent. A declared Hold is a fresh signal, so it re-arms the record the
+    way a fresh Wait does."""
     notices.record_notified(GRILL)
 
     assert notices.of(GRILL, hold_count=1) == (False, 0)
@@ -328,7 +326,7 @@ def test_no_turn_has_ended_while_an_entry_waits_to_become_a_run(tmp_path):
 
 def test_a_turn_ending_in_the_gap_is_counted_against_the_entry(tmp_path):
     """The adopting turn ends before the Supervisor's pass creates the Run, so
-    the ending is recorded against the Entry that will become it (ADR 0042)."""
+    the ending is recorded against the Entry that will become it."""
     EntryTurns(tmp_path, "20260808-adopt-1").record_end()
 
     assert EntryTurns(tmp_path, "20260808-adopt-1").count() == 1
@@ -351,7 +349,7 @@ def test_relocation_seeds_the_runs_turns_and_takes_the_sidecar(tmp_path):
 
 def test_relocation_never_overwrites_what_the_run_already_heard(tmp_path):
     """A Stop that fired after the Run was created wrote a fresher record into
-    the run root; the sidecar is then deleted unread (ADR 0042)."""
+    the run root; the sidecar is then deleted unread."""
     queue_root = tmp_path / "queue"
     run_root = tmp_path / "runs" / "r1"
     run_root.mkdir(parents=True)
@@ -495,7 +493,7 @@ def _mtime(path):
 
 
 def test_the_records_do_not_share_a_file_with_the_state_file(turns, handled, tmp_path):
-    """The agent is the State file's only writer (ADR 0001)."""
+    """The agent is the State file's only writer."""
     turns.record_end(latest_seq=1)
     handled.record(1)
 
@@ -512,7 +510,7 @@ def test_no_prompt_has_been_typed_before_the_loop_types_one(tmp_path):
 
 def test_a_typed_prompt_is_kept_with_what_the_hook_judges_it_against(tmp_path):
     """The hook runs in the Session's process and knows no Announcement: the
-    latest attempt carries everything it needs (ADR 0053)."""
+    latest attempt carries everything it needs."""
     Deliveries(tmp_path).record_attempt(GRILL, prompt="/grill add dark mode", turns=3, at=100.0)
 
     latest = Deliveries(tmp_path).latest()
@@ -602,7 +600,7 @@ def test_a_new_announcement_re_arms_the_report(tmp_path):
 
 def test_a_report_leaves_the_notices_alone(tmp_path):
     """The two records are kept apart so that nothing reading the parked
-    status can see a Report (ADR 0055)."""
+    status can see a Report."""
     Reports(tmp_path).record(GRILL)
 
     assert Notices(tmp_path).of(GRILL) == (False, 0)

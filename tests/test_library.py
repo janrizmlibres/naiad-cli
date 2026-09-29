@@ -1,5 +1,5 @@
 """The Workflow library: a bare name resolves to a library file at the
-entrance (ADR 0023).
+entrance.
 
 What is asserted here is the resolution rule itself — shape decides name or
 path, a name is a stem in the library, and the two refusals that guard it.

@@ -1,7 +1,7 @@
 """The Queue's rules, as data in and Actions out. No tmux, no subprocess, no clock.
 
 One scan produces the behaviours — sequential ordering within a repository,
-repositories running concurrently (ADR 0020), a parked Run blocking its own
+repositories running concurrently, a parked Run blocking its own
 lane, and crash recovery — with no special case for any of them. Each is
 asserted separately here because each would be a different bug.
 """
@@ -77,7 +77,7 @@ def test_an_entry_whose_run_has_not_finished_is_resumed():
 def test_an_entry_whose_run_has_not_finished_stops_the_next_from_starting():
     """Sequential ordering within a repository and a parked Run blocking its
     lane are the same case: the lane's scan stops at the first Entry that is
-    not done, and a parked Run is not finished (ADR 0012, ADR 0020)."""
+    not done, and a parked Run is not finished."""
     running, waiting = entry("one", run_id="a-run"), entry("two")
 
     assert supervise(draining(running, waiting)) == [Resume(entry=running)]
@@ -85,7 +85,7 @@ def test_an_entry_whose_run_has_not_finished_stops_the_next_from_starting():
 
 def test_a_supervisor_restarted_mid_run_resumes_the_same_entry():
     """Crash recovery needs no resume path: a restarted Supervisor is handed
-    the same signals and finds the same Entry (ADR 0013)."""
+    the same signals and finds the same Entry."""
     interrupted, waiting = entry("one", run_id="a-run"), entry("two")
     signals = draining(interrupted, waiting)
 
@@ -111,8 +111,8 @@ def test_a_finished_entry_is_scanned_past_to_the_next_unfinished_run():
     assert supervise(draining(done, running, finished={"a-run"})) == [Resume(entry=running)]
 
 
-# Repositories are lanes: sequential within one, concurrent across them
-# (ADR 0020). The exclusion unit is the working tree, named by the target path.
+# Repositories are lanes: sequential within one, concurrent across them. The
+# exclusion unit is the working tree, named by the target path.
 
 
 def test_entries_for_two_repositories_are_both_started():
@@ -127,7 +127,7 @@ def test_entries_for_two_repositories_are_both_started():
 
 
 def test_a_run_in_one_repository_does_not_stop_another_repository_starting():
-    """The screenshot that motivated ADR 0020: one repository running, another
+    """One repository running, another
     waiting behind it for no reason the working tree can name."""
     running = entry("one", run_id="a-run")
     waiting = entry("two", target_repo=ANOTHER_REPO)
@@ -161,7 +161,7 @@ def test_lanes_come_out_in_the_order_their_first_unfinished_entries_were_queued(
 
 
 def test_two_worktrees_of_one_repository_are_two_lanes():
-    """Not a loophole but the rule meaning what it says (ADR 0020): the
+    """Not a loophole but the rule meaning what it says: the
     exclusion unit is the working tree, named by the target path, and two
     worktrees of one repository are two working trees."""
     main_tree = entry("one", target_repo=Path("/repos/acme"))
@@ -174,9 +174,9 @@ def test_two_worktrees_of_one_repository_are_two_lanes():
 
 
 def test_a_queue_parked_in_one_lane_still_works_in_the_others():
-    """A parked Run blocks only its own lane (ADR 0012 narrowed by ADR 0020):
-    a night parked at review in one repository is still a night of work in the
-    other two."""
+    """A parked Run blocks only its own lane: a night
+    parked at review in one repository is still a night of work in the other
+    two."""
     parked = entry("one", run_id="a-run")
     other_repo = entry("two", target_repo=ANOTHER_REPO)
     third_repo = entry("three", target_repo=Path("/repos/third"))
@@ -279,7 +279,7 @@ def test_an_entry_whose_immediate_predecessor_was_removed_takes_the_one_before_i
 
 def test_a_branchless_entry_stands_on_the_branch_the_preceding_run_declared():
     """A preceding Entry whose own record carries no branch yields the branch
-    its Run declared (ADR 0022): the stacking chain works for Derived branches
+    its Run declared: the stacking chain works for Derived branches
     exactly as for given ones."""
     derived = entry("one", working_branch=None, run_id="a-run")
     second = entry("two")
@@ -324,7 +324,7 @@ def test_a_declared_branch_in_another_repository_is_still_walked_over():
 
 def test_a_preceding_entry_for_the_same_repository_is_never_skipped():
     """Naiad does not skip one on the grounds that its work has already landed:
-    that is a question about git and the answer belongs to the agent (ADR 0015).
+    that is a question about git and the answer belongs to the agent.
     The stack collapses correctly without Naiad knowing anything."""
     landed = entry("one", run_id="a-run")
     stacked = entry("two", run_id="another-run")

@@ -10,13 +10,13 @@ class RecordingSessions:
     the command a spec produces is covered by tests/test_session_spec.py.
 
     Both ways a Run meets a session: one opened for it, and one already running
-    that it joins (ADR 0028). An attachment answers with the name of the tmux
+    that it joins. An attachment answers with the name of the tmux
     session holding that pane, which is the human's own rather than Naiad's.
 
     Clearing is recorded although starting a Run never asks for it, because
     that is exactly what wants asserting: kickoff ignores its first State's
     Clear flag, and a fake missing the verb could only report the omission as
-    an AttributeError from somewhere unrelated (ADR 0028).
+    an AttributeError from somewhere unrelated.
     """
 
     def __init__(self):

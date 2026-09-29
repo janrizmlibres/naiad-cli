@@ -1,5 +1,5 @@
 """Writing a Workflow file the way an author's own edits are written: through
-the one seam every writing verb shares (ADR 0049).
+the one seam every writing verb shares.
 
 What is asserted is the contract that keeps a file the author's to hand-edit:
 comments survive a write, a write the loader rejects changes nothing, a
@@ -206,7 +206,7 @@ def test_unset_deletes_the_key(workflow):
 
 
 def test_unsetting_the_last_answerer_key_keeps_the_table_because_it_is_the_opt_in(workflow):
-    """An `[answerer]` table flips the file's default for Questions (ADR 0050),
+    """An `[answerer]` table flips the file's default for Questions,
     so emptying it must not switch the Answerer off as a side effect."""
     edit_workflow(workflow, lambda d: set_file_key(d, "answerer.model", "haiku"))
 

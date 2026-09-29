@@ -87,7 +87,7 @@ terminal = true
 """
 
 # Both kinds of Gate State in one file: `review` sits in the declared order and
-# `no-repro` is named as a candidate. The pair is the whole of ADR 0007, so it
+# `no-repro` is named as a candidate. The pair is the whole of the distinction, so it
 # is asserted over one Workflow rather than two.
 BOTH_KINDS_OF_GATE = """
 name = "both"
@@ -186,16 +186,16 @@ def test_a_state_between_branching_ones_keeps_its_implicit_successor(branching):
 
 
 def test_a_gate_state_named_as_a_candidate_is_never_skipped(branching):
-    """ADR 0007: skipping applies to the declared order alone. A Gate State the
+    """Skipping applies to the declared order alone. A Gate State the
     agent may choose is a destination rather than a routine checkpoint, and
     deleting it would tell an agent that could not reproduce a bug to finish."""
     assert next_states(branching, "diagnose", skip_gates=True) == ("no-repro", "done")
 
 
 def test_gate_skipping_tells_the_two_kinds_of_gate_state_apart():
-    """ADR 0007, both halves at once. `review` is a routine checkpoint an
+    """Both halves at once. `review` is a routine checkpoint an
     unattended Run may decline; `no-repro` is a destination the agent chose, and
-    deleting it would overrule the judgment ADR 0001 gives away. One Workflow
+    deleting it would overrule the judgment that the agent, not Naiad, owns. One Workflow
     holds both, because it is the pair that carries the distinction.
     """
     workflow = parse_workflow(BOTH_KINDS_OF_GATE)
@@ -246,7 +246,7 @@ def test_the_expectation_honours_skipped_gates(workflow):
 
 def test_the_expectation_at_a_fork_is_every_candidate(branching):
     """All the agent has to go on after a Clear, so naming one of two would
-    bias it toward whichever the author happened to list first (ADR 0001)."""
+    bias it toward whichever the author happened to list first."""
     expected = expected_next_states(branching, announced="classify", started_at=None)
 
     assert expected == ("diagnose", "grill")
@@ -361,5 +361,5 @@ def test_naiad_does_not_park_on_a_routine_gate_when_gates_are_skipped():
 
 
 def test_naiad_still_parks_on_a_gate_named_as_a_candidate_when_gates_are_skipped():
-    """ADR 0007: a destination the agent chose is not a checkpoint to decline."""
+    """A destination the agent chose is not a checkpoint to decline."""
     assert parks_on(parse_workflow(FORK_TO_A_GATE), "no-repro", skip_gates=True)

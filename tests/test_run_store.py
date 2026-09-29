@@ -127,7 +127,7 @@ def test_lists_every_run_it_holds(store, repo):
 
 
 # Removing a Run. Only a Prune ever asks for this, and only of a Run whose
-# Entry is done (ADR 0029) — the store itself checks nothing, because what a
+# Entry is done — the store itself checks nothing, because what a
 # Run's own files say about it is the Queue's to read rather than this store's.
 
 

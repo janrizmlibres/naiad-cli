@@ -83,7 +83,7 @@ def test_asking_a_question_succeeds_and_records_it_with_every_option(run):
 
 
 def test_a_question_with_no_options_is_rejected_and_told_why(run):
-    """A Question Naiad cannot see does not exist (ADR 0002), and one without
+    """A Question Naiad cannot see does not exist, and one without
     its options leaves whoever answers guessing at what was on offer.
 
     The reason is asserted, not just the word 'option': argparse's own

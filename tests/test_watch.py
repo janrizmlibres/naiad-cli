@@ -177,7 +177,7 @@ def test_nothing_the_agent_says_after_the_end_starts_the_run_again(run):
 
 
 def test_watching_a_cancelled_run_does_not_start_ticking(run):
-    """A Run the operator called off is over by the other ending (ADR 0036),
+    """A Run the operator called off is over by the other ending,
     and it stops a watch for the same reason a Finish does: nothing is coming,
     so a watch that ticked it would spin over it forever."""
     announce(run, "implement")

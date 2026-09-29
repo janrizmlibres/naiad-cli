@@ -1,16 +1,15 @@
 """The Workflow files that ship, asserted only for what any Workflow file must
 hold: it loads under its own name, its Prompts render with no slot left, every
-exit is named to the agent, and a Run can start from it (ADR 0043).
+exit is named to the agent, and a Run can start from it.
 
 Two files ship: the starter inside the package, and the personal Workflow in
-`workflows/`, which stays a tracked file anyone can read (ADR 0052). Every
+`workflows/`, which stays a tracked file anyone can read. Every
 invariant runs over both, because none of them reads content.
 
 Nothing here reads the file's meaning — which States it declares, what its
 Prompts pin, which settings it chooses — so editing the file never breaks a
-test. What the Workflow says is reviewed in the file itself, against the
-decisions docs/workflow-authoring.md indexes per State, and exercised by manual
-smoke (docs/smoke/matt-pocock.md).
+test. What the Workflow says is reviewed in the file itself and exercised by
+manual smoke.
 
 Every parametrised list below is derived from the loaded files rather than
 written out, which is what keeps a State added or removed from touching this
@@ -38,7 +37,7 @@ SHIPPED_PATHS = (
 # Sample interpolations, arbitrary by design: every assertion holds for any
 # values, so none of these encodes anything about the file's content.
 TASK = "add dark mode"
-SUBJECT = ".scratch/dark-mode/issues/04-toggle.md"
+SUBJECT = "tickets/dark-mode/issues/04-toggle.md"
 BRANCH = "MC-AGENT-8546"
 PREDECESSOR = "MC-AGENT-8500"
 
@@ -225,7 +224,7 @@ def test_a_run_can_start_at_any_state_that_delivers(path, tmp_path, sessions, st
 def test_a_state_whose_prompt_names_a_subject_refuses_to_start_without_one(
     path, tmp_path, sessions, state_name
 ):
-    """Refused rather than rendered empty (ADR 0009): a Prompt with a Subject
+    """Refused rather than rendered empty: a Prompt with a Subject
     slot and nothing to fill it would tell the agent to trust a decision about
     an item that was never named."""
     with pytest.raises(MissingSubject):

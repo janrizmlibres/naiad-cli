@@ -57,7 +57,7 @@ def test_the_turn_ending_hook_is_installed_without_a_matcher(installed):
 
 def test_every_submitted_prompt_is_judged_without_a_matcher(installed):
     """UserPromptSubmit takes no matcher. It is how a typed Prompt is confirmed
-    to have reached the Session whole (ADR 0053)."""
+    to have reached the Session whole."""
     assert commands_for(installed, "UserPromptSubmit") == [f"{COMMAND} submitted"]
 
 

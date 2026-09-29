@@ -122,7 +122,7 @@ def test_installing_ships_the_adopt_skill_beside_the_hooks(tmp_path, capsys):
 
 
 def test_a_bare_install_leaves_the_library_alone(monkeypatch, tmp_path, capsys):
-    """The library is the operator's store (ADR 0049): install touches it only
+    """The library is the operator's store: install touches it only
     when asked, so re-running install without thinking can never reach it."""
     monkeypatch.setenv("NAIAD_HOME", str(tmp_path / "naiad"))
     library = tmp_path / "naiad" / "workflows"

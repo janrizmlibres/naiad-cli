@@ -48,7 +48,7 @@ def write_workflow(repo):
 
     Only the tests that need a Terminal State read back call this. The rest
     leave the file absent, which is itself a case: a Run whose Workflow cannot
-    be read falls back to the log line (ADR 0035).
+    be read falls back to the log line.
     """
     (repo / "w.toml").write_text(WORKFLOW)
 
@@ -186,7 +186,7 @@ def test_a_workflow_that_cannot_be_read_falls_back_to_the_log(store, repo):
 
 def waiting_entry(entry_id, *, pane=None, claude_session_id=None, run_id=None, repo=None):
     """An adopted Entry in the gap: queued, claiming a Session, its Run not
-    started yet unless a run_id says otherwise (ADR 0042)."""
+    started yet unless a run_id says otherwise."""
     return Entry(
         id=entry_id,
         workflow_path=repo / "w.toml",
@@ -215,7 +215,7 @@ def test_a_live_run_receives_the_turn_before_any_entry(store, repo):
 
 def test_the_entry_awaiting_attachment_receives_the_turn_when_no_run_answers(store, repo):
     """The adopting turn ends before the Supervisor's pass creates the Run;
-    the ending belongs to the Entry that will become it (ADR 0042)."""
+    the ending belongs to the Entry that will become it."""
     entry = waiting_entry("e1", pane="%1", repo=repo)
 
     recipient = turn_recipient(RunResolver(store, environ={}), [entry], tmux_pane="%1")
@@ -225,7 +225,7 @@ def test_the_entry_awaiting_attachment_receives_the_turn_when_no_run_answers(sto
 
 def test_an_entry_whose_run_exists_is_past_its_gap(store, repo):
     """Once the Run is recorded on the Entry it is resolvable by pane, and an
-    ended one has released the Session (ADR 0035) — either way the Entry no
+    ended one has released the Session — either way the Entry no
     longer stands in for it."""
     entry = waiting_entry("e1", pane="%1", run_id="one", repo=repo)
 

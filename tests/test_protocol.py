@@ -25,7 +25,7 @@ def test_names_the_command_that_asks_a_question():
 
 def test_names_the_subject_flag_and_says_when_it_is_needed():
     """A Cleared context has only the Protocol to go on, so a flag it is never
-    told about is one it will be rejected for omitting (ADR 0009).
+    told about is one it will be rejected for omitting.
 
     Described by what it is for rather than by the placeholder that requires
     it: the agent never reads the Workflow file, so naming `{subject}` would
@@ -56,7 +56,7 @@ def test_an_answer_invites_the_next_question():
 
 def test_names_the_command_that_declares_a_wait():
     """A freshly Cleared context knows only what the Protocol tells it, and an
-    agent that cannot declare its wait is read as silent (ADR 0021)."""
+    agent that cannot declare its wait is read as silent."""
     protocol = render_protocol(next_states=("spec",))
 
     assert "naiad wait" in protocol
@@ -64,9 +64,8 @@ def test_names_the_command_that_declares_a_wait():
 
 
 def test_names_the_command_that_declares_a_hold():
-    """The human's pause reaches Naiad only through the agent (ADR 0002), and
-    an agent that cannot relay it improvises with bounded waits instead
-    (ADR 0025)."""
+    """The human's pause reaches Naiad only through the agent, and
+    an agent that cannot relay it improvises with bounded waits instead."""
     protocol = render_protocol(next_states=("spec",))
 
     assert "naiad hold" in protocol
@@ -87,7 +86,7 @@ def test_names_the_expected_next_state():
 def test_at_a_fork_every_candidate_is_named():
     """Naming one of two would bias the agent toward whichever the Workflow
     author happened to list first, in precisely the case where its judgment is
-    the whole point (ADR 0001). It is also all a Cleared agent has to go on."""
+    the whole point. It is also all a Cleared agent has to go on."""
     protocol = render_protocol(next_states=("no-repro", "pull-request"))
 
     assert "no-repro" in protocol
@@ -140,14 +139,14 @@ def test_the_second_nudge_is_worded_more_firmly_than_the_first():
 
 def test_the_first_nudge_teaches_the_wait_verb():
     """The Nudge is the teachable moment: it arrives precisely when an
-    undeclared wait is being misread as silence (ADR 0021)."""
+    undeclared wait is being misread as silence."""
     assert "naiad wait" in render_nudge(attempt=1)
     assert "naiad wait" not in render_nudge(attempt=2)
 
 
 def test_the_first_nudge_teaches_the_hold_verb():
     """The other lesson the same moment carries: a human's pause answered with
-    silence is misread exactly like an undeclared wait (ADR 0025)."""
+    silence is misread exactly like an undeclared wait."""
     assert "naiad hold" in render_nudge(attempt=1)
     assert "naiad hold" not in render_nudge(attempt=2)
 
@@ -183,7 +182,7 @@ def test_there_is_a_wording_for_every_nudge_naiad_is_willing_to_send():
 
 
 # The Adoption output: what a hitherto-undriven agent is taught at the moment it
-# hands its session over (ADR 0028). It is the Protocol plus what only an
+# hands its session over. It is the Protocol plus what only an
 # Adoption has to say — settle the branch, end the turn, and relay a warning
 # when nothing is supervising.
 
@@ -236,7 +235,8 @@ def test_an_adoption_carrying_a_branch_names_it_rather_than_asking_for_one():
 
 def test_an_adoption_carrying_no_branch_asks_the_agent_to_derive_and_declare_one():
     """Both Workflow branch heads are skipped by a mid-Workflow start, so the
-    ADR 0022 discipline moves into the act of adopting."""
+    rule that a Working branch is given or derived moves into the act of
+    adopting."""
     taught = adoption(working_branch=None)
 
     assert "naiad branch" in taught
@@ -279,7 +279,7 @@ def test_no_adoption_is_left_holding_a_placeholder():
 
 
 def compaction(**overrides):
-    fields = dict(state="implement", subject=".scratch/x/issues/04-toggle.md", question=None)
+    fields = dict(state="implement", subject="tickets/x/issues/04-toggle.md", question=None)
     fields.update(overrides)
     return render_compaction(**fields)
 
@@ -287,11 +287,11 @@ def compaction(**overrides):
 def test_after_a_compaction_the_agent_is_told_which_state_it_stands_in():
     """A summary can lose the phase the agent was in, and a Protocol alone —
     'when this phase is done announce X' — invites a fresh start on a half-done
-    ticket, which is the Clear failure in different clothes (ADR 0047)."""
+    ticket, which is the Clear failure in different clothes."""
     told = compaction()
 
     assert "implement" in told
-    assert ".scratch/x/issues/04-toggle.md" in told
+    assert "tickets/x/issues/04-toggle.md" in told
 
 
 def test_after_a_compaction_the_agent_is_told_to_carry_on_rather_than_start_over():

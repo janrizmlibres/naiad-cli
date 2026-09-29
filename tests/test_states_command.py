@@ -1,10 +1,10 @@
 """`naiad states`, as the adopting agent meets it: exit status and what is
 printed.
 
-The listing ADR 0023 declined to add, added for the one reader that needs it —
-an agent turning the operator's words into a State the Workflow declares
-(ADR 0032). What each line holds is asserted in tests/test_listing.py; what is
-asserted here is which Workflows a call reaches and how it fails.
+A listing added for the one reader that needs it —
+an agent turning the operator's words into a State the Workflow declares. What
+each line holds is asserted in tests/test_listing.py; what is asserted here is
+which Workflows a call reaches and how it fails.
 """
 
 import pytest
@@ -58,7 +58,7 @@ def test_a_bare_name_lists_that_workflows_states(library, capsys):
 
 def test_a_path_is_read_as_a_path(library, tmp_path, capsys):
     """The same rule every entrance obeys: shape alone decides, so a Workflow
-    outside the library is listed by naming its file (ADR 0023)."""
+    outside the library is listed by naming its file."""
     elsewhere = tmp_path / "elsewhere.toml"
     elsewhere.write_text(WORKFLOW)
 
@@ -68,7 +68,7 @@ def test_a_path_is_read_as_a_path(library, tmp_path, capsys):
 
 def test_no_workflow_lists_every_one_the_library_holds(library, capsys):
     """What the agent runs when the operator named no Workflow: one call
-    answers both which Workflows exist and what each declares (ADR 0032)."""
+    answers both which Workflows exist and what each declares."""
     (library / "matt-pocock.toml").write_text(WORKFLOW)
     (library / "acme-hotfix.toml").write_text(OTHER)
 
@@ -91,7 +91,7 @@ def test_an_empty_library_says_where_workflows_go(library, capsys):
 
 
 def test_a_name_the_library_does_not_hold_is_refused_with_what_it_does(library, capsys):
-    """The refusal ADR 0023 already wrote, reaching the agent here too: a
+    """The refusal already written, reaching the agent here too: a
     misremembered name is answered with the names that exist."""
     (library / "matt-pocock.toml").write_text(WORKFLOW)
 

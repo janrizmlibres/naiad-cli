@@ -203,7 +203,7 @@ def test_an_entry_that_is_not_a_table_is_rejected_naming_its_position():
 
 
 def test_an_entry_naming_only_a_subject_carries_no_task_of_its_own():
-    """A Subject stands in for an absent task (ADR 0024), and the stand-in
+    """A Subject stands in for an absent task, and the stand-in
     happens where Entries are made rather than here: the file parses to work
     that honestly says no task was written."""
     (only,) = parse(
@@ -222,7 +222,7 @@ def test_an_entry_naming_only_a_subject_carries_no_task_of_its_own():
 
 def test_a_default_task_is_the_task_even_beside_an_entrys_own_subject():
     """The stand-in is a fallback for absence, and a default-supplied task
-    means the task is not absent (ADR 0024): override is same-key-beats-default,
+    means the task is not absent: override is same-key-beats-default,
     never different-key-beats-default."""
     (only,) = parse(
         """

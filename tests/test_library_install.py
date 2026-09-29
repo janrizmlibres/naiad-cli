@@ -1,4 +1,4 @@
-"""Copying the starter into the library on request (ADR 0049).
+"""Copying the starter into the library on request.
 
 The library is the operator's store, so what is pinned here is the rule for a
 file of the starter's name: absent, it is written; byte-identical, it is

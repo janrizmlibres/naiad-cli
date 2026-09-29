@@ -3,7 +3,7 @@
 Run as a real subprocess against a temporary Naiad directory, like the
 announce and ask commands. The failures here would otherwise be silent — an
 agent whose declared Wait went nowhere is read as silent and Nudged into the
-very interruption it declared against (ADR 0021).
+very interruption it declared against.
 """
 
 import json
@@ -100,8 +100,8 @@ def test_a_non_positive_duration_is_rejected(run):
 
 
 def test_a_wait_past_the_spent_budget_is_refused_toward_announce_ask_or_hold(run):
-    """The refusal must leave the agent a move: announce, or ask (ADR 0021) —
-    and when the waiting was a human's pause worn as a Wait, hold (ADR 0025).
+    """The refusal must leave the agent a move: announce, or ask —
+    and when the waiting was a human's pause worn as a Wait, hold.
     This is exactly the moment that agent needs to learn the verb, and the old
     wording steered it wrong."""
     (run.root / WAITS_FILENAME).write_text(
@@ -128,7 +128,7 @@ def test_a_wait_past_the_spent_budget_is_refused_toward_announce_ask_or_hold(run
 
 
 def test_a_fresh_wait_supersedes_an_outstanding_hold(run):
-    """The agent signalling again is what ends a Hold (ADR 0025); left
+    """The agent signalling again is what ends a Hold; left
     standing, the Run would stay held by a declaration the agent has already
     moved past."""
     held = subprocess.run(

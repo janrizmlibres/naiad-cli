@@ -1,7 +1,7 @@
 """`naiad adopt` as the agent inside a live session meets it: what lands on the
 Queue, what is printed back, and what is refused while the human is still there.
 
-The command validates, enqueues, prints and exits (ADR 0014) — the Run is attached
+The command validates, enqueues, prints and exits — the Run is attached
 by the Supervisor, on its ordinary pass — so nothing here may spawn a session or
 start a Run. The output is the whole of what a hitherto-undriven agent learns,
 which makes its absences the silent failures: an agent that never read the
@@ -129,7 +129,7 @@ def test_adopting_records_the_claude_session_id_when_it_can_be_gathered(
 
 def test_the_task_the_agent_distilled_becomes_the_entrys_task(home, repo):
     """The agent writes it, being the one party holding the conversation the
-    operator's intent came out of (ADR 0028)."""
+    operator's intent came out of."""
     adopt(repo)
 
     assert queue_of(home).all()[0].task == "the audit log design"
@@ -163,7 +163,7 @@ def test_adopting_supervises_nothing_and_starts_nothing(home, repo, no_tmux):
 
 def test_an_adoption_takes_its_place_in_the_queue_rather_than_jumping_it(home, repo):
     """It waits its Lane turn like any Entry, so a Run already live in that
-    working tree is never typed over (ADR 0028)."""
+    working tree is never typed over."""
     main(
         [
             "queue",
@@ -279,7 +279,7 @@ def test_adopting_a_workflow_that_cannot_be_read_is_refused(home, repo, capsys):
 
 def test_adopting_by_bare_name_queues_the_library_file_of_that_stem(home, repo):
     """The entrances share one resolution, so a bare name is shorthand here
-    exactly as it is at `queue add` (ADR 0023)."""
+    exactly as it is at `queue add`."""
     library = home / "workflows"
     library.mkdir(parents=True)
     (library / "feature.toml").write_text(WORKFLOW)
@@ -299,7 +299,7 @@ def test_adopting_by_a_name_the_library_does_not_hold_is_refused(home, repo, cap
 def test_adopting_without_a_task_is_refused(home, repo):
     """There is no Subject stand-in for an Adoption: the operator's words were
     a conversation rather than a line, and only the agent holding it can say
-    what the work is (ADR 0028)."""
+    what the work is."""
     with pytest.raises(SystemExit) as refused:
         main(
             [
@@ -319,7 +319,7 @@ def test_adopting_without_a_task_is_refused(home, repo):
 
 
 # The branch, settled at the act of adopting: both Workflow branch heads are
-# behind a mid-Workflow start (ADR 0022, ADR 0028).
+# behind a mid-Workflow start.
 
 
 def test_adopting_on_a_branch_another_entry_claims_is_refused(home, repo, capsys):
@@ -344,7 +344,7 @@ def test_adopting_on_a_branch_another_entry_claims_is_refused(home, repo, capsys
 
 def test_adopting_without_a_branch_queues_branchless_and_claims_nothing(home, repo):
     """Absent one, the Entry claims nothing until the agent declares the name
-    it derived (ADR 0022)."""
+    it derived."""
     assert adopt(repo) == 0
     assert adopt(repo) == 0
 

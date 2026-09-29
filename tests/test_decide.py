@@ -52,8 +52,8 @@ name = "done"
 terminal = true
 """
 
-# A fork whose short branch ends at a Gate State, which is the shape ADR 0007
-# is about: the exit an unattended Run must still be offered.
+# A fork whose short branch ends at a Gate State, which is the shape where the
+# exit an unattended Run must still be offered is a Gate State.
 BRANCHING = """
 name = "bug"
 
@@ -71,7 +71,7 @@ terminal = true
 """
 
 
-# A State whose Questions the Workflow reserves for the human (ADR 0046).
+# A State whose Questions the Workflow reserves for the human.
 RESERVING = """
 name = "map"
 
@@ -89,7 +89,7 @@ terminal = true
 
 
 # A Workflow that declares no Answerer: every Question is the human's unless a
-# State opts in (ADR 0050).
+# State opts in.
 NO_ANSWERER = """
 name = "plain"
 
@@ -235,7 +235,7 @@ def test_an_unhandled_announcement_with_a_turn_ended_delivers_that_states_prompt
 
 
 def test_the_model_is_switched_before_the_prompt(switched):
-    """Each Switch is its own Action on its own tick (ADR 0038). The session
+    """Each Switch is its own Action on its own tick. The session
     discards whatever arrives while it is handling a slash command, so a Switch
     and the Prompt behind it cannot be typed in one go."""
     action = decide(switched, signals("grill"))
@@ -260,7 +260,7 @@ def test_the_prompt_follows_once_every_switch_has_been_typed(switched):
 
 
 def test_a_state_the_session_already_holds_types_no_switch(switched):
-    """A Switch carries what the Session does not already hold (ADR 0039). The
+    """A Switch carries what the Session does not already hold. The
     settings are sticky, so re-typing what is there buys nothing and costs the
     State two Ticks."""
     action = decide(switched, signals("grill", belief={"model": "opus", "effort": "medium"}))
@@ -289,9 +289,9 @@ def test_only_the_setting_that_changed_is_typed(switched):
 
 def test_a_hand_off_to_a_human_types_every_setting_again(switched):
     """The belief is discarded where a human has had the keyboard, and every
-    setting the State declares goes in again though none of them changed (ADR
-    0039). It is what the narrowing gives up and this gives back: past a Notify
-    is the one moment Naiad knows its belief may be wrong."""
+    setting the State declares goes in again though none of them changed. It is
+    what the narrowing gives up and this gives back: past a Notify is the one
+    moment Naiad knows its belief may be wrong."""
     held = {"model": "opus", "effort": "medium"}
 
     assert decide(switched, signals("grill", belief=held, handed_over=True)) == Switch(
@@ -334,11 +334,11 @@ def test_a_workflow_without_the_keys_delivers_on_the_first_tick(workflow):
 
 
 def test_a_state_declaring_nothing_types_nothing_and_keeps_what_is_there():
-    """Absence is no opinion (ADR 0040). `spec` declares neither key and no
+    """Absence is no opinion. `spec` declares neither key and no
     file-level default stands under it, so it types no Switch and runs on the
     opus/high `grill` left in the Session.
 
-    The second half is the consequence that ADR 0040 accepts: the belief is
+    The second half is the accepted consequence: the belief is
     discarded, and `spec` still types nothing. A Notify re-types what a State
     declares, so it reaches a State that declares nothing not at all — which is
     the sticky behaviour asked for, and why a State wanting its own says so."""
@@ -396,7 +396,7 @@ def test_a_state_with_one_switch_spends_one_tick_on_it():
 
 
 def test_a_clearing_state_clears_before_it_switches():
-    """The Clear keeps its place at the head of delivery (ADR 0019): it is the
+    """The Clear keeps its place at the head of delivery: it is the
     one step confirmed rather than spaced, and nothing follows it until the
     SessionStart hook says the context is gone."""
     clearing = parse_workflow(
@@ -424,8 +424,7 @@ def test_a_clearing_state_clears_before_it_switches():
 
 def test_delivery_carries_the_announcements_subject(workflow):
     """The Subject rides from the Announcement to the delivered Prompt, which
-    is what lets the selection be made before the Clear rather than after it
-    (ADR 0009)."""
+    is what lets the selection be made before the Clear rather than after it."""
     action = decide(workflow, signals("implement", subject="04-x.md", cleared=True))
 
     assert action.subject == "04-x.md"
@@ -462,7 +461,7 @@ def test_the_same_state_announced_twice_delivers_twice(workflow):
 
 def test_a_state_declaring_clear_is_cleared_before_it_is_delivered(workflow):
     """The Clear splits off from delivery as its own Action, so that the /clear
-    can be confirmed before the Prompt follows it (ADR 0019)."""
+    can be confirmed before the Prompt follows it."""
     assert decide(workflow, signals("implement")) == Clear(state="implement", attempt=1)
 
 
@@ -530,7 +529,7 @@ def test_a_confirmed_clear_delivers_rather_than_retrying_however_many_were_typed
 
 def test_a_typed_prompt_is_waited_on_before_it_is_judged(workflow):
     """The Prompt has been typed and the hook has said nothing yet: it may be
-    on its way, so nothing is typed over it (ADR 0053)."""
+    on its way, so nothing is typed over it."""
     typed = signals("grill", deliveries=1, idle_for=DELIVERY_CONFIRM_SECONDS - 1)
 
     assert decide(workflow, typed) is NOTHING
@@ -611,7 +610,7 @@ def test_nothing_announced_yet_takes_no_action(workflow):
 
 # An Adoption: a Run that joined a session already running has
 # announced nothing, and what it is owed is the Prompt of the State it was
-# adopted at (ADR 0028).
+# adopted at.
 
 
 def test_a_run_adopted_at_a_state_is_owed_that_states_prompt(workflow):
@@ -634,7 +633,7 @@ def test_the_prompt_an_adoption_is_owed_waits_for_a_turn_to_end(workflow):
 
 
 def test_an_adoption_types_its_switches_before_that_prompt(switched):
-    """The Switches precede Prompt delivery wherever it happens (ADR 0026, 0038).
+    """The Switches precede Prompt delivery wherever it happens.
     A spawned Run wears them as flags on its launch; an adopted Run has no
     launch, so the ticks before its first delivery are where they arrive."""
     action = decide(switched, signals(None, opening=Opening(state="spec")))
@@ -654,7 +653,7 @@ def test_an_adoption_delivers_once_its_switches_are_typed(switched):
 
 def test_the_subject_an_adoption_named_rides_that_delivery(workflow):
     """There is no Announcement to carry it: an Adoption's Subject was named
-    when the Entry was made, and the State adopted at may name it (ADR 0009).
+    when the Entry was made, and the State adopted at may name it.
 
     Past a Clear, which is what the Subject is for: the context that could have
     named it has been discarded by the time the Prompt goes out."""
@@ -694,7 +693,7 @@ def test_a_run_adopted_at_a_clearing_state_is_cleared_before_that_prompt(workflo
     """The one place an Adoption diverges from kickoff. Kickoff ignores the
     first State's Clear because a new session holds nothing to discard; the
     session an Adoption joins holds everything, and the Workflow's declaration
-    of a clean start is not Naiad's to overrule (ADR 0028)."""
+    of a clean start is not Naiad's to overrule."""
     action = decide(workflow, signals(None, opening=Opening(state="implement")))
 
     assert action == Clear(state="implement", attempt=1)
@@ -702,7 +701,7 @@ def test_a_run_adopted_at_a_clearing_state_is_cleared_before_that_prompt(workflo
 
 def test_the_prompt_an_adoption_is_owed_follows_only_a_confirmed_clear(workflow):
     """The handshake an announced Clearing State already obeys, unchanged: the
-    Prompt does not follow the /clear on faith (ADR 0019)."""
+    Prompt does not follow the /clear on faith."""
     owed = signals(None, opening=Opening(state="implement"))
 
     assert isinstance(decide(workflow, owed), Clear)
@@ -777,7 +776,7 @@ def test_delivery_from_a_branching_state_names_every_candidate(branching):
 
 
 def test_a_gate_state_reached_as_a_candidate_still_notifies_with_gates_skipped(branching):
-    """ADR 0007: the stop an author put on a fork is one an unattended Run
+    """The stop an author put on a fork is one an unattended Run
     honours, so a bug it could not reproduce parks rather than opening a pull
     request on no diagnosis."""
     delivered = decide(branching, signals("diagnose"), skip_gates=True)
@@ -978,7 +977,7 @@ def test_a_third_idle_period_notifies_rather_than_nudging_again(workflow):
 
 def test_a_declared_wait_is_not_silence(workflow):
     """The agent said its silence was deliberate, so no reminder is owed
-    however long the silence bound has been exceeded (ADR 0021)."""
+    however long the silence bound has been exceeded."""
     waiting = signals(
         "grill",
         seq=1,
@@ -1038,7 +1037,7 @@ def test_an_announcement_is_delivered_regardless_of_an_outstanding_wait(workflow
 
 def test_a_hold_parks_the_run_at_the_humans_request(workflow):
     """A Hold is a park the human asked for: deliberate, immediate, and worded
-    calmly rather than as a failure (ADR 0025)."""
+    calmly rather than as a failure."""
     held = signals(
         "grill",
         seq=1,
@@ -1053,7 +1052,7 @@ def test_a_hold_parks_the_run_at_the_humans_request(workflow):
 
 def test_a_hold_has_no_clock(workflow):
     """No expiry, no budget, no Nudges: the silence bound and the nudge count
-    say nothing while a Hold stands (ADR 0025)."""
+    say nothing while a Hold stands."""
     held = signals(
         "grill",
         seq=1,
@@ -1101,7 +1100,7 @@ def test_a_hold_wins_over_an_outstanding_wait(workflow):
 
 
 def test_an_announcement_is_delivered_regardless_of_an_outstanding_hold(workflow):
-    """The agent signalling again is what ends a Hold (ADR 0025), so an
+    """The agent signalling again is what ends a Hold, so an
     Announcement is acted on however the hold signals read."""
     announced = signals(
         "grill", seq=2, handled_seq=1, stopped=True, holding=True, hold_reason="user typed 'pause'"
@@ -1313,7 +1312,7 @@ def test_an_answer_is_sent_once_the_turn_has_ended(workflow):
 def test_a_question_from_a_state_reserving_its_questions_is_never_consulted(reserving):
     """The Workflow, not the Prompt, says whose the Question is: a State that
     reserves its Questions for the human parks as an Escalation does, and the
-    Answerer is never asked (ADR 0046)."""
+    Answerer is never asked."""
     action = decide(reserving, signals("wayfind", question=QUESTION))
 
     assert isinstance(action, Notify)
@@ -1471,7 +1470,7 @@ def test_an_announcement_of_a_reporting_state_is_reported(reporting):
 
 def test_a_report_waits_for_no_turn_to_end(reporting):
     """It sends nothing into the Session, so it cannot type over an agent still
-    writing: the operator hears it when the agent says it (ADR 0055)."""
+    writing: the operator hears it when the agent says it."""
     action = decide(reporting, signals("ship", stopped=False))
 
     assert isinstance(action, Report)
@@ -1508,7 +1507,7 @@ def test_a_state_that_did_not_ask_is_not_reported(workflow):
 
 def test_a_question_asked_from_a_reporting_state_is_not_reported(reporting):
     """A Question's Announcement names the State the agent stands in but is not
-    an entry (ADR 0055)."""
+    an entry."""
     action = decide(reporting, signals("ship", question=QUESTION))
 
     assert isinstance(action, Consult)

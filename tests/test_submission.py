@@ -1,5 +1,5 @@
 """What the UserPromptSubmit hook makes of a prompt the Session is about to
-take, as data in and a verdict out (ADR 0053). No hook, no files, no clock."""
+take, as data in and a verdict out. No hook, no files, no clock."""
 
 from naiad.domain.decide import DELIVERY_CONFIRM_SECONDS
 from naiad.domain.submission import judge_submission

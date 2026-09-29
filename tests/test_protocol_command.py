@@ -68,7 +68,7 @@ def make_run(store, repo, **options):
 
 def protocol(run, *, run_id="a-run", source="startup"):
     """The SessionStart hook feeds the command its JSON on stdin, `source` among
-    it (a documented field, ADR 0002). Passed here so the command is met with
+    it (a documented field). Passed here so the command is met with
     exactly the shape a real hook gives it, and so stdin is a pipe rather than
     the test runner's terminal."""
     return subprocess.run(
@@ -143,7 +143,7 @@ def test_a_run_started_at_a_named_state_is_told_what_follows_that_state(store, r
 
 
 def test_a_clear_source_records_that_the_clear_landed(store, repo):
-    """The confirmation ADR 0019 turns on: a fresh context a /clear made says so
+    """The confirmation the loop turns on: a fresh context a /clear made says so
     through the hook's `source`, and the loop reads it as the Clear landing."""
     run = make_run(store, repo)
 
@@ -219,7 +219,7 @@ def test_a_workflow_edited_out_from_under_the_run_does_not_break_the_session(sto
 
 
 def test_a_compact_source_records_that_the_context_was_summarised(store, repo):
-    """The diagnostic ADR 0047 keeps: how many times, and in which State, the
+    """The diagnostic kept: how many times, and in which State, the
     Session summarised itself is read from the Run log and nowhere else."""
     run = make_run(store, repo)
     Announcements(run.root).announce("review")
@@ -283,7 +283,7 @@ def test_a_startup_source_carries_no_reminder(store, repo):
 
 def test_a_compact_source_does_not_repeat_a_question_handed_to_a_human(store, repo):
     """An escalated Question is the human's to answer in the Session, and
-    is no longer pending — the same rule `naiad ask` applies (ADR 0044)."""
+    is no longer pending — the same rule `naiad ask` applies."""
     run = make_run(store, repo)
     asked = Announcements(run.root).ask(Question(text="Which module owns retries?", options=()), state="grill")
     Consultations(run.root).record(asked, Escalated(reason="needs a credential"))

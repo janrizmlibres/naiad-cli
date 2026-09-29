@@ -4,7 +4,7 @@ The listing exists for one job: the operator says "spec this out", and the
 agent has to turn that into a State name the Workflow actually declares. So
 what is asserted here is what the agent must be able to read off a line —
 the name, the slash command that name hides behind, and whether landing on
-that State would park the Run or end it (ADR 0032).
+that State would park the Run or end it.
 
 Column positions are not asserted. They are alignment, and alignment is prose.
 """
@@ -68,7 +68,7 @@ def test_it_names_every_state_in_declared_order():
 
 def test_a_state_carries_the_slash_command_its_prompt_opens_with():
     """The whole reason the listing exists: the operator says "to-spec" for a
-    State called `spec`, and only this column joins the two (ADR 0032)."""
+    State called `spec`, and only this column joins the two."""
     assert "/to-spec" in line_for("spec")
 
 
@@ -194,7 +194,7 @@ def test_workflow_show_and_states_render_the_states_identically():
 def test_a_compaction_point_is_shown_so_an_adoption_can_relay_it():
     """An Adoption types nothing into the human's Session, so the point the
     Workflow wants is told to the human instead — and the listing is what the
-    adopt skill reads (ADR 0047)."""
+    adopt skill reads."""
     shown = render_states(parse_workflow(WORKFLOW.replace('name = "matt-pocock"', 'name = "matt-pocock"\nautocompact = "200k"')))
 
     assert "autocompact" in shown.splitlines()[0]

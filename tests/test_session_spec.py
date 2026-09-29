@@ -85,7 +85,7 @@ def test_a_session_with_neither_key_passes_no_flags():
 
 
 def test_the_compaction_point_rides_as_a_launch_flag():
-    """Handed to the flag verbatim: the Session judges the value (ADR 0047)."""
+    """Handed to the flag verbatim: the Session judges the value."""
     argv = command_for(spec(autocompact="200k"))
 
     assert argv[argv.index("--autocompact") + 1] == "200k"

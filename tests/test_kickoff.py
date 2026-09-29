@@ -157,7 +157,7 @@ def test_the_run_is_resolvable_without_the_environment_variable(repo, store, ses
 
 def test_the_first_states_model_and_effort_reach_the_spawn(repo, store, sessions):
     """At kickoff the first Prompt is handed over at launch, so its switches
-    ride the same way — as flags on the spawn (ADR 0026)."""
+    ride the same way — as flags on the spawn."""
     (repo / "workflow.toml").write_text(
         """
         name = "feature"
@@ -184,7 +184,7 @@ def test_the_first_states_model_and_effort_reach_the_spawn(repo, store, sessions
 
 def test_the_flags_the_spawn_carried_are_written_to_the_log(repo, store, sessions):
     """A launch flag sets the Session as surely as a Switch typed into it, so
-    it is written down as one (ADR 0039). Without the lines the belief starts
+    it is written down as one. Without the lines the belief starts
     empty, and the Run's second State would type settings the launch had
     already set."""
     (repo / "workflow.toml").write_text(SWITCHED)
@@ -222,7 +222,7 @@ def test_a_gate_state_first_writes_no_settings_to_the_log(repo, store, sessions)
 
 def test_a_gate_state_first_spawns_without_model_or_effort_flags(repo, store, sessions):
     """The switches ride Prompt delivery: a Gate State delivers nothing, so
-    nothing rides (ADR 0026)."""
+    nothing rides."""
     (repo / "workflow.toml").write_text(
         """
         name = "feature"
@@ -288,7 +288,7 @@ def test_a_run_started_at_a_state_whose_prompt_needs_a_subject_is_rejected(
     """Kickoff is the other entrance to delivery, and the announce command's
     guard does not cover it: nothing is announced here. Without this the first
     Prompt of the Run reads '/implement the ticket at ' and then tells the
-    agent to take that ticket's triage as given (ADR 0009)."""
+    agent to take that ticket's triage as given."""
     with pytest.raises(MissingSubject) as caught:
         start(repo, store, sessions, start_state="implement")
 
@@ -316,7 +316,7 @@ def test_a_run_started_at_such_a_state_with_a_subject_delivers_it(repo, store, s
 
 
 def test_a_spawned_run_ignores_its_first_states_clear_flag(repo, store, sessions):
-    """The other half of the divergence an Adoption makes (ADR 0028). A session
+    """The other half of the divergence an Adoption makes. A session
     about to be opened holds nothing to discard, so the flag is not acted on
     here: nothing is cleared, and the Prompt is handed over at launch rather
     than held back behind a Clear waiting to be confirmed."""
@@ -382,9 +382,9 @@ def test_the_run_remembers_the_branch_it_was_started_with(repo, store, sessions)
 
 
 def test_a_run_started_without_a_working_branch_records_none(repo, store, sessions):
-    """Omission is intent (ADR 0022): the Run starts with no Working branch,
+    """Omission is intent: the Run starts with no Working branch,
     and the agent at its head derives a name in the repository and declares
-    it. Naiad still attempts no derivation of its own (ADR 0015)."""
+    it. Naiad still attempts no derivation of its own."""
     run = start(repo, store, sessions, working_branch=None)
 
     assert store.load(run.id).working_branch is None
@@ -432,7 +432,7 @@ def test_a_run_with_no_predecessor_delivers_the_prompt_with_it_empty(repo, store
     assert spawn.initial_prompt == "work on MC-AGENT-8546 based on "
 
 
-# An Adoption: the other way a Run meets its session (ADR 0028).
+# An Adoption: the other way a Run meets its session.
 # Nothing is opened and nothing is delivered — the Run joins the pane the Entry
 # named, and its first Prompt waits for the tick loop and a Turn end.
 
@@ -596,7 +596,7 @@ def test_a_turn_that_ended_in_the_gap_is_waiting_in_the_run_it_gated(
 ):
     """The adopting turn ended before this pass created the Run; the sidecar
     the Stop hook left beside the Entry is relocated so the opening delivery
-    finds the turn end it waits for (ADR 0042)."""
+    finds the turn end it waits for."""
     queue_root = tmp_path / "naiad" / "queue"
     EntryTurns(queue_root, "20260719-115900-feature").record_end()
 
@@ -674,7 +674,7 @@ terminal = true
 
 
 def test_the_workflows_compaction_point_reaches_the_spawn(repo, store, sessions):
-    """Set once as the Session opens and never typed after (ADR 0047)."""
+    """Set once as the Session opens and never typed after."""
     (repo / "workflow.toml").write_text(COMPACTING)
 
     start(repo, store, sessions)

@@ -38,8 +38,8 @@ terminal = true
 """
 
 # A Workflow whose head Prompt carries {branch}, behind a pre-head State that
-# does not — the shape the undeclared-branch guard is measured against
-# (ADR 0022): the guard fires only once a {branch}-carrying Prompt has gone out.
+# does not — the shape the undeclared-branch guard is measured against: the
+# guard fires only once a {branch}-carrying Prompt has gone out.
 BRANCH_WORKFLOW = """
 name = "feature"
 
@@ -116,16 +116,16 @@ def test_the_same_state_announced_twice_is_two_distinct_announcements(run):
 
 
 def test_a_subject_is_recorded_against_the_announcement(run):
-    finished = announce(run, "implement", "--subject", ".scratch/f/issues/04-x.md")
+    finished = announce(run, "implement", "--subject", "tickets/f/issues/04-x.md")
 
     assert finished.returncode == 0, finished.stderr
-    assert state_file(run)["subject"] == ".scratch/f/issues/04-x.md"
+    assert state_file(run)["subject"] == "tickets/f/issues/04-x.md"
 
 
 def test_a_prompt_needing_a_subject_announced_without_one_is_rejected(run):
     """The Prompt cannot be rendered, and the mistake is the agent's to
     correct — so it is caught here, inside the agent's own turn, rather than at
-    delivery where only a human could answer it (ADR 0009)."""
+    delivery where only a human could answer it."""
     finished = announce(run, "implement")
 
     assert finished.returncode != 0
@@ -293,7 +293,7 @@ def test_a_rejected_subjectless_announcement_does_not_alter_the_state_file(run):
 def test_a_subject_given_to_a_state_with_no_slot_for_one_is_accepted(run):
     """A Subject belongs to the Announcement, not the Prompt. The Gate State
     this loop hands work to has no Prompt at all, and its Subject — read by the
-    human out of the Run log — is the most useful one in the Run (ADR 0009)."""
+    human out of the Run log — is the most useful one in the Run."""
     finished = announce(run, "grill", "--subject", "05-y.md")
 
     assert finished.returncode == 0, finished.stderr
@@ -336,7 +336,7 @@ def ask(run, question, option, run_id="a-run"):
 
 
 def test_announcing_over_an_unanswered_question_records_it_abandoned(run):
-    """The agent abandoning its own Question is its judgment (ADR 0001), but a
+    """The agent abandoning its own Question is its judgment, but a
     log holding only the Questions that were settled would show an unattended
     Run as tidier than it was — the Answer log's own founding argument."""
     ask(run, "Which module owns retries?", "the client")
@@ -387,7 +387,7 @@ def branch_workflow_run(tmp_path, *, start_state=None, working_branch=None):
 def test_a_branchless_run_handed_a_branch_carrying_head_prompt_refuses_the_next_announcement(
     tmp_path,
 ):
-    """Forgetting to declare is loud, not silent (ADR 0022). The Run began at
+    """Forgetting to declare is loud, not silent. The Run began at
     the head State, so its {branch}-carrying Prompt went out at kickoff; the
     next Announcement with the branch still absent is refused, with the fix in
     the message."""

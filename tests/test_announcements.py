@@ -41,10 +41,10 @@ def test_the_same_state_announced_twice_is_two_distinct_announcements(announceme
 
 def test_announcing_records_the_subject(announcements):
     """What the Announcement is about, so the Prompt delivered after the Clear
-    can name it (ADR 0009)."""
-    announcements.announce("implement", subject=".scratch/f/issues/04-x.md")
+    can name it."""
+    announcements.announce("implement", subject="tickets/f/issues/04-x.md")
 
-    assert announcements.latest().subject == ".scratch/f/issues/04-x.md"
+    assert announcements.latest().subject == "tickets/f/issues/04-x.md"
 
 
 def test_a_state_announced_without_a_subject_has_none(announcements):

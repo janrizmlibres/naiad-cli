@@ -4,7 +4,7 @@ error text.
 Run as a real subprocess against a temporary Naiad directory, like the announce
 and wait commands. The failures here would otherwise be silent — a declaration
 that went nowhere leaves the Run branchless, and the next Entry's Predecessor
-stands on what was declared (ADR 0022).
+stands on what was declared.
 """
 
 import json
@@ -94,7 +94,7 @@ def test_the_agent_is_told_what_was_declared(run):
 
 
 def test_a_subsequent_enqueue_sees_the_claim(run):
-    """The declared name resolves through the Run (ADR 0022), so an operator's
+    """The declared name resolves through the Run, so an operator's
     `--branch` cannot collide with a Derived branch invisibly."""
     hold(
         run,

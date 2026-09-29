@@ -129,7 +129,7 @@ def drive(run, workflow, session, *, notifier=None, answerer=None, now=None, sub
     default is the instant of the Run's newest record: nothing has been idle.
 
     A typed Prompt is then submitted as the Session would submit it, and judged
-    by what the UserPromptSubmit hook runs (ADR 0053). submit is what the
+    by what the UserPromptSubmit hook runs. submit is what the
     Session made of the typing — whole by default, cut short where a test says
     so — and None stands for a Session whose hook never fires."""
     action = tick(
@@ -148,7 +148,7 @@ def drive(run, workflow, session, *, notifier=None, answerer=None, now=None, sub
 
 def deliver(run, workflow, session, **kwargs):
     """Drive a Prompt through to its Confirm: typed on one tick, settled on the
-    next once the hook has seen it land (ADR 0053). Returns the delivery."""
+    next once the hook has seen it land. Returns the delivery."""
     delivered = drive(run, workflow, session, **kwargs)
     drive(run, workflow, session, **kwargs)
     return delivered
@@ -169,7 +169,7 @@ def land_clear(run):
 
 def deliver_clearing(run, workflow, session, **kwargs):
     """Drive a Clearing State's two-tick handshake through to its Prompt: type
-    /clear, confirm it landed, then deliver (ADR 0019). Returns the delivery."""
+    /clear, confirm it landed, then deliver. Returns the delivery."""
     drive(run, workflow, session, **kwargs)
     land_clear(run)
     return drive(run, workflow, session, **kwargs)
@@ -219,7 +219,7 @@ def test_an_announcement_is_settled_only_once_the_hook_saw_its_prompt_land(
     run, workflow, session
 ):
     """Typing the Prompt is not delivering it: the Announcement is handled on the
-    tick after the hook reported it whole, and not before (ADR 0053)."""
+    tick after the hook reported it whole, and not before."""
     announce(run, "grill")
 
     drive(run, workflow, session)
@@ -276,7 +276,7 @@ def test_a_prompt_no_hook_reported_tells_the_operator_and_is_not_typed_again(
 
 
 def test_each_switch_is_typed_on_its_own_tick_ahead_of_the_prompt(run, session):
-    """One send a tick (ADR 0038). The session discards whatever arrives while
+    """One send a tick. The session discards whatever arrives while
     it is handling a slash command, so the two Switches and the Prompt are three
     ticks rather than three sends."""
     keyed = parse_workflow(SWITCHED)
@@ -315,7 +315,7 @@ terminal = true
 
 
 def test_the_next_announcement_reuses_what_the_session_holds(run, session):
-    """A Switch carries what the Session does not already hold (ADR 0039). The
+    """A Switch carries what the Session does not already hold. The
     settings are sticky, so a State asking for the ones already there goes
     straight to its Prompt rather than spending two Ticks saying so again."""
     keyed = parse_workflow(SWITCHED)
@@ -333,7 +333,7 @@ def test_the_next_announcement_reuses_what_the_session_holds(run, session):
 def test_a_notification_makes_the_next_delivery_switch_again(run, session):
     """A Notify is Naiad telling a human it needs them, and a human at the
     keyboard may type a /model of their own. Past one the belief is worthless,
-    so the settings go in again whether or not they changed (ADR 0039). It is
+    so the settings go in again whether or not they changed. It is
     the only heal left now that a Switch is not typed on every delivery."""
     gated = parse_workflow(SWITCHED_WITH_GATE)
     announce(run, "grill")
@@ -353,12 +353,12 @@ def test_a_notification_makes_the_next_delivery_switch_again(run, session):
 def test_the_subject_reaches_the_pane_in_the_delivered_prompt(run, workflow, session):
     """The wiring hop the Subject exists for: the Clear discards the context
     that chose the ticket, and the Prompt arriving after it names the ticket
-    anyway (ADR 0009)."""
-    announce(run, "implement", subject=".scratch/f/issues/04-x.md")
+    anyway."""
+    announce(run, "implement", subject="tickets/f/issues/04-x.md")
 
     deliver_clearing(run, workflow, session)
 
-    assert ("send", "%42", "/implement the ticket at .scratch/f/issues/04-x.md") in session.sent
+    assert ("send", "%42", "/implement the ticket at tickets/f/issues/04-x.md") in session.sent
 
 
 def test_successive_iterations_are_delivered_their_own_subjects(run, workflow, session):
@@ -411,7 +411,7 @@ def test_a_state_declaring_clear_is_cleared_before_its_prompt_arrives(run, workf
 
 
 def test_a_clearing_states_prompt_is_held_back_until_the_clear_is_confirmed(run, workflow, session):
-    """The whole of ADR 0019: the Prompt does not follow the /clear on faith.
+    """The Prompt does not follow the /clear on faith.
     A first tick types /clear and stops there; only once the Clear is confirmed
     does a later tick deliver, so a dropped /clear can never be delivered
     through."""
@@ -495,7 +495,7 @@ def test_a_run_with_no_pane_recorded_is_refused_rather_than_sent_anywhere(
     assert session.sent == []
 
 
-# An adopted Run's first Prompt (ADR 0028). A Run that spawned its session was
+# An adopted Run's first Prompt. A Run that spawned its session was
 # handed one as that session launched; a Run that joined a session already
 # running is owed one, and is owed it until a turn has ended.
 
@@ -578,7 +578,7 @@ def test_the_prompt_an_adoption_was_owed_is_delivered_once_however_often_it_tick
 
 def test_an_adopted_runs_switches_take_a_tick_each_like_any_others(adopted, session):
     """An adopted Run has no launch for the Switches to ride as flags, so the
-    ticks before its first delivery are where they arrive (ADR 0026, 0038).
+    ticks before its first delivery are where they arrive.
     Their count is kept against no seq, as its Clear is: nothing has been
     announced yet."""
     keyed = parse_workflow(SWITCHED)
@@ -627,9 +627,9 @@ def test_a_run_adopted_at_a_gate_state_notifies_and_sends_nothing(tmp_path, sess
 
 
 def test_an_adopted_run_at_a_clearing_state_is_cleared_before_its_prompt(tmp_path, session):
-    """The one divergence from kickoff (ADR 0028): a spawned Run's session holds
+    """The one divergence from kickoff: a spawned Run's session holds
     nothing to discard, and an adopted one holds the whole conversation. The
-    /clear goes first and the Prompt waits on the confirmation (ADR 0019)."""
+    /clear goes first and the Prompt waits on the confirmation."""
     run = adopted_at(tmp_path, "implement", start_subject="04-x.md")
     end_turn(run)
 
@@ -967,7 +967,7 @@ def declare_wait(run, reason, *, seconds):
 
 
 def test_a_declared_wait_keeps_the_silent_agent_unnudged(run, workflow, session):
-    """The screenshot case (ADR 0021): background review agents running, the
+    """The screenshot case: background review agents running, the
     turn correctly ended, and the wake already guaranteed — a Nudge here buys
     a wasted poll turn and marches toward a false parking."""
     announce(run, "grill")
@@ -997,7 +997,7 @@ def test_an_expired_wait_is_nudged_naming_what_was_waited_on(run, workflow, sess
 
 def test_a_fresh_wait_re_arms_the_nudge_allowance(run, workflow, session):
     """A re-declared Wait after a wake answers a new silence, so the count
-    starts over rather than inheriting the expired Wait's nudges (ADR 0021)."""
+    starts over rather than inheriting the expired Wait's nudges."""
     announce(run, "grill")
     drive(run, workflow, session)
     Turns(run.root).record_end(latest_seq=1)
@@ -1018,7 +1018,7 @@ def declare_hold(run, reason):
 
 
 def test_a_declared_hold_parks_the_run_calmly_and_indefinitely(run, workflow, session):
-    """The pause case (ADR 0025): the human typed 'pause', the agent relayed
+    """The pause case: the human typed 'pause', the agent relayed
     it, and the Run must idle unnudged for as long as they stay away — told
     apart from a stall by the one calm notification."""
     notifier = RecordingNotifier()
@@ -1047,7 +1047,7 @@ def test_a_declared_hold_parks_the_run_calmly_and_indefinitely(run, workflow, se
 def test_a_hold_declared_after_a_silence_notification_still_notifies(run, workflow, session):
     """The likeliest real sequence: agent silent, Nudged twice, operator told,
     operator returns and types 'pause', agent holds. The Hold's notification is
-    load-bearing (ADR 0025), so the earlier alarm must not swallow it."""
+    load-bearing, so the earlier alarm must not swallow it."""
     notifier = RecordingNotifier()
     announce(run, "grill")
     deliver(run, workflow, session)
@@ -1064,7 +1064,7 @@ def test_a_hold_declared_after_a_silence_notification_still_notifies(run, workfl
 
 
 def test_asking_a_question_lifts_the_hold(run, workflow, session):
-    """A Question is the agent signalling again (ADR 0025): the Hold is keyed
+    """A Question is the agent signalling again: the Hold is keyed
     to the Announcement it was declared against, and asking makes a new one."""
     announce(run, "grill")
     drive(run, workflow, session)
@@ -1080,7 +1080,7 @@ def test_asking_a_question_lifts_the_hold(run, workflow, session):
 
 
 def test_announcing_again_lifts_the_hold_and_the_run_moves_on(run, workflow, session):
-    """The agent signalling again is what ends a Hold (ADR 0025)."""
+    """The agent signalling again is what ends a Hold."""
     announce(run, "grill")
     drive(run, workflow, session)
     Turns(run.root).record_end(latest_seq=1)
@@ -1227,8 +1227,7 @@ def test_an_answerer_with_no_settings_is_consulted_with_neither_key(run, workflo
 
 def test_a_state_opting_in_without_a_table_consults_with_neither_key(run, session):
     """The table holds settings and moves the default; a State asking for the
-    Answerer in a file without one gets it on the platform's defaults
-    (ADR 0050)."""
+    Answerer in a file without one gets it on the platform's defaults."""
     opted_in = parse_workflow(
         edited(WITHOUT_TABLE, 'name = "implement"', 'name = "implement"\nquestions = "answerer"')
     )
@@ -1651,7 +1650,7 @@ def test_the_run_log_keeps_the_reason_of_a_gate_without_the_pointer(run, workflo
     assert "naiad queue answers" not in RunLog(run.root).path.read_text()
 
 
-# A State that asks for a Report on entry (ADR 0055): the clearing `implement`,
+# A State that asks for a Report on entry: the clearing `implement`,
 # and a `ship` with a Model of its own so a Report can be told from a hand-off
 # by what the next delivery types.
 REPORTING = edited(
@@ -1752,7 +1751,7 @@ def test_a_report_leaves_the_belief_standing_so_the_next_switch_is_not_retyped(
     run, reporting, session
 ):
     """A Report hands nothing over: nobody took the keyboard, so the Model
-    Naiad typed is still what the Session holds (ADR 0055)."""
+    Naiad typed is still what the Session holds."""
     announce(run, "ship")
     for _ in range(3):
         drive(run, reporting, session)

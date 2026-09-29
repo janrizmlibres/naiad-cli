@@ -49,8 +49,8 @@ def test_a_long_prompt_is_still_typed_rather_than_pasted():
 def test_a_long_line_is_typed_in_pieces_the_session_reads_as_typing():
     """One write of a kilobyte or more is read by the Session as a paste: it
     arrives wrapped as pasted content, or with its first 1022 bytes gone —
-    which is how the pull-request Prompt reached the Session headless
-    (ADR 0053). Pieces of TYPED_PIECE_BYTES arrive as typed."""
+    which is how the pull-request Prompt reached the Session headless. Pieces of
+    TYPED_PIECE_BYTES arrive as typed."""
     line = "word " * 700
 
     pieces = [argv[-1] for argv in keystrokes_for("%1", line.strip()) if "-l" in argv]

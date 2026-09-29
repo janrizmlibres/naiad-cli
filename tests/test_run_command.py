@@ -1,4 +1,4 @@
-"""`naiad run` as an operator meets it: one entrance to starting Runs (ADR 0014).
+"""`naiad run` as an operator meets it: one entrance to starting Runs.
 
 It adds one Entry and then adopts or becomes — returning at once when a
 Supervisor already holds the lock, and supervising in the foreground when none
@@ -119,7 +119,7 @@ def supervised(home):
 
 def test_running_by_bare_name_queues_the_library_file_of_that_stem(home, repo, monkeypatch):
     """`naiad run` shares the one entrance, so a bare name resolves through
-    the Workflow library here exactly as it does at `queue add` (ADR 0023)."""
+    the Workflow library here exactly as it does at `queue add`."""
     supervision(monkeypatch)
     library = home / "workflows"
     library.mkdir(parents=True)
@@ -134,7 +134,7 @@ def test_running_by_bare_name_queues_the_library_file_of_that_stem(home, repo, m
 def test_running_adds_an_entry_rather_than_spawning_a_session(home, repo, no_tmux, monkeypatch):
     """A second entrance to starting Runs would bypass the guard that matters
     most: nothing would stop an immediate Run putting a second agent into a
-    working tree the Supervisor is already driving a Run in (ADR 0014)."""
+    working tree the Supervisor is already driving a Run in."""
     supervision(monkeypatch)
 
     assert run(repo, "--branch", "MC-AGENT-8546") == 0
@@ -202,7 +202,7 @@ def test_running_appends_rather_than_jumping_the_queue(home, repo, monkeypatch):
 
 
 def test_running_without_a_working_branch_queues_branchless_work(home, repo, monkeypatch):
-    """Omission is intent (ADR 0022): the Entry records no Working branch, and
+    """Omission is intent: the Entry records no Working branch, and
     the agent at the head of its Run derives and declares one there."""
     supervision(monkeypatch)
 
@@ -213,7 +213,7 @@ def test_running_without_a_working_branch_queues_branchless_work(home, repo, mon
 
 
 def test_running_with_only_a_subject_takes_it_as_the_task(home, repo, monkeypatch):
-    """ADR 0024: `naiad run <workflow> --at implement --subject <ticket>` needs
+    """`naiad run <workflow> --at implement --subject <ticket>` needs
     no task beside the Subject — the Subject stands in as the task."""
     supervision(monkeypatch)
 

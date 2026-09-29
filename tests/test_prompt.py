@@ -47,21 +47,21 @@ def test_a_missing_next_state_renders_as_nothing():
 def test_interpolates_the_subject():
     """What the Announcement was about, carried into the Prompt across the
     Clear so the receiving context is told what to work on rather than asked to
-    work it out (ADR 0009)."""
+    work it out."""
     rendered = render_prompt(
         "/implement the ticket at {subject}",
         task="t",
         next_states=("s",),
-        subject=".scratch/f/issues/04-x.md",
+        subject="tickets/f/issues/04-x.md",
     )
 
-    assert rendered == "/implement the ticket at .scratch/f/issues/04-x.md"
+    assert rendered == "/implement the ticket at tickets/f/issues/04-x.md"
 
 
 def test_a_prompt_with_no_subject_slot_is_unaffected_by_one():
     """A Subject belongs to the Announcement rather than to the Prompt, so a
     Prompt with no slot for one is rendered as written. The Run log is the
-    other reader (ADR 0009)."""
+    other reader."""
     rendered = render_prompt("/implement", task="t", next_states=("s",), subject="a-ticket.md")
 
     assert rendered == "/implement"
@@ -70,7 +70,7 @@ def test_a_prompt_with_no_subject_slot_is_unaffected_by_one():
 def test_a_missing_subject_renders_as_nothing():
     """render_prompt does not guard this — announcing without a Subject a
     Prompt requires is rejected at the announce command, where the agent can
-    still fix it inside its own turn (ADR 0009)."""
+    still fix it inside its own turn."""
     rendered = render_prompt("at {subject}", task="t", next_states=("s",))
 
     assert rendered == "at "
@@ -94,7 +94,7 @@ def test_interpolates_the_working_branch():
 
 def test_interpolates_the_predecessor():
     """Substituted without being read, exactly as a Subject is: whether to
-    actually stand on it is decided in the Prompt (ADR 0015)."""
+    actually stand on it is decided in the Prompt."""
     rendered = render_prompt(
         "based on {predecessor}", task="t", next_states=("s",), predecessor="MC-AGENT-8000"
     )

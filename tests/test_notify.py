@@ -77,7 +77,7 @@ def test_the_terminal_leg_prints_what_the_banner_cannot_be_scrolled_back_to(caps
 
 def test_a_report_goes_down_the_terminal_leg_and_every_other(capsys):
     """A Report is told on every leg, the terminal included: it is the record of
-    the night (ADR 0055)."""
+    the night."""
     recording = RecordingNotifier()
 
     Notifications(TerminalNotifications(), recording).notify(

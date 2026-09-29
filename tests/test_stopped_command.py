@@ -1,7 +1,7 @@
 """The Stop hook as a session meets it: which record a Turn end lands in.
 
 Ordinarily the Run's own turns record; through an Adoption's gap, the sidecar
-beside the Entry that will become it (ADR 0042); with neither, nowhere — the
+beside the Entry that will become it; with neither, nowhere — the
 hook is installed machine-wide and a pane nobody adopted stays silent.
 """
 
@@ -87,7 +87,7 @@ def test_a_damaged_entry_does_not_crash_the_hook(home, repo, pane, capsys):
 
 
 def test_a_stop_that_races_the_attach_still_lands_in_the_run(home, repo, pane, monkeypatch):
-    """The reverse interleaving of relocation's write-if-absent (ADR 0042):
+    """The reverse interleaving of relocation's write-if-absent:
     the hook resolved the Entry, the Supervisor then created the Run and
     relocated an absent sidecar, and only then did the hook's write land. The
     hook re-resolves after writing and performs the same move itself, so the

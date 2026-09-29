@@ -138,7 +138,7 @@ def test_entries_added_in_a_row_each_get_their_own_place_in_the_queue(home, repo
 
 
 def test_adding_an_entry_with_no_working_branch_queues_branchless_work(home, repo, capsys):
-    """Omission is intent (ADR 0022): the Entry records no Working branch, and
+    """Omission is intent: the Entry records no Working branch, and
     the agent at the head of its Run derives and declares one there."""
     assert add(repo) == 0
 
@@ -186,7 +186,7 @@ def test_adding_a_workflow_with_an_unknown_key_is_refused_in_a_sentence(home, re
 
 def test_adding_by_bare_name_queues_the_library_file_of_that_stem(home, repo, capsys):
     """A bare name is entrance-side shorthand: the Entry stores the resolved
-    library path exactly as it stores one typed explicitly (ADR 0023)."""
+    library path exactly as it stores one typed explicitly."""
     library = home / "workflows"
     library.mkdir(parents=True)
     (library / "feature.toml").write_text(WORKFLOW)
@@ -341,8 +341,7 @@ def test_listing_tells_apart_two_repositories_that_share_a_name(home, repo, tmp_
 
 
 def test_listing_derives_what_became_of_an_entry_from_its_run(home, repo, capsys):
-    """No status is stored, so a finished Run is what makes an Entry done
-    (ADR 0013)."""
+    """No status is stored, so a finished Run is what makes an Entry done."""
     run = RunStore(home / "runs").create(
         run_id="a-run",
         workflow_path=repo / "workflow.toml",
@@ -506,7 +505,7 @@ def test_removing_an_entry_takes_it_out_of_the_queue(home, repo, capsys):
 
 def queued_run(home, repo, *, pane="%7", state="implement"):
     """An Entry that has become a Run, standing in a State with a session of
-    its own — which is the case removal has to release (ADR 0036)."""
+    its own — which is the case removal has to release."""
     run = RunStore(home / "runs").create(
         run_id="a-run",
         workflow_path=repo / "workflow.toml",
@@ -543,7 +542,7 @@ def test_removing_an_entry_keeps_the_run_it_produced(home, repo):
 
 def test_removing_an_entry_cancels_the_run_and_releases_its_session(home, repo):
     """The Session is released by the Run ending, and the seam every hook and
-    Protocol verb asks is what stops answering (ADR 0036)."""
+    Protocol verb asks is what stops answering."""
     run = queued_run(home, repo)
 
     assert main(["queue", "rm", "an-entry"]) == 0
@@ -768,7 +767,7 @@ def test_adding_with_neither_a_file_nor_a_task_is_refused(home, capsys):
 
 
 def test_adding_with_only_a_subject_takes_it_as_the_task(home, repo):
-    """ADR 0024: work described mid-workflow — `--at implement --subject
+    """Work described mid-workflow — `--at implement --subject
     <ticket>` — needs no task typed twice; the Subject stands in."""
     assert (
         main(
@@ -913,7 +912,7 @@ def test_pruning_reports_a_run_directory_that_would_not_go(home, repo, capsys, m
 
 
 def orphan(home, repo, run_id="orphaned-run"):
-    """A Run directory no Entry names (ADR 0030)."""
+    """A Run directory no Entry names."""
     return RunStore(home / "runs").create(
         run_id=run_id,
         workflow_path=repo / "workflow.toml",

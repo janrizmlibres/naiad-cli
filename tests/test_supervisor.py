@@ -235,8 +235,8 @@ def test_two_entries_for_one_repository_are_run_one_after_the_other(queue, runs,
 
 
 def test_a_run_that_never_finishes_holds_its_lane(queue, runs, repo):
-    """A parked Run blocks its lane (ADR 0012, narrowed by ADR 0020): behind
-    it, the same repository's next Entry is never started."""
+    """A parked Run blocks its lane: behind it, the
+    same repository's next Entry is never started."""
     queued(queue, repo, "one")
     queued(queue, repo, "two")
     supervision = Supervision(runs, never_finishes={"run-1"})
@@ -248,7 +248,7 @@ def test_a_run_that_never_finishes_holds_its_lane(queue, runs, repo):
     assert set(supervision.ticked) == {"run-1"}
 
 
-# Repositories are lanes, ticked in turn within one pass (ADR 0020).
+# Repositories are lanes, ticked in turn within one pass.
 
 
 def test_entries_for_two_repositories_run_at_the_same_time(queue, runs, repo, other_repo):
@@ -269,7 +269,7 @@ def test_entries_for_two_repositories_run_at_the_same_time(queue, runs, repo, ot
 def test_a_lane_that_parks_does_not_stop_another_repository_finishing(
     queue, runs, repo, other_repo
 ):
-    """The night that motivated ADR 0020: parked at review in one repository,
+    """Parked at review in one repository,
     the Queue still works through the whole of another repository's lane."""
     queued(queue, repo, "a-parked")
     first = queued(queue, other_repo, "b-first")
@@ -304,7 +304,7 @@ def test_an_entry_added_while_following_is_picked_up(queue, runs, repo):
     assert supervision.ticked == ["run-1"]
 
 
-# The Predecessor resolves through Runs (ADR 0022): a preceding Entry whose own
+# The Predecessor resolves through Runs: a preceding Entry whose own
 # record carries no branch yields the branch its Run declared.
 
 
@@ -352,7 +352,7 @@ def test_resolution_continues_past_an_undeclared_run_to_the_branch_before_it(que
 
 
 # An Adoption is an Entry like any other: it waits its Lane's turn and jumps
-# nothing (ADR 0028).
+# nothing.
 
 
 def test_an_adoption_behind_a_live_run_in_its_lane_waits_for_it(queue, runs, repo):
@@ -402,7 +402,7 @@ def test_another_lane_proceeds_beside_an_adoption_waiting_its_turn(
 
 
 def test_a_supervisor_restarted_mid_run_ticks_the_same_run(queue, runs, repo):
-    """It finds the same Entry and ticks its Run again (ADR 0013)."""
+    """It finds the same Entry and ticks its Run again."""
     first = queued(queue, repo, "one")
     queued(queue, repo, "two")
     interrupted = Supervision(runs, never_finishes={"run-1"})

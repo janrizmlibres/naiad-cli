@@ -1,6 +1,6 @@
 """The license files a wheel carries: the MIT text names the two Workflow files
 that are 0BSD instead, and every file `pyproject.toml` lists as a license file
-exists, so a build cannot ship a declaration with nothing behind it (ADR 0056).
+exists, so a build cannot ship a declaration with nothing behind it.
 """
 
 import tomllib

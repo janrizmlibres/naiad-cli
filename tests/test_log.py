@@ -66,7 +66,7 @@ def test_delivering_a_prompt_and_answering_a_question_are_told_apart(log):
 
 
 def test_a_clear_is_recorded_as_its_own_line_before_the_delivery(log):
-    """The Clear splits off from delivery (ADR 0019), so the narrative shows the
+    """The Clear splits off from delivery, so the narrative shows the
     context discarded and then the Prompt sent — two lines, not one."""
     log.record(Clear(state="implement", attempt=1), seq=1)
     log.record(Deliver(state="implement", prompt="/implement", next_states=("pr",)), seq=1)
@@ -78,9 +78,9 @@ def test_a_clear_is_recorded_as_its_own_line_before_the_delivery(log):
 
 
 def test_each_switch_is_its_own_line_before_the_delivery(log):
-    """A Switch is never confirmed (ADR 0026), so the log is the only record
+    """A Switch is never confirmed, so the log is the only record
     that it was typed at all — and the only place a State that ran at the wrong
-    price can be diagnosed from (ADR 0038)."""
+    price can be diagnosed from."""
     log.record(Switch(state="grill", setting="model", value="opus"), seq=1)
     log.record(Switch(state="grill", setting="effort", value="high"), seq=1)
     log.record(Deliver(state="grill", prompt="/grill", next_states=("spec",)), seq=1)
@@ -94,7 +94,7 @@ def test_each_switch_is_its_own_line_before_the_delivery(log):
 
 def test_the_belief_read_back_is_the_last_settings_typed(log):
     """What Naiad believes the Session holds is what Naiad last typed into it,
-    and the log is where that is already written down (ADR 0039)."""
+    and the log is where that is already written down."""
     log.record(Switch(state="grill", setting="model", value="opus"), seq=1)
     log.record(Switch(state="grill", setting="effort", value="high"), seq=1)
 
@@ -114,7 +114,7 @@ def test_a_later_switch_replaces_an_earlier_one(log):
 def test_a_notification_reads_as_a_hand_off_to_a_human(log):
     """A Notify is Naiad telling a human it needs them, and a human at the
     keyboard may type a /model of their own. What Naiad typed is then evidence
-    of nothing, which is the fact reported here (ADR 0039)."""
+    of nothing, which is the fact reported here."""
     log.record(Switch(state="grill", setting="model", value="opus"), seq=1)
     log.record(Notify(reason="state 'review' is a Gate State"), seq=2)
 
@@ -166,9 +166,9 @@ def test_this_announcements_own_switches_are_not_read_back(log):
 
 
 def test_an_adopted_runs_first_delivery_believes_nothing(log):
-    """It answers no Announcement and so is kept against no seq, like its Clear
-    (ADR 0028). Its own Switches are its own to exclude, and there are none
-    before them: Naiad did not open this Session and knows nothing of it."""
+    """It answers no Announcement and so is kept against no seq, like its Clear.
+    Its own Switches are its own to exclude, and there are none before them:
+    Naiad did not open this Session and knows nothing of it."""
     log.record(Switch(state="spec", setting="model", value="sonnet"), seq=None)
 
     assert log.belief(None) == ({}, False)
@@ -176,7 +176,7 @@ def test_an_adopted_runs_first_delivery_believes_nothing(log):
 
 def test_the_launch_flags_are_recorded_as_the_switches_they_are(log):
     """A flag read as the process starts sets the Session as surely as a
-    /model typed into a running one (ADR 0039). How that is spelled in the
+    /model typed into a running one. How that is spelled in the
     narrative is this module's business, not the kickoff's."""
     log.record_launch(state="grill", model="opus", effort="high")
 
@@ -213,7 +213,7 @@ def test_an_announcement_records_the_state_it_named(log):
 def test_an_announcement_records_the_subject_it_carried(log):
     """The Run log is the Subject's other reader. A Gate State substitutes it
     nowhere, so without this the log says a Gate was reached and leaves the
-    operator to read the session to find out which item (ADR 0009)."""
+    operator to read the session to find out which item."""
     log.record_announcement(announcement(seq=3, state="handover", subject="05-y.md"))
 
     assert "05-y.md" in log.entries()[-1].detail
@@ -261,7 +261,7 @@ def test_a_nudge_records_which_attempt_it_was(log):
 
 def test_a_nudge_after_an_expired_wait_records_what_was_waited_on(log):
     """'nudged' overnight only reads beside what the agent said it was
-    waiting on (ADR 0021)."""
+    waiting on."""
     log.record(Nudge(attempt=1, expired_wait="2 review agents"), seq=2)
 
     assert "2 review agents" in log.entries()[-1].detail
@@ -350,7 +350,7 @@ def test_a_run_whose_log_holds_its_finish_has_ended(log):
 
 def test_a_cancelled_run_has_ended(log):
     """The third witness of an ending, beside the Terminal Announcement and the
-    Finish (ADR 0036). Every reader asks the one question — has this Run ended
+    Finish. Every reader asks the one question — has this Run ended
     — so the Session releases and the next Prune takes the orphan."""
     log.record_cancellation(state="implement")
 
@@ -415,7 +415,7 @@ def test_the_log_survives_being_written_by_one_process_and_read_by_another(tmp_p
 def test_the_compaction_point_a_launch_carried_is_its_own_line_and_no_switch(log):
     """A `launched` line rather than a `switched` one: no State ever compares
     its settings against the point, so a Switch line would lie about what it
-    is for, and the belief must not learn it (ADR 0047)."""
+    is for, and the belief must not learn it."""
     log.record_launch(state="grill", model="opus", effort="high", autocompact="200k")
 
     assert [(e.kind, e.state, e.detail) for e in log.entries() if e.kind != "switched"] == [
@@ -432,7 +432,7 @@ def test_a_launch_with_no_compaction_point_writes_no_launched_line(log):
 
 def test_a_compaction_is_recorded_where_the_agent_stood(log):
     """The diagnostic: 'its context was summarised three times during
-    implement' is read from here and nowhere else (ADR 0047)."""
+    implement' is read from here and nowhere else."""
     log.record_compaction(state="implement")
 
     assert [(e.kind, e.state) for e in log.entries()] == [("compacted", "implement")]
@@ -446,7 +446,7 @@ def test_a_compaction_before_anything_was_announced_names_no_state(log):
 
 def test_a_compaction_leaves_the_belief_where_it_was(log):
     """A summary discards conversation and leaves the Session's settings in
-    place, the reason ADR 0039 refused to key the belief on a Clear."""
+    place, which is why the belief is not keyed on a Clear."""
     log.record(Switch(state="grill", setting="model", value="opus"), seq=1)
     log.record_compaction(state="grill")
 
@@ -466,8 +466,7 @@ def test_a_report_is_logged_as_reported_with_its_state_and_subject(log):
 
 
 def test_a_report_hands_nothing_over_so_the_belief_stands(log):
-    """Nobody took the keyboard, so what Naiad typed is still evidence
-    (ADR 0055)."""
+    """Nobody took the keyboard, so what Naiad typed is still evidence."""
     log.record(Switch(state="grill", setting="model", value="opus"), seq=1)
     log.record(Report(state="implement"), seq=2)
 
