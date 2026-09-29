@@ -13,9 +13,8 @@ The exclusion unit is the working tree, named by the Entry's target path:
 sequential within a path, concurrent across paths. That single scan produces the
 behaviours with no special case for any of them. Sequential ordering per lane,
 because a lane that has yielded its Action yields nothing more. A parked Run
-blocking its own lane and only its own, because
-a parked Run is not finished, so its lane keeps answering Resume while every
-other lane answers for itself. And crash recovery, because a restarted
+blocking its own lane and only its own, because a parked Run is not finished,
+so its lane keeps answering Resume while every other lane answers for itself. And crash recovery, because a restarted
 Supervisor is handed the same signals and finds the same Entries.
 
 The Entry the scan chooses to Start carries the Predecessor its work stands on,
@@ -110,8 +109,8 @@ IDLE = Idle()
 Action = Start | Resume
 
 # What one scan of the Queue says: an Action per Lane with something live, or
-# the two nothing-to-do answers. Not called an Answer, which the glossary
-# reserves for what the Answerer settles a Question with.
+# the two nothing-to-do answers. Not called an Answer, a word reserved
+# for what the Answerer settles a Question with.
 Scan = list[Action] | Drained | Idle
 
 

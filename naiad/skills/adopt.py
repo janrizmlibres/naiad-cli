@@ -14,7 +14,7 @@ is said.
 The wording is the agent's to read rather than the operator's, apart from the
 description: that is the whole of what Claude Code matches an intent against.
 The intents quoted there are the operator's own words, kept verbatim because
-they are match strings rather than vocabulary — the glossary's word for what
+they are match strings rather than vocabulary — the domain's word for what
 they ask for is Adoption, and `handover` is reserved for a State of the shipped
 Workflow that an agent reading this must not confuse it with. Every one of them
 names Naiad, because a phase word alone is how anyone asks for that phase's

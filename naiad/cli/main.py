@@ -435,7 +435,7 @@ def _describe_the_work(parser: argparse.ArgumentParser, *, required: bool = True
     starting a Run could.
 
     The flags read as an operator types them — `--branch`, `--base` — while
-    what they set is named as the glossary names it. The translation happens
+    what they set is named as the domain names it. The translation happens
     here, at the boundary, and nowhere else.
 
     `required` is false where a batch file may describe the work instead, and
@@ -491,7 +491,7 @@ def _describe_where_and_how(parser: argparse.ArgumentParser) -> None:
         help="the working branch this work's commits belong on "
         "(default: the agent derives one in the repository)",
     )
-    # Left under the flag's own name rather than the glossary's, because the two
+    # Left under the flag's own name rather than the domain's, because the two
     # commands make different things of it: a Run records it as its Predecessor,
     # already resolved, while an Entry records it as the pinned base a
     # Predecessor is later resolved *from*. Naming it for either here would put

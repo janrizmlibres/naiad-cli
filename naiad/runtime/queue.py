@@ -34,9 +34,9 @@ from naiad.runtime.run import Run, RunStore
 ENTRY_SUFFIX = ".json"
 
 # What became of an Entry, derived from its Run and never stored.
-# The four the glossary names and no fifth: a word the Queue invented would be
-# a claim about a Run that the Run had not made — which is why the type is
-# closed rather than a bare string.
+# The four states an Entry can be in and no fifth: a word the Queue invented
+# would be a claim about a Run that the Run had not made — which is why the
+# type is closed rather than a bare string.
 Status = Literal["waiting", "running", "parked", "done"]
 
 WAITING: Status = "waiting"

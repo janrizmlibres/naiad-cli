@@ -1,6 +1,6 @@
 """A comment or docstring states its rule inline. It never cites a decision
-record, the glossary, a ticket, a spec or a smoke walkthrough, because a reader
-of the public checkout holds none of them.
+record, a ticket, a spec or a smoke walkthrough, because a reader of the
+public checkout holds none of them.
 """
 
 import re

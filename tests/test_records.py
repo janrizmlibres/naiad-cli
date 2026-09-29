@@ -267,8 +267,8 @@ def test_a_hold_re_arms_the_notified_flag(notices, holds):
     """The likeliest Hold arrives after a notification: silence, two Nudges,
     the operator told, and only then the human's 'pause' relayed. Gated on the
     shared flag, that Hold would notify nobody and the Run would park silently
-    — the exact failure the notification exists to prevent. A declared Hold is a fresh signal, so it re-arms the record the
-    way a fresh Wait does."""
+    — the exact failure the notification exists to prevent. A declared Hold is a
+    fresh signal, so it re-arms the record the way a fresh Wait does."""
     notices.record_notified(GRILL)
 
     assert notices.of(GRILL, hold_count=1) == (False, 0)

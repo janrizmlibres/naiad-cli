@@ -6,8 +6,8 @@ the same turn the branch was created.
 
 Two refusals. Write-once, because the next Entry's Predecessor stands on the
 declared name and a branch that moves mid-Run is the silent stacking failure
-the Predecessor rule guards against. And a name another Entry in the same repository
-holds — the two-Entries-one-branch refusal relocated to declaration time,
+the Predecessor rule guards against. And a name another Entry in the same
+repository holds — the two-Entries-one-branch refusal relocated to declaration time,
 naming the holder so the agent derives another name and retries.
 """
 

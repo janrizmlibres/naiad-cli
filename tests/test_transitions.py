@@ -87,8 +87,8 @@ terminal = true
 """
 
 # Both kinds of Gate State in one file: `review` sits in the declared order and
-# `no-repro` is named as a candidate. The pair is the whole of the distinction, so it
-# is asserted over one Workflow rather than two.
+# `no-repro` is named as a candidate. The pair is the whole of the distinction,
+# so it is asserted over one Workflow rather than two.
 BOTH_KINDS_OF_GATE = """
 name = "both"
 
@@ -195,8 +195,8 @@ def test_a_gate_state_named_as_a_candidate_is_never_skipped(branching):
 def test_gate_skipping_tells_the_two_kinds_of_gate_state_apart():
     """Both halves at once. `review` is a routine checkpoint an
     unattended Run may decline; `no-repro` is a destination the agent chose, and
-    deleting it would overrule the judgment that the agent, not Naiad, owns. One Workflow
-    holds both, because it is the pair that carries the distinction.
+    deleting it would overrule the judgment that the agent, not Naiad, owns. One
+    Workflow holds both, because it is the pair that carries the distinction.
     """
     workflow = parse_workflow(BOTH_KINDS_OF_GATE)
 

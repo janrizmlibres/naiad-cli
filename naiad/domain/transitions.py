@@ -41,7 +41,8 @@ def next_states(workflow: Workflow, current: str, *, skip_gates: bool = False) -
 
     Gate-skipping applies to the declared order alone. A Gate State
     named as a candidate is a destination the agent chose rather than a routine
-    checkpoint, and deleting it would overrule the judgment that the agent, not Naiad, owns.
+    checkpoint, and deleting it would overrule the judgment that the agent, not
+    Naiad, owns.
     """
     state = workflow.state(current)
     if state is not None and state.next_candidates:

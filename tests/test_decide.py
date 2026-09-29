@@ -52,8 +52,8 @@ name = "done"
 terminal = true
 """
 
-# A fork whose short branch ends at a Gate State, which is the shape where the
-# exit an unattended Run must still be offered is a Gate State.
+# A fork whose short branch ends at a Gate State, which is the shape where an
+# unattended Run must still be offered an exit.
 BRANCHING = """
 name = "bug"
 

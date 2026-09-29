@@ -60,8 +60,8 @@ class LogLine:
     """One thing that happened: one line of a Run's narrative.
 
     Named for the line rather than for the entry it once was, because Entry is
-    the glossary's word for a Run that does not exist yet — a collision the
-    glossary is the place to prevent, as it does for Branch and Working branch.
+    the project's word for a Run that does not exist yet — a collision worth
+    preventing, as it is for Branch and Working branch.
 
     kind names it — 'announced' and 'asked' for what the agent said, and the
     Action's own past tense for what Naiad did about it.
@@ -200,9 +200,8 @@ class RunLog:
 
         The settings are what Naiad typed rather than what the Session holds,
         and the gap between those is the point. Claude Code fires no hook on a
-        Switch and Naiad never reads the session's state back (it reads no Claude Code
-        internals), so what Naiad put there is the only evidence there is. Read back from
-        the log rather than kept as a record of its own, for the reason `ended`
+        Switch and Naiad never reads the session's state back, so what Naiad
+        put there is the only evidence there is. Read back from the log rather than kept as a record of its own, for the reason `ended`
         and `opened` are: every Switch is already written here, and one fact
         deserves one home.
 

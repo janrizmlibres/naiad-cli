@@ -244,9 +244,8 @@ This run is queued and is not driving you yet. Its work belongs on the branch
 `{working_branch}`, which the human already made: check it out if you are not
 standing on it, then end your turn."""
 
-# The branchless wording. The rule that a Working branch is given or derived, never invented by
-# Naiad, in as many words, because the
-# State that would ordinarily have prepared the branch is behind this start.
+# The branchless wording. The rule that a Working branch is given or derived,
+# never invented by Naiad, in as many words, because the State that would ordinarily have prepared the branch is behind this start.
 _ADOPTION_CLOSING_BRANCHLESS = """\
 This run is queued and is not driving you yet. It has no working branch: derive
 one from this repository's conventions, create it, and declare it with

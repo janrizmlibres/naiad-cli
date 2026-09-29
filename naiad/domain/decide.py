@@ -173,8 +173,8 @@ class Signals:
     keyboard since that was typed.
 
     A belief and not a reading: Claude Code fires no hook on a Switch, and
-    Naiad never reads the session back, so what Naiad put there
-    is the only evidence there is. handed_over is when that evidence is worth
+    Naiad never reads the session back, so what Naiad put there is the only
+    evidence there is. handed_over is when that evidence is worth
     nothing — past a Notify a human may have typed a `/model` of their own, and
     Naiad cannot know — which is why it is carried beside the belief rather
     than folded into it: emptying the belief where it is read would put the
@@ -263,8 +263,7 @@ class Switch:
     A first-class Action for the reason Clear is one: what has been typed and
     what is left is the decision's business, so the loop keeps no rule of its
     own. Unlike a Clear it is never confirmed and never re-typed
-    within one Announcement — it stays a best-effort switch,
-    with the Ticks between doing the work a confirmation would have done.
+    within one Announcement — it stays a best-effort switch, with the Ticks between doing the work a confirmation would have done.
     """
 
     state: str
