@@ -32,6 +32,8 @@ from naiad.domain.workflow import parse_workflow
 WORKFLOW = """
 name = "feature"
 
+[answerer]
+
 [[states]]
 name = "grill"
 prompt = "/grill-with-docs {task}"
@@ -72,6 +74,8 @@ terminal = true
 RESERVING = """
 name = "map"
 
+[answerer]
+
 [[states]]
 name = "wayfind"
 prompt = "/wayfinder {subject}"
@@ -81,6 +85,36 @@ questions = "human"
 name = "done"
 terminal = true
 """
+
+
+# A Workflow that declares no Answerer: every Question is the human's unless a
+# State opts in (ADR 0050).
+NO_ANSWERER = """
+name = "plain"
+
+[[states]]
+name = "plan"
+prompt = "/plan {task}"
+
+[[states]]
+name = "trusting"
+prompt = "/trust"
+questions = "answerer"
+
+[[states]]
+name = "insisting"
+prompt = "/insist"
+questions = "human"
+
+[[states]]
+name = "done"
+terminal = true
+"""
+
+
+@pytest.fixture
+def no_answerer():
+    return parse_workflow(NO_ANSWERER)
 
 
 @pytest.fixture
@@ -1195,6 +1229,35 @@ def test_a_reserved_question_notifies_once_however_often_the_decision_is_made(re
     already = signals("wayfind", question=QUESTION, notified=True)
 
     assert decide(reserving, already) is NOTHING
+
+
+def test_a_question_in_a_workflow_with_no_answerer_parks_the_run_without_consulting(no_answerer):
+    action = decide(no_answerer, signals("plan", question=QUESTION))
+
+    assert isinstance(action, Notify)
+    assert action.question == QUESTION
+
+
+def test_the_no_answerer_reason_leads_the_questions_text(no_answerer):
+    action = decide(no_answerer, signals("plan", question=QUESTION))
+
+    assert action.reason == f"no Answerer is declared: {QUESTION.text}"
+
+
+def test_a_state_that_asked_for_the_human_keeps_the_reserve_wording_without_a_table(no_answerer):
+    action = decide(no_answerer, signals("insisting", question=QUESTION))
+
+    assert action.reason == f"state 'insisting' reserves its Questions for you: {QUESTION.text}"
+
+
+def test_a_state_opting_in_consults_the_answerer_in_a_workflow_with_no_table(no_answerer):
+    assert decide(no_answerer, signals("trusting", question=QUESTION)) == Consult(question=QUESTION)
+
+
+def test_a_reserving_state_in_a_file_with_the_table_keeps_the_reserve_wording(reserving):
+    action = decide(reserving, signals("wayfind", question=QUESTION))
+
+    assert action.reason == f"state 'wayfind' reserves its Questions for you: {QUESTION.text}"
 
 
 def test_a_state_that_reserves_nothing_still_consults_the_answerer(workflow):

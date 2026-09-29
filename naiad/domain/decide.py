@@ -355,7 +355,7 @@ class Notify:
     Run, which is why this is not Finish.
 
     question is set when what needs a human is a Question — one the Answerer
-    escalated, or one the Workflow reserved for the human (ADR 0046) — so that
+    escalated, or one the Workflow gave the human (ADR 0046, 0050) — so that
     the Answer log records what became of it beside the ones that were
     answered. An Escalation is not a separate Action — a Gate reached, an
     Answerer escalating, an agent gone silent and an agent hung are one
@@ -427,18 +427,20 @@ def decide(workflow: Workflow, signals: Signals, *, skip_gates: bool = False) ->
         # ending. That exemption is theirs alone.
         asked_from = workflow.state(announcement.state)
         if asked_from is not None and asked_from.questions == "human":
-            # The Workflow reserved this State's Questions for the human, so
-            # the Answerer is never consulted: the Run parks exactly as it
-            # does on an Escalation, and the human answers in the session
-            # (ADR 0046). The Question rides along for the Answer log, which
-            # records what became of it; the reason carries its text because
-            # no Answerer has phrased one and the notification is all the
-            # human sees before they sit down.
-            return _notify(
-                signals,
-                f"state '{asked_from.name}' reserves its Questions for you: {question.text}",
-                question=question,
+            # The Workflow gave this State's Questions to the human, so the
+            # Answerer is never consulted: the Run parks exactly as it does on
+            # an Escalation, and the human answers in the session (ADR 0046).
+            # The Question rides along for the Answer log, which records what
+            # became of it; the reason carries its text because no Answerer
+            # has phrased one and the notification is all the human sees
+            # before they sit down. It says who put the Question with them:
+            # the State, or a file that declared no Answerer (ADR 0050).
+            whose = (
+                f"state '{asked_from.name}' reserves its Questions for you"
+                if asked_from.questions_explicit
+                else "no Answerer is declared"
             )
+            return _notify(signals, f"{whose}: {question.text}", question=question)
         if consultation is None:
             return Consult(question=question)
         if isinstance(consultation, Escalated):

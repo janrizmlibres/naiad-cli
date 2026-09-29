@@ -40,6 +40,8 @@ from naiad.runtime.run import RunStore
 WORKFLOW = """
 name = "feature"
 
+[answerer]
+
 [[states]]
 name = "grill"
 prompt = "/grill-with-docs {task}, then announce {next_state}"
@@ -56,6 +58,16 @@ clear = true
 name = "done"
 terminal = true
 """
+
+
+def edited(text, old, new):
+    """The fixture Workflow with one piece of it swapped. Refuses to no-op, so a
+    reformatted fixture fails here rather than passing for the wrong reason."""
+    assert old in text
+    return text.replace(old, new)
+
+
+WITHOUT_TABLE = edited(WORKFLOW, "[answerer]\n\n", "")
 
 
 class RecordingSession:
@@ -1188,14 +1200,7 @@ def test_the_answerer_runs_against_the_target_repository(run, workflow, session)
 
 
 def test_the_workflows_answerer_keys_reach_the_consultation(run, session):
-    keyed = parse_workflow(
-        WORKFLOW
-        + """
-[answerer]
-model = "haiku"
-effort = "low"
-"""
-    )
+    keyed = parse_workflow(edited(WORKFLOW, "[answerer]", '[answerer]\nmodel = "haiku"\neffort = "low"'))
     ask(run, "Which module owns retries?", "the client")
     answerer = RecordingAnswerer()
 
@@ -1205,7 +1210,7 @@ effort = "low"
     assert answerer.consulted[0].effort == "low"
 
 
-def test_a_workflow_without_an_answerer_table_consults_with_neither_key(run, workflow, session):
+def test_an_answerer_with_no_settings_is_consulted_with_neither_key(run, workflow, session):
     ask(run, "Which module owns retries?", "the client")
     answerer = RecordingAnswerer()
 
@@ -1213,6 +1218,41 @@ def test_a_workflow_without_an_answerer_table_consults_with_neither_key(run, wor
 
     assert answerer.consulted[0].model is None
     assert answerer.consulted[0].effort is None
+
+
+def test_a_state_opting_in_without_a_table_consults_with_neither_key(run, session):
+    """The table holds settings and moves the default; a State asking for the
+    Answerer in a file without one gets it on the platform's defaults
+    (ADR 0050)."""
+    opted_in = parse_workflow(
+        edited(WITHOUT_TABLE, 'name = "implement"', 'name = "implement"\nquestions = "answerer"')
+    )
+    ask(run, "Which module owns retries?", "the client")
+    answerer = RecordingAnswerer()
+
+    action = drive(run, opted_in, session, answerer=answerer)
+
+    assert isinstance(action, Consult)
+    assert answerer.consulted[0].model is None
+    assert answerer.consulted[0].effort is None
+
+
+def test_a_workflow_without_an_answerer_table_parks_the_run_and_never_consults(
+    run, session
+):
+    plain = parse_workflow(WITHOUT_TABLE)
+    ask(run, "Which module owns retries?", "the client")
+    answerer = RecordingAnswerer()
+    notifier = RecordingNotifier()
+
+    action = drive(run, plain, session, answerer=answerer, notifier=notifier)
+
+    assert isinstance(action, Notify)
+    assert answerer.consulted == []
+    assert "no Answerer is declared: Which module owns retries?" in notifier.notified[0][1]
+    entry = AnswerLog(run.root).entries()[0]
+    assert entry.escalated is True
+    assert entry.answer == "no Answerer is declared: Which module owns retries?"
 
 
 def test_the_first_consultation_starts_an_answerer_session_and_records_it(run, workflow, session):

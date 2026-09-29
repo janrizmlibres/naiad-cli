@@ -116,12 +116,21 @@ The `fallback` key is the Answerer's alone. ADR 0031 gives the reasoning and
 the syntax. It names `sonnet` alone: a fallback repeating the primary is a
 retry on the model that just declined.
 
-A State may keep the Answerer out with `questions = "human"`. A Question asked
-from such a State is never consulted: the Run parks as it does on an
-Escalation, the notification carries the Question's text, and the human
-answers in the Session. `wayfind` declares it, because a Wayfinder map's
-tickets are the decisions a human is meant to make (ADR 0046). Every other
-State says nothing and keeps the Answerer.
+The table is also the file's default for whose Questions are whose. A file
+that declares `[answerer]`, even an empty table, sends every State's Questions
+to the Answerer; a file that declares none sends them all to the human. Either
+default gives way to a State's own `questions = "human"` or
+`questions = "answerer"`, and a State that opts in within a table-less file
+consults the Answerer on the platform's defaults (ADR 0050).
+
+A Question that is the human's is never consulted: the Run parks as it does on
+an Escalation, the notification carries the Question's text, and the human
+answers in the Session. The reason ahead of the text says why: "no Answerer is
+declared" where the file's default put it with the human, and "state X reserves
+its Questions for you" where the State asked. `wayfind` declares
+`questions = "human"`, because a Wayfinder map's tickets are the decisions a
+human is meant to make (ADR 0046). Every other State says nothing and follows the
+file's default, which here is the Answerer this file declares.
 
 ## Where each State's shape was decided
 

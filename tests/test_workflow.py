@@ -187,13 +187,54 @@ def test_an_empty_state_key_is_kept_rather_than_read_as_absent():
     assert workflow.state("a").model == ""
 
 
-def test_a_state_may_reserve_its_questions_for_the_human():
-    """A State declaring `questions = "human"` is one whose Questions are never
-    the Answerer's to settle (ADR 0046). Absence is the Answerer, which is what
-    every State meant before the key existed."""
+def test_a_workflow_with_no_answerer_table_gives_every_state_to_the_human():
+    """The human is the default (ADR 0050): nothing is decided for an adopter
+    who declared nothing."""
     workflow = parse_workflow(
         """
         name = "w"
+
+        [[states]]
+        name = "a"
+        prompt = "x"
+
+        [[states]]
+        name = "done"
+        terminal = true
+        """
+    )
+
+    assert workflow.state("a").questions == "human"
+    assert workflow.state("a").questions_explicit is False
+
+
+def test_declaring_the_answerer_table_gives_every_state_to_the_answerer_even_when_empty():
+    workflow = parse_workflow(
+        """
+        name = "w"
+
+        [answerer]
+
+        [[states]]
+        name = "a"
+        prompt = "x"
+
+        [[states]]
+        name = "done"
+        terminal = true
+        """
+    )
+
+    assert workflow.state("a").questions == "answerer"
+    assert workflow.state("a").questions_explicit is False
+
+
+def test_a_state_may_reserve_its_questions_for_the_human_in_a_file_with_the_table():
+    workflow = parse_workflow(
+        """
+        name = "w"
+
+        [answerer]
 
         [[states]]
         name = "a"
@@ -211,7 +252,58 @@ def test_a_state_may_reserve_its_questions_for_the_human():
     )
 
     assert workflow.state("a").questions == "human"
+    assert workflow.state("a").questions_explicit is True
     assert workflow.state("b").questions == "answerer"
+
+
+def test_a_state_may_opt_in_to_the_answerer_in_a_file_without_the_table():
+    """The table carries settings and moves the default; the Answerer does not
+    need it to exist. It runs on the platform's defaults (ADR 0050)."""
+    workflow = parse_workflow(
+        """
+        name = "w"
+
+        [[states]]
+        name = "a"
+        prompt = "x"
+        questions = "answerer"
+
+        [[states]]
+        name = "b"
+        prompt = "y"
+
+        [[states]]
+        name = "done"
+        terminal = true
+        """
+    )
+
+    assert workflow.state("a").questions == "answerer"
+    assert workflow.state("a").questions_explicit is True
+    assert workflow.state("b").questions == "human"
+    assert workflow.answerer_model is None
+    assert workflow.answerer_effort is None
+    assert workflow.answerer_fallback is None
+
+
+def test_a_state_asking_for_the_human_in_a_file_without_the_table_has_asked():
+    workflow = parse_workflow(
+        """
+        name = "w"
+
+        [[states]]
+        name = "a"
+        prompt = "x"
+        questions = "human"
+
+        [[states]]
+        name = "done"
+        terminal = true
+        """
+    )
+
+    assert workflow.state("a").questions == "human"
+    assert workflow.state("a").questions_explicit is True
 
 
 def test_the_answerer_table_is_parsed_with_both_keys_optional():
