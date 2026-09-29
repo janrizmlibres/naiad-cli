@@ -284,3 +284,33 @@ def test_an_answerer_that_fails_escalates_with_what_it_said(tmp_path, monkeypatc
 
     assert isinstance(outcome, Escalated)
     assert "it-broke" in outcome.reason
+
+
+def test_an_answerer_without_claude_on_path_escalates_with_a_sentence(tmp_path, monkeypatch):
+    """Not the exception's text: whoever is woken by this reason is told what
+    is missing, and it is the same thing the doctor names."""
+    monkeypatch.setenv("PATH", str(tmp_path))
+
+    outcome = adapter.HeadlessAnswerer().consult(
+        ConsultationSpec(cwd=tmp_path, claude_session_id="an-id", text="ask", resume=False)
+    )
+
+    assert outcome == Escalated(reason="the Answerer could not be run: `claude` is not on PATH")
+
+
+def test_an_answerer_that_cannot_launch_escalates_with_the_launch_failure(tmp_path, monkeypatch):
+    """`claude` is there but the system refused to start it: not a PATH problem,
+    and saying so would send the operator looking in the wrong place."""
+    (tmp_path / "claude").write_text("#!/bin/sh\n")
+    (tmp_path / "claude").chmod(0o644)
+    monkeypatch.setenv("PATH", str(tmp_path))
+    monkeypatch.setattr(adapter, "CLAUDE", str(tmp_path / "claude"))
+
+    outcome = adapter.HeadlessAnswerer().consult(
+        ConsultationSpec(cwd=tmp_path, claude_session_id="an-id", text="ask", resume=False)
+    )
+
+    assert isinstance(outcome, Escalated)
+    assert outcome.reason.startswith("the Answerer could not be run: ")
+    assert "Errno" not in outcome.reason
+    assert "PATH" not in outcome.reason

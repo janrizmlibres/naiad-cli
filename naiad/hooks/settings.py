@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import re
 from copy import deepcopy
+from dataclasses import dataclass
 from typing import Any
 
 # The three moments a context is created or destroyed. `resume` is deliberately
@@ -67,6 +68,59 @@ def with_naiad_hooks(settings: Settings, *, naiad: str) -> Settings:
     return merged
 
 
+# Every hook `with_naiad_hooks` installs, as (event, matcher, subcommand), for
+# `installed_hooks` to look for. Kept in step by hand: a hook added there and not
+# here is one the doctor would never miss.
+NAIAD_HOOKS = (
+    *(("SessionStart", matcher, PROTOCOL_SUBCOMMAND) for matcher in SESSION_START_MATCHERS),
+    ("Stop", None, STOPPED_SUBCOMMAND),
+    ("UserPromptSubmit", None, SUBMITTED_SUBCOMMAND),
+)
+
+
+@dataclass(frozen=True)
+class InstalledHooks:
+    """What a settings document holds of Naiad's hooks, judged against the naiad
+    that is asking.
+
+    `missing` names each hook not there at all, as `Event` or `Event(matcher)`.
+    `elsewhere` holds the commands naming another naiad — a rebuilt virtualenv
+    or a moved checkout — which run the wrong program or none.
+    """
+
+    missing: tuple[str, ...]
+    elsewhere: tuple[str, ...]
+
+
+def installed_hooks(settings: Settings, *, naiad: str) -> InstalledHooks:
+    """The read-only twin of `with_naiad_hooks`: which of its hooks are present,
+    and whether they name `naiad`. Judges the document as it stands."""
+    hooks = settings.get("hooks")
+    hooks = hooks if isinstance(hooks, dict) else {}
+    missing: list[str] = []
+    elsewhere: list[str] = []
+    for event, matcher, subcommand in NAIAD_HOOKS:
+        commands = [
+            str(hook.get("command", ""))
+            for entry in _dicts(hooks.get(event))
+            if entry.get("matcher") == matcher
+            for hook in _dicts(entry.get("hooks"))
+            if _is_ours(hook) and str(hook.get("command", "")).split()[-1:] == [subcommand]
+        ]
+        if not commands:
+            missing.append(event if matcher is None else f"{event}({matcher})")
+        elsewhere += [
+            command
+            for command in commands
+            if command != f"{naiad} {subcommand}" and command not in elsewhere
+        ]
+    return InstalledHooks(missing=tuple(missing), elsewhere=tuple(elsewhere))
+
+
+def _dicts(value: Any) -> list[dict[str, Any]]:
+    return [item for item in value if isinstance(item, dict)] if isinstance(value, list) else []
+
+
 def _command(naiad: str, subcommand: str) -> dict[str, str]:
     return {"type": "command", "command": f"{naiad} {subcommand}"}
 
@@ -86,4 +140,11 @@ def _is_ours(hook: dict[str, Any]) -> bool:
     return bool(_NAIAD_HOOK_COMMAND.search(str(hook.get("command", ""))))
 
 
-__all__ = ["SESSION_START_MATCHERS", "Settings", "with_naiad_hooks"]
+__all__ = [
+    "InstalledHooks",
+    "NAIAD_HOOKS",
+    "SESSION_START_MATCHERS",
+    "Settings",
+    "installed_hooks",
+    "with_naiad_hooks",
+]

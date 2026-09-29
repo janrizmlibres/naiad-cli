@@ -35,6 +35,7 @@ from naiad.cli.answers import render_answers
 from naiad.cli.ask import AskError, ask_question
 from naiad.cli.batch import BatchError, enqueue_batch, load_batch
 from naiad.cli.branch import BranchError, declare_branch
+from naiad.cli.doctor import Severity, diagnose, entrance_refusal, render_report
 from naiad.cli.enqueue import REFUSALS, Work, enqueue
 from naiad.cli.hold import HoldError, declare_hold
 from naiad.cli.library import (
@@ -306,6 +307,12 @@ def build_parser() -> argparse.ArgumentParser:
         help="with --starter, overwrite a starter.toml that differs from the shipped one",
     )
     install.set_defaults(handler=_install)
+
+    doctor = subcommands.add_parser(
+        "doctor",
+        help="check that this machine can run Naiad, and say how to fix what cannot",
+    )
+    doctor.set_defaults(handler=_doctor)
 
     watch_parser = _driving_parser(
         subcommands, "watch", help="drive a Run until it ends or is interrupted"
@@ -651,6 +658,10 @@ def _install(arguments: argparse.Namespace) -> int:
     its own and moves with `NAIAD_HOME` as everything under the home does,
     where the hooks and the skill live in a configuration that is Claude Code's
     and needs naming.
+
+    Ends with the doctor's report, whatever install did, so that what it just
+    set up is read against what the machine still lacks. The report never
+    changes install's exit code: that is install's own outcome.
     """
     if arguments.force and not arguments.starter:
         print("naiad: --force applies to --starter, and --starter was not given", file=sys.stderr)
@@ -667,8 +678,34 @@ def _install(arguments: argparse.Namespace) -> int:
     except (OSError, ValueError) as error:
         print(f"naiad: {error}", file=sys.stderr)
         return 2
+    finally:
+        # After what install did or refused to do, and never changing its exit
+        # code: install is the command that fixes what the report finds, so the
+        # report is the check that it did.
+        print(render_report(diagnose()))
 
     return 0
+
+
+def _doctor(arguments: argparse.Namespace) -> int:
+    """Say what this machine lacks and how to fix it, and repair nothing: what
+    to run is the operator's to run. Exits 1 only when a check fails, so that a
+    warning never stops a script that gates on it."""
+    findings = diagnose()
+    print(render_report(findings))
+    return 1 if any(finding.severity is Severity.FAIL for finding in findings) else 0
+
+
+def _refused_at_the_door() -> bool:
+    """Whether an entrance must stop, having said why. Every command that
+    starts or drives Runs asks this first, and nothing else does: the commands
+    an agent types inside a session, and the hooks Claude Code fires, run where
+    a refusal would only add noise to work already under way."""
+    refusal = entrance_refusal()
+    if refusal is None:
+        return False
+    print(refusal, file=sys.stderr)
+    return True
 
 
 def _watch(arguments: argparse.Namespace) -> int:
@@ -677,6 +714,9 @@ def _watch(arguments: argparse.Namespace) -> int:
     A held lock means the Supervisor may be ticking this very Run in one of
     its lanes, and a second ticker on one Run delivers everything twice.
     """
+    if _refused_at_the_door():
+        return 2
+
     if SupervisorLock(default_lock_path()).held():
         print(
             "naiad: a supervisor is already driving the queue's live run; "
@@ -800,6 +840,9 @@ def _run(arguments: argparse.Namespace) -> int:
     meaning 'start this now' the moment a Queue existed, and where the Entry
     lands is the honest place for that to show.
     """
+    if _refused_at_the_door():
+        return 2
+
     queued = _queued(arguments, remedy=RUN_COMMAND)
     if queued is None:
         return 2
@@ -862,6 +905,9 @@ def _adopt(arguments: argparse.Namespace) -> int:
     knows: the Protocol, what to do with the rest of this turn, and, when
     nothing is supervising, the warning to relay.
     """
+    if _refused_at_the_door():
+        return 2
+
     try:
         # Before anything is queued, because a session with no pane is one the
         # Supervisor could never attach to: an Entry marked to attach to
@@ -1124,6 +1170,9 @@ def _queue_watch(arguments: argparse.Namespace) -> int:
     one working tree — which is the single thing one Run per working tree
     exists to prevent (ADR 0020).
     """
+    if _refused_at_the_door():
+        return 2
+
     with SupervisorLock(default_lock_path()).taken() as mine:
         if not mine:
             print(

@@ -49,13 +49,25 @@ class HeadlessAnswerer:
                 f"{int(CONSULTATION_TIMEOUT_SECONDS)}s"
             )
         except OSError as error:
-            return Escalated(reason=f"the Answerer could not be run: {error}")
+            return Escalated(reason=f"the Answerer could not be run: {_why_not_launched(error)}")
 
         if finished.returncode != 0:
             return Escalated(
                 reason=f"the Answerer failed: {(finished.stderr or '').strip() or 'no output'}"
             )
         return parse_outcome(finished.stdout)
+
+
+def _why_not_launched(error: OSError) -> str:
+    """The launch failure as a sentence rather than an exception's text.
+
+    A `claude` that is not on PATH is told apart by the file the failure names,
+    because the same FileNotFoundError also reports a working directory that is
+    gone, and that is not what to send the operator to fix.
+    """
+    if isinstance(error, FileNotFoundError) and error.filename == CLAUDE:
+        return f"`{CLAUDE}` is not on PATH"
+    return f"`{CLAUDE}` could not be launched ({error.strerror or error})"
 
 
 def command_for(spec: ConsultationSpec) -> list[str]:

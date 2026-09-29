@@ -131,7 +131,7 @@ def test_a_bare_install_leaves_the_library_alone(monkeypatch, tmp_path, capsys):
     assert main(_install(tmp_path)) == 0
 
     assert {path.name: path.read_bytes() for path in library.iterdir()} == before
-    assert "workflow" not in capsys.readouterr().out
+    assert "installed the starter" not in capsys.readouterr().out
 
 
 def test_a_bare_install_does_not_create_the_library(monkeypatch, tmp_path):

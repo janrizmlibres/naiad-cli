@@ -1,4 +1,8 @@
+import os
+
 import pytest
+
+from fake_machine import install_healthy
 
 
 class RecordingSessions:
@@ -48,3 +52,17 @@ def isolated_machine(monkeypatch, tmp_path_factory):
     root = tmp_path_factory.mktemp("machine")
     monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(root / "claude"))
     monkeypatch.setenv("NAIAD_HOME", str(root / "naiad"))
+
+
+@pytest.fixture(autouse=True)
+def ready_machine(monkeypatch, tmp_path_factory):
+    """A machine where the doctor finds tmux and claude, whatever this one has.
+
+    Every entrance checks the machine before it starts, and most tests are about
+    what an entrance does once it has. The tests of the check itself put the
+    real one back and build the machine they mean to break.
+    """
+    directory = tmp_path_factory.mktemp("bin")
+    install_healthy(directory)
+    monkeypatch.setenv("PATH", f"{directory}:{os.environ['PATH']}")
+    monkeypatch.setattr("naiad.cli.main.entrance_refusal", lambda: None)

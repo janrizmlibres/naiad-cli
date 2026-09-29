@@ -7,6 +7,7 @@ Announcement — the two ways this could be wrong without any rule being wrong.
 
 import pytest
 
+from naiad.adapters.answerer import HeadlessAnswerer
 from naiad.domain.answerer import Answered, Escalated
 from naiad.domain.decide import (
     CLEAR_CONFIRM_SECONDS,
@@ -1318,6 +1319,26 @@ def test_an_escalation_notifies_and_is_logged_and_sends_nothing_into_the_session
     entry = AnswerLog(run.root).entries()[0]
     assert entry.escalated is True
     assert entry.options == ("Twilio", "Vonage")
+
+
+def test_a_question_whose_answerer_cannot_be_launched_parks_the_run_with_the_sentence(
+    run, workflow, session, tmp_path, monkeypatch
+):
+    """Through the real adapter rather than a stand-in: the reason the operator
+    is woken with is what the adapter says, not an exception's text."""
+    monkeypatch.setenv("PATH", str(tmp_path / "no-claude-here"))
+    ask(run, "Which module owns retries?", "the client")
+    notifier = RecordingNotifier()
+
+    _, acted = resolve(run, workflow, session, HeadlessAnswerer(), notifier=notifier)
+
+    reason = "the Answerer could not be run: `claude` is not on PATH"
+    assert isinstance(acted, Notify)
+    assert session.sent == []
+    assert reason in notifier.notified[0][1]
+    entry = AnswerLog(run.root).entries()[0]
+    assert entry.escalated is True
+    assert reason in entry.answer
 
 
 def test_an_answer_and_an_escalation_each_record_the_state_the_question_was_asked_from(
