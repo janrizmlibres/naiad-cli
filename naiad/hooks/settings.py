@@ -2,12 +2,12 @@
 
 Pure: a settings document in, a settings document out. Whoever writes the file
 decides where it goes — hooks are installed independently of any Run, and never
-into the target repository (PRD, 'Storage').
+into the target repository.
 
-Naiad's entire coupling to Claude Code is a few documented surfaces (ADR 0002),
+Naiad's entire coupling to Claude Code is a few documented surfaces,
 most of them these hooks: a SessionStart injecting the Protocol, a Stop
 reporting that a turn ended, and a UserPromptSubmit confirming that a typed
-Prompt reached the Session whole (ADR 0053).
+Prompt reached the Session whole.
 """
 
 from __future__ import annotations

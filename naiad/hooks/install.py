@@ -1,7 +1,7 @@
 """Writing Naiad's hooks into the operator's Claude Code settings.
 
 User settings rather than the target repository's: Naiad writes nothing into
-the repository it drives (PRD, 'Storage'), and hooks belong to the operator's
+the repository it drives, and hooks belong to the operator's
 machine rather than to any one Run — they are installed independently of a Run
 and do nothing when none is attached.
 """

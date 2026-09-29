@@ -10,7 +10,7 @@ night's backlog cannot fail at three in the morning on a typo.
 One copy of these checks rather than one per caller, so that neither can quietly
 stop making one of them. Not every refusal is here: the Queue's own —
 a Working branch another Entry has claimed — needs the Queue's contents and
-lives with the enqueue, as does the missing-task refusal (ADR 0024), which only
+lives with the enqueue, as does the missing-task refusal, which only
 the entrances can fail — an Entry's task is total by the time kickoff sees it.
 The announce command's missing-Subject check is a different guard on a
 different actor, refusing what the agent said rather than what an operator
@@ -43,8 +43,8 @@ class Remedy:
     # Names {state}, because which State wanted a Subject is not known until
     # the Workflow has been read.
     subject: str
-    # How to say what the work is when neither a task nor a Subject did
-    # (ADR 0024). No {state}: the refusal is about describing work at all.
+    # How to say what the work is when neither a task nor a Subject did. No
+    # {state}: the refusal is about describing work at all.
     task: str
 
     def for_subject(self, state: str) -> str:
@@ -56,7 +56,7 @@ def _typed(command: str) -> Remedy:
     typed, with the missing option added — something they can retype rather
     than a rule they have to translate. Takes the command alone and spells the
     positionals itself, because the task remedy needs the line both with
-    `<task>` and without it (ADR 0024)."""
+    `<task>` and without it."""
     described = f"{command} <workflow>"
     return Remedy(
         subject=f"try: {described} <task> --at {{state}} --subject <value>",
@@ -73,7 +73,7 @@ ADD_COMMAND = _typed("naiad queue add")
 # Work described at the session being handed over. Spelled out rather than made
 # by `_typed`, because an Adoption names its work in flags: there is no Subject
 # to stand in for a Task, so the Task is required and the line reads
-# differently from either operator command's (ADR 0028).
+# differently from either operator command's.
 ADOPT_COMMAND = Remedy(
     subject="try: naiad adopt <workflow> --at {state} --task <task> --subject <value>",
     # Unreachable, `--task` being required — worded anyway, so that a Remedy is
@@ -92,7 +92,7 @@ BATCH_ENTRY = Remedy(
 class Start:
     """What survived the checks: the Workflow, the State the work begins at,
     and the Working branch — still optional, because omitting one is intent:
-    the agent at the head of the Run derives a name there (ADR 0022)."""
+    the agent at the head of the Run derives a name there."""
 
     workflow: Workflow
     state: State
@@ -100,9 +100,9 @@ class Start:
 
 
 class MissingTask(Exception):
-    """Work described with neither a task nor a Subject to stand in for one
-    (ADR 0024). With both absent nothing says what the work is — not to the
-    Queue listing, not to the Answerer, not to a Prompt naming {task}."""
+    """Work described with neither a task nor a Subject to stand in for one.
+    With both absent nothing says what the work is — not to the Queue listing,
+    not to the Answerer, not to a Prompt naming {task}."""
 
 
 class MissingSubject(Exception):
@@ -111,7 +111,7 @@ class MissingSubject(Exception):
     Nothing is announced at either entrance, so the announce command's guard
     does not reach them. Without this the first Prompt arrives with the
     placeholder rendered empty, into a session with no memory of what it was
-    meant to say (ADR 0009).
+    meant to say.
     """
 
 
@@ -130,7 +130,7 @@ def check_start(
     they have to translate.
 
     The Working branch is not among the checks: given, it is carried verbatim,
-    and absent, the agent at the head of the Run derives one (ADR 0022).
+    and absent, the agent at the head of the Run derives one.
     """
     workflow = load_workflow(workflow_path)
     first = resolve_start_state(workflow, start_state)

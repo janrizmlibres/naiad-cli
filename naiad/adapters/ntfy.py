@@ -1,7 +1,7 @@
 """Pushing a telling to a phone through ntfy.
 
 An adapter and nothing more: whether to notify, and once per what, are rules
-and were decided in naiad.domain.decide (ADR 0004). What is here is one POST —
+and were decided in naiad.domain.decide. What is here is one POST —
 the message as the body, the title and the priority as headers — and the
 mapping from Naiad's three tellings onto ntfy's scale of five.
 
@@ -26,7 +26,7 @@ NTFY_TOKEN_VARIABLE = "NAIAD_NTFY_TOKEN"
 # still for a notification it may not even get. Roughly, because it bounds the
 # socket and not the name lookup before it: a resolver that hangs — a dropped
 # VPN, a captive portal — stalls the tick past this. Survivable because the
-# once-per-Announcement rule (ADR 0004) means a parked Run pays it once rather
+# once-per-Announcement rule means a parked Run pays it once rather
 # than every tick, and worth watching if a push service is ever added to a
 # Lane-heavy Supervisor, whose lanes tick one after another.
 TIMEOUT_SECONDS = 5.0
@@ -34,7 +34,7 @@ TIMEOUT_SECONDS = 5.0
 # ntfy grades 1 (min) to 5 (max). A human who is needed gets 4, which is a
 # push loud enough to notice; 5 breaks through Do Not Disturb and a Gate State
 # waiting until morning does not deserve that. Good news travels at 3, and a
-# Report at 2, low enough that a milestone never sounds like a Gate (ADR 0055).
+# Report at 2, low enough that a milestone never sounds like a Gate.
 PRIORITIES = {
     Notification.NOTIFY: "4",
     Notification.FINISH: "3",

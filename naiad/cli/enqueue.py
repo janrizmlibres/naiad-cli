@@ -3,7 +3,7 @@
 Supervises nothing itself. `naiad queue add` returns here and stops, which is
 what an agent inside a session needs — a tool call that became a process
 blocking for hours is the failure the Queue exists to avoid — and `naiad run`
-goes on to adopt or become a Supervisor afterwards (ADR 0014).
+goes on to adopt or become a Supervisor afterwards.
 
 The Entry is validated before it exists, so that everything which used to fail
 at kickoff fails while whoever typed it is still standing at the terminal.
@@ -36,13 +36,13 @@ class Work:
     two vocabularies, and giving that thing a name is what lets a batch reach
     the single-Entry path rather than a parallel one that could drift from it.
 
-    The Working branch is optional because omitting it is intent (ADR 0022):
+    The Working branch is optional because omitting it is intent:
     work described without one starts a Run with none, and the agent at its
     head derives and declares a name there.
     """
 
     workflow_path: Path
-    # Optional because a Subject can stand in for it (ADR 0024): work described
+    # Optional because a Subject can stand in for it: work described
     # with only a Subject takes that Subject as its task, so the Entry's own
     # task stays total. Absent along with the Subject, the work is refused.
     task: str | None
@@ -52,11 +52,11 @@ class Work:
     start_state: str | None = None
     subject: str | None = None
     skip_gates: bool = False
-    # The Session an Adoption's Run joins rather than one being opened for it
-    # (ADR 0028). Described here beside everything else the work was described
-    # with, because an Adoption is one piece of work like any other and reaches
-    # the Queue through this same enqueue — a second path could queue something
-    # this one would have refused.
+    # The Session an Adoption's Run joins rather than one being opened for it.
+    # Described here beside everything else the work was described with, because
+    # an Adoption is one piece of work like any other and reaches the Queue
+    # through this same enqueue — a second path could queue something this one
+    # would have refused.
     attachment: Attachment | None = None
 
 
@@ -69,10 +69,10 @@ class BranchAlreadyClaimed(Exception):
     request carrying somebody else's commits.
 
     A claim is usually a fact recorded on the Entry, held until the Entry is
-    removed — the refusal does not depend on what became of a Run (ADR 0013).
+    removed — the refusal does not depend on what became of a Run.
     An Entry queued without a branch is the one exception: its record carries
     none, so its claim is read through its Run, where the agent declares the
-    name it derived (ADR 0022). Until then it claims nothing.
+    name it derived. Until then it claims nothing.
     """
 
 
@@ -140,7 +140,7 @@ def prepare(
     that cannot exist has to be discovered while the ones before it are still
     only in hand.
     """
-    # The Subject stands in for an absent task (ADR 0024), so the Entry's own
+    # The Subject stands in for an absent task, so the Entry's own
     # task is total however the work was described. Resolved before anything
     # opens the Workflow file: with neither given, nothing says what the work
     # is, and no other check could make that better.
@@ -193,7 +193,7 @@ def _refuse_a_claimed_branch(
 
     Work with no Working branch claims none, so nothing is checked for it and
     two branchless Entries for one repository coexist: each is claim-checked at
-    its own declaration, against the claims existing then (ADR 0022). A held
+    its own declaration, against the claims existing then. A held
     Entry's claim is resolved through its Run when its own record carries no
     branch, so a name an agent derived is found here too."""
     if working_branch is None:
@@ -215,7 +215,7 @@ def claimed_branch_message(
 ) -> str:
     """The two-Entries-one-branch refusal, worded once.
 
-    Shared with the declaration command (ADR 0022), which refuses the same
+    Shared with the declaration command, which refuses the same
     collision at a different moment to a different reader: only the remedy
     differs — an operator can rename or remove, while an agent mid-turn derives
     another name — and two prose copies of the rest would drift apart.

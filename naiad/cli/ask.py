@@ -3,13 +3,13 @@
 A command rather than a conversational question, because no human is watching:
 a question put to one blocks forever and the Run dies having done nothing. And
 a command rather than a file the agent writes, for the same reason announcing
-is (ADR 0001).
+is.
 
 The Question carries its own text and options because Naiad reads no Claude
-Code internals (ADR 0002) — there is no conversation for it to be lifted out
+Code internals — there is no conversation for it to be lifted out
 of, so a Question Naiad was not told about does not exist.
 
-One Question at a time (ADR 0044). Only the latest Announcement is kept, so a
+One Question at a time. Only the latest Announcement is kept, so a
 second ask would replace the first unanswered — and the agent, promised an
 answer for each, would wait on ones that can never come. The refusal carries
 the protocol: hold the rest, re-ask as each answer arrives.

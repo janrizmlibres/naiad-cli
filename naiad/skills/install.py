@@ -1,7 +1,7 @@
 """Writing the adopt skill into the operator's Claude configuration.
 
 User skills rather than the target repository's: Naiad writes nothing into the
-repository it drives (PRD, 'Storage'), and a skill belongs to the operator's
+repository it drives, and a skill belongs to the operator's
 machine rather than to any one Run — it is installed independently of a Run and
 is reached for only when the operator asks for an Adoption.
 """

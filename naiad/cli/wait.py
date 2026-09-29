@@ -1,9 +1,9 @@
 """The agent's third side of the Protocol: declaring that its silence is a Wait.
 
 A command rather than a convention because Naiad reads no Claude Code
-internals (ADR 0002): a wait Naiad was not told about is indistinguishable
+internals: a wait Naiad was not told about is indistinguishable
 from a forgotten announcement, and is Nudged into the very interruption it
-meant to avoid (ADR 0021).
+meant to avoid.
 
 The refusals leave the agent a move. A Wait past the spent budget is refused
 toward announcing or asking, because a wait-looping agent stalling its Lane
@@ -56,7 +56,7 @@ def declare_wait(
             "spends no wait budget"
         )
     granted = waits.record(announcement, reason=reason, now=now, seconds=seconds)
-    # A fresh Wait supersedes any Hold outstanding (ADR 0025): the agent
+    # A fresh Wait supersedes any Hold outstanding: the agent
     # signalling again is what ends one, and both records standing would leave
     # the Run held by a declaration the agent has already moved past.
     Holds(run.root).release(announcement)

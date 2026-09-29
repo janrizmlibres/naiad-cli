@@ -5,7 +5,7 @@ loop or to the agent's command. Everything identifying a Run — its id, its
 Claude session id, the moment it started — is made here and passed in, so the
 code under it stays testable over plain data.
 
-Starting a Run goes through the Queue and nowhere else (ADR 0014): `naiad run`
+Starting a Run goes through the Queue and nowhere else: `naiad run`
 adds an Entry and then adopts or becomes the Supervisor, and nothing here opens
 a session except by taking an Entry off the Queue.
 """
@@ -202,7 +202,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     # No arguments and nothing to confirm: a Prune can reach nothing but done
     # work, so a flag narrowing it would guard against nothing, and `naiad
-    # queue list` already shows exactly what it will take (ADR 0029).
+    # queue list` already shows exactly what it will take.
     queue_prune = queue_commands.add_parser(
         "prune", help="remove the done Entries, and the Runs they became, together"
     )
@@ -216,7 +216,7 @@ def build_parser() -> argparse.ArgumentParser:
         help="path to the Workflow file, or the bare name of one in the library",
     )
     # A flag rather than a positional, and required: an Adoption has no natural
-    # Subject to stand in for a Task (ADR 0028), and the agent is the one party
+    # Subject to stand in for a Task, and the agent is the one party
     # holding the conversation the operator's intent came out of, so it writes
     # the Task rather than repeating a line the operator never typed.
     adopt.add_argument(
@@ -229,7 +229,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     # Read before adopting, and by nothing else: the operator names a phase in
     # their own words, and only the Workflow says what its States are actually
-    # called (ADR 0032).
+    # called.
     states = subcommands.add_parser(
         "states", help="list what a Workflow declares, to choose a State to start at"
     )
@@ -440,7 +440,7 @@ def _describe_the_work(parser: argparse.ArgumentParser, *, required: bool = True
 
     `required` is false where a batch file may describe the work instead, and
     it governs the workflow positional alone: the task is optional everywhere,
-    because a given --subject stands in for it (ADR 0024). Both absences are
+    because a given --subject stands in for it. Both absences are
     refused with a message rather than by argparse, as the Working branch
     already is, so that an operator is told every way of saying it rather than
     only the one they left out.
@@ -454,7 +454,7 @@ def _describe_the_work(parser: argparse.ArgumentParser, *, required: bool = True
         **optional,
     )
     # Optional everywhere, not only where a file may describe the work: a
-    # given --subject stands in for an absent task (ADR 0024), so which of the
+    # given --subject stands in for an absent task, so which of the
     # two must be present is refused with a message rather than by argparse.
     parser.add_argument(
         "task",
@@ -472,7 +472,7 @@ def _describe_where_and_how(parser: argparse.ArgumentParser) -> None:
 
     Apart from the two positionals because `naiad adopt` names its work
     differently — its task is a flag, an Adoption having no Subject to stand in
-    for one (ADR 0028) — while these six mean there exactly what they mean at
+    for one — while these six mean there exactly what they mean at
     the other entrances, and two copies would drift apart.
     """
     parser.add_argument(
@@ -483,8 +483,8 @@ def _describe_where_and_how(parser: argparse.ArgumentParser) -> None:
     )
     # Optional: given, it is carried verbatim and never second-guessed; absent,
     # the agent at the head of the Run derives a name from the target
-    # repository's conventions and declares it (ADR 0022). Naiad itself still
-    # invents no branch name (ADR 0015).
+    # repository's conventions and declares it. Naiad itself still
+    # invents no branch name.
     parser.add_argument(
         "--branch",
         default=None,
@@ -609,9 +609,9 @@ def _stopped(arguments: argparse.Namespace) -> int:
 
     A Turn ending through an Adoption's gap — the Entry queued, its Run not
     created yet — lands beside the Entry instead of nowhere, so the opening
-    delivery it gates is not waited on for a signal that already came and went
-    (ADR 0042). Who it belongs to is the resolution seam's one answer, not two
-    checks composed here.
+    delivery it gates is not waited on for a signal that already came and went.
+    Who it belongs to is the resolution seam's one answer, not two checks
+    composed here.
 
     Guarded rather than left to raise, unlike every command: a queue file the
     operator damaged is a command's refusal to report, and this hook fires on
@@ -629,7 +629,7 @@ def _stopped(arguments: argparse.Namespace) -> int:
             # write, and its relocation found no sidecar to move. Resolving
             # again closes the interleaving: a Run answering for the pane now
             # existed before that relocation, so whichever side acted last
-            # performs the same move (ADR 0042).
+            # performs the same move.
             raced = resolver.resolve(tmux_pane=pane)
             if raced is not None:
                 sidecar.relocate_into(raced.root)
@@ -650,15 +650,15 @@ def _protocol(arguments: argparse.Namespace) -> int:
 
     A fresh context a Clear made is the one the loop is waiting on: it records
     that the /clear landed, so delivery of the next Prompt can be gated on the
-    Clear being confirmed rather than hoped for (ADR 0019). The three sources
-    are told apart by the hook's own `source`, a documented field (ADR 0002),
+    Clear being confirmed rather than hoped for. The three sources
+    are told apart by the hook's own `source`, a documented field,
     so only a Clear counts — a startup or a compaction is not this State's
     Clear.
 
     A fresh context a Compaction made is the Session's own doing, and Naiad
     only learns of it here: it is written to the Run log as the diagnostic,
     and the injection gains the reminder of where the agent stands, since the
-    summary may have lost it (ADR 0047)."""
+    summary may have lost it."""
     run = _attached_run()
     if run is None:
         return 0
@@ -678,7 +678,7 @@ def _submitted(arguments: argparse.Namespace) -> int:
     """The UserPromptSubmit hook, run on every prompt submitted in any session
     on the machine. A prompt is judged against the Prompt the loop typed last,
     and one the Session took cut short is turned away — exit 2 blocks it and
-    erases it — so the loop can type it whole again (ADR 0053).
+    erases it — so the loop can type it whole again.
 
     Everything else passes untouched and prints nothing, since what a
     UserPromptSubmit hook prints is added to the agent's context: a session
@@ -738,8 +738,8 @@ def _hook_source() -> str | None:
 
 def _install(arguments: argparse.Namespace) -> int:
     """What one machine needs set up: the three hooks, the skill that turns the
-    operator's stated intent into `naiad adopt` (ADR 0028), and, on request, the
-    starter Workflow in the library (ADR 0049).
+    operator's stated intent into `naiad adopt`, and, on request, the
+    starter Workflow in the library.
 
     Installed once for the machine rather than per Run: the hooks do nothing
     when no Run is attached to the session that fired them, and the skill is
@@ -868,7 +868,7 @@ def _entry_id_of(run: Run) -> str | None:
 
 
 def _ticker() -> Callable[[Run], None]:
-    """One tick of one lane's Run, for the Supervisor's pass (ADR 0020).
+    """One tick of one lane's Run, for the Supervisor's pass.
 
     Runs in different lanes report into one terminal, so every narration line
     is prefixed with the Run it belongs to — interleaved lines are noise
@@ -925,7 +925,7 @@ def _attached_run() -> Run | None:
 
 
 def _run(arguments: argparse.Namespace) -> int:
-    """The one entrance to starting Runs (ADR 0014): add one Entry, then adopt
+    """The one entrance to starting Runs: add one Entry, then adopt
     or become.
 
     It spawns no session of its own. A second entrance would bypass the guard
@@ -979,7 +979,7 @@ def _queue_add(arguments: argparse.Namespace) -> int:
         # positional had to become optional for a file to describe the work
         # instead. A missing task is not refused here — a given Subject stands
         # in for it, and which of the two must be present is the enqueue's one
-        # check to make (ADR 0024).
+        # check to make.
         print(
             "naiad: no workflow was given, and no batch file either; "
             "try: naiad queue add <workflow> <task>, "
@@ -997,10 +997,10 @@ def _adopt(arguments: argparse.Namespace) -> int:
 
     It starts nothing, for the reason `naiad queue add` does not — a tool call
     that became a process blocking for hours is the failure the Queue exists to
-    avoid — and because the Supervisor is the one entrance to starting Runs
-    (ADR 0014). What it prints is the whole of what the hitherto-undriven agent
-    knows: the Protocol, what to do with the rest of this turn, and, when
-    nothing is supervising, the warning to relay.
+    avoid — and because the Supervisor is the one entrance to starting Runs.
+    What it prints is the whole of what the hitherto-undriven agent knows: the
+    Protocol, what to do with the rest of this turn, and, when nothing is
+    supervising, the warning to relay.
     """
     if _refused_at_the_door():
         return 2
@@ -1024,7 +1024,7 @@ def _adopt(arguments: argparse.Namespace) -> int:
             entry,
             # Asked rather than acted on: a Supervisor started as a side effect
             # of a tool call would have no terminal, no owner and no end, so
-            # what is left is telling the agent to tell the human (ADR 0028).
+            # what is left is telling the agent to tell the human.
             supervised=SupervisorLock(default_lock_path()).held(),
             # The naiad the agent must type, for the reason the Protocol names
             # one: this session's PATH is whatever the human's shell held.
@@ -1042,7 +1042,7 @@ def _states(arguments: argparse.Namespace) -> int:
     Named or not, because an operator who says "naiad, spec this out" has
     named no Workflow: one call then answers both which Workflows exist and
     what each declares, so the agent chooses with the candidates in front of
-    it rather than from memory (ADR 0032).
+    it rather than from memory.
     """
     library = default_library_root()
     if arguments.workflow is None:
@@ -1254,7 +1254,7 @@ def _queued(
     *,
     remedy: Remedy,
     # The Session this work's Run attaches to instead of one being opened for
-    # it, for an Adoption alone (ADR 0028). Threaded through the one enqueue
+    # it, for an Adoption alone. Threaded through the one enqueue
     # rather than given a path of its own, so that an Adoption cannot queue
     # something the other entrances would have refused.
     attachment: Attachment | None = None,
@@ -1272,7 +1272,7 @@ def _queued(
 
     try:
         # A bare name resolves through the Workflow library here, at the
-        # entrance, and the Entry stores the path it resolved to (ADR 0023).
+        # entrance, and the Entry stores the path it resolved to.
         workflow_path = resolve_workflow(arguments.workflow, library=default_library_root())
         entry = enqueue(
             Work(
@@ -1309,8 +1309,7 @@ def _report(entry: Entry) -> None:
 
 def _queue_list(arguments: argparse.Namespace) -> int:
     """The Entries in id order, which is Queue order, each with what became of
-    it — asked of its Run rather than read from a status the Queue keeps
-    (ADR 0013)."""
+    it — asked of its Run rather than read from a status the Queue keeps."""
     try:
         entries = Queue(default_queue_root()).all()
     except FAILURES as error:
@@ -1381,7 +1380,7 @@ def _queue_watch(arguments: argparse.Namespace) -> int:
     A second Supervisor is refused rather than queued behind the first, because
     two of them each take a lane's first waiting Entry and put two agents in
     one working tree — which is the single thing one Run per working tree
-    exists to prevent (ADR 0020).
+    exists to prevent.
     """
     if _refused_at_the_door():
         return 2
@@ -1487,7 +1486,7 @@ def _queue_answers(arguments: argparse.Namespace) -> int:
 
 
 def _queue_rm(arguments: argparse.Namespace) -> int:
-    """Removes an Entry and cancels the Run it became (ADR 0036).
+    """Removes an Entry and cancels the Run it became.
 
     Which Runs are ended and in what order is naiad.runtime.queue's to say;
     this reports what came back. The Session is named because nothing is typed
@@ -1534,8 +1533,8 @@ def _cancellation_line(run: Run) -> str:
 
 
 def _queue_prune(arguments: argparse.Namespace) -> int:
-    """Take the done Entries out, each with the Run it became (ADR 0029), and
-    the finished Orphaned Runs after them (ADR 0030).
+    """Take the done Entries out, each with the Run it became, and
+    the finished Orphaned Runs after them.
 
     Which Entries and orphans qualify is naiad.runtime.queue's to say; this
     reports what came back. A Run that would not go is a failure with a
@@ -1560,7 +1559,7 @@ def _queue_prune(arguments: argparse.Namespace) -> int:
     for entry in pruned.removed:
         print(f"pruned {entry.id}  {entry.task}")
     # An orphan has no line in the listing, so this printed line is the only
-    # record its removal ever gets (ADR 0030).
+    # record its removal ever gets.
     for run_id in pruned.orphans:
         print(f"pruned orphaned run {run_id}")
     if pruned.removed or pruned.orphans:

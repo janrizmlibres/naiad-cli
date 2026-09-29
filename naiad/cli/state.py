@@ -143,8 +143,8 @@ def add_state_commands(subcommands: "argparse._SubParsersAction[argparse.Argumen
         action="store_true",
         help="make it end the Run: it lands at the end and takes no Prompt",
     )
-    # The human answers a State's Questions unless the Workflow says otherwise
-    # (ADR 0050), so opting in is the flag and the other polarity has none.
+    # The human answers a State's Questions unless the Workflow says otherwise,
+    # so opting in is the flag and the other polarity has none.
     add.add_argument(
         "--auto",
         action="store_true",

@@ -1,9 +1,9 @@
 """The agent's fourth side of the Protocol: relaying the human's pause as a Hold.
 
-A command rather than a convention for the same reason a Wait is (ADR 0002):
+A command rather than a convention for the same reason a Wait is:
 Naiad cannot see the human type "pause" into the session, so the agent is the
 only possible relay — and a pause Naiad was not told about is nudged into the
-very interruption the human ordered against (ADR 0025).
+very interruption the human ordered against.
 
 No duration and no budget, deliberately. A Hold waits on a person, and what
 bounds it is visibility rather than a clock: declaring one notifies the

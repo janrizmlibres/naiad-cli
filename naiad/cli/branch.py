@@ -1,12 +1,12 @@
 """The agent's declaration of the Derived branch it just created.
 
-A command rather than a file edit, for the reason announcing is (ADR 0001):
+A command rather than a file edit, for the reason announcing is:
 the command checks and refuses where the agent can still correct itself, in
-the same turn the branch was created (ADR 0022).
+the same turn the branch was created.
 
 Two refusals. Write-once, because the next Entry's Predecessor stands on the
 declared name and a branch that moves mid-Run is the silent stacking failure
-ADR 0015 was built against. And a name another Entry in the same repository
+the Predecessor rule guards against. And a name another Entry in the same repository
 holds — the two-Entries-one-branch refusal relocated to declaration time,
 naming the holder so the agent derives another name and retries.
 """

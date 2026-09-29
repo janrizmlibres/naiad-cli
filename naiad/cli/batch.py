@@ -68,8 +68,7 @@ Reject = Callable[[str], BatchError]
 def load_batch(path: Path, *, repo: Path, library: Path) -> list[Work]:
     """Everything one file describes. `repo` is where an Entry that names no
     repository stands, which is the working directory, as `--repo`'s default
-    already is; `library` is where a Workflow given as a bare name resolves
-    (ADR 0023)."""
+    already is; `library` is where a Workflow given as a bare name resolves."""
     try:
         text = path.read_text()
     except OSError as error:
@@ -172,14 +171,14 @@ def _work(
     named_repo = _text(fields, REPO, bad)
     return Work(
         workflow_path=_workflow(_required(fields, WORKFLOW, bad), library=library, bad=bad),
-        # Optional, because a Subject may stand in for it (ADR 0024). The
+        # Optional, because a Subject may stand in for it. The
         # stand-in and the neither-given refusal live where Entries are made,
         # so the file parses to work that honestly says no task was written.
         task=_text(fields, TASK, bad),
         target_repo=_path(named_repo) if named_repo else repo,
         # Optional, as `--branch` is: an Entry that names none starts a Run
         # with no Working branch, and the agent at its head derives and
-        # declares one there (ADR 0022).
+        # declares one there.
         working_branch=_text(fields, BRANCH, bad),
         pinned_base=_text(fields, BASE, bad),
         start_state=_text(fields, AT, bad),
@@ -216,7 +215,7 @@ def _text(fields: dict[str, Any], key: str, bad: Reject) -> str | None:
 
 def _workflow(value: str, *, library: Path, bad: Reject) -> Path:
     """A path as `_path` reads one, or a bare name resolved through the
-    Workflow library (ADR 0023) — refused naming the Entry's position, as
+    Workflow library — refused naming the Entry's position, as
     every other complaint about an Entry is."""
     try:
         return resolve_workflow(value, library=library)

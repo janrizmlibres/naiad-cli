@@ -9,7 +9,7 @@ Workflow, which start State, which branch, what the work is, and what to relay
 afterwards. None of it is guessable from the sentence, and an agent left to
 improvise would queue something the human did not ask for. So the whole
 contract lives here, in the one file Claude Code reaches for when the sentence
-is said (ADR 0028).
+is said.
 
 The wording is the agent's to read rather than the operator's, apart from the
 description: that is the whole of what Claude Code matches an intent against.
@@ -19,7 +19,7 @@ they ask for is Adoption, and `handover` is reserved for a State of the shipped
 Workflow that an agent reading this must not confuse it with. Every one of them
 names Naiad, because a phase word alone is how anyone asks for that phase's
 ordinary work, and matching it would take the session over on a request nobody
-meant that way (ADR 0032).
+meant that way.
 
 Two arguments carry what the operator said — the Workflow and the State — and
 neither is a name Naiad will take: "spec this out" names a State called `spec`

@@ -1,7 +1,7 @@
 """Telling the operator they are needed, everywhere they might be.
 
 Adapters and nothing more: whether to notify, and once per what, are rules and
-were decided in naiad.domain.decide (ADR 0004). What is here is a set of legs
+were decided in naiad.domain.decide. What is here is a set of legs
 one telling goes down, and the reading of the environment that says which of
 them exist.
 

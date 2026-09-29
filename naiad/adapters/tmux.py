@@ -1,7 +1,7 @@
 """Opening a tmux session. Turns a SessionSpec into commands and runs them;
-every rule in the spec was decided in naiad.domain.session (ADR 0004).
+every rule in the spec was decided in naiad.domain.session.
 
-Naiad never reads the Claude Code terminal UI (ADR 0002): nothing here captures
+Naiad never reads the Claude Code terminal UI: nothing here captures
 a pane or matches against what the TUI is showing. The session's first Prompt
 is handed to Claude Code as it starts, so there is nothing to wait for and
 nothing to watch.
@@ -28,7 +28,7 @@ NEWLINE = "M-Enter"
 # kilobyte or more as a paste — wrapped as pasted content, or with its first
 # 1022 bytes silently dropped — so a long line goes in pieces well under that.
 # Probed against the live TUI: 500-byte pieces arrive whole where 1000-byte ones
-# do not (ADR 0053).
+# do not.
 TYPED_PIECE_BYTES = 256
 
 
@@ -48,10 +48,10 @@ class TmuxSessions:
         name it, and what the operator is told to attach to.
 
         Nothing is opened and nothing is typed: the pane is already there and
-        its Prompt is the tick loop's to deliver once a Turn has ended (ADR
-        0028). Asking is also what catches a pane the human has since closed,
-        which is the one thing about an adopted session that can have changed
-        between the Entry being queued and the Supervisor reaching it.
+        its Prompt is the tick loop's to deliver once a Turn has ended. Asking
+        is also what catches a pane the human has since closed, which is the one
+        thing about an adopted session that can have changed between the Entry
+        being queued and the Supervisor reaching it.
 
         An empty answer is that closed pane: tmux reports a target it cannot
         find on stderr and still exits 0, so the refusal has to be made here
@@ -69,7 +69,8 @@ class TmuxSessions:
 
         Nothing is read back to check that it landed. v1 verified sends by
         capturing the pane and matching against the TUI's input box, which
-        broke on every change to the box's chrome; ADR 0002 rules that out.
+        broke on every change to the box's chrome; Naiad reads no Claude Code
+        internals, so it does not do that again.
         """
         for argv in keystrokes_for(pane, text):
             self._run(argv)
@@ -77,7 +78,7 @@ class TmuxSessions:
     def clear(self, pane: str) -> None:
         """Discard the session's context by typing /clear. Nothing is slept for:
         whether the /clear landed is confirmed by Naiad's own SessionStart hook
-        and the Prompt held back until it has (ADR 0019), rather than hoping a
+        and the Prompt held back until it has, rather than hoping a
         fixed pause outlasts a terminal that might drop the keystroke anyway."""
         self.send(pane, "/clear")
 
@@ -120,7 +121,7 @@ def keystrokes_for(pane: str, text: str) -> list[list[str]]:
 
     Exposed so what reaches the TUI can be asserted without a session in front
     of it — that a Prompt is typed rather than pasted is the whole point, and
-    reading the pane back to check would be the thing ADR 0002 forbids.
+    reading the pane back to check would be the thing Naiad never does.
     """
     keys: list[list[str]] = []
     for position, line in enumerate(text.split("\n")):

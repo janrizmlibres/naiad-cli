@@ -6,7 +6,7 @@ else does. Everything else is narration for the operator watching the terminal.
 
 It lives apart from the entry point because a Run that has finished must stop
 ticking and a Run waiting on a human must not, and those two are worth
-asserting rather than assuming (PRD, 'The Answerer').
+asserting rather than assuming.
 """
 
 from __future__ import annotations
@@ -98,7 +98,7 @@ def tick_once(
     lead: int = 0,
 ) -> Action:
     """One tick of a Run, narrated. The watch is this in a loop; the
-    Supervisor calls it once per pass per lane instead (ADR 0020), so the two
+    Supervisor calls it once per pass per lane instead, so the two
     drive a Run through the same tick with the same narration.
 
     lead is how many columns the caller prints before the narration, as the

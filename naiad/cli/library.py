@@ -1,4 +1,4 @@
-"""The Workflow library: bare names for Workflow files (ADR 0023).
+"""The Workflow library: bare names for Workflow files.
 
 One machine-wide directory of Workflow files addressable by name, where a name
 is the file's stem. Which of the two an argument is, its shape alone decides —
@@ -10,7 +10,7 @@ A name resolves to a path here, at the entrance, and nowhere else: the Entry
 stores what came out exactly as it stores a path typed explicitly, and
 everything downstream is untouched.
 
-The library is the operator's store (ADR 0049): regular files they own, or a
+The library is the operator's store: regular files they own, or a
 hand-made symlink to a Workflow maintained in a repository. This module both
 reads it and, on request, writes the starter into it.
 """
@@ -75,7 +75,7 @@ def workflows_in(library: Path) -> tuple[Path, ...]:
 
     A listing rather than a resolution, and the one place both readers share:
     the refusal below names what the library holds, and `naiad states` prints
-    what each of them declares (ADR 0032). Sorted by stem, because the stem is
+    what each of them declares. Sorted by stem, because the stem is
     the address and a directory's own order is not one an operator can predict.
 
     Files only, so nothing is claimed about a directory that happens to end in
@@ -88,7 +88,7 @@ def workflows_in(library: Path) -> tuple[Path, ...]:
 
 
 def install_starter(*, library: Path, force: bool = False) -> Path:
-    """Copy the shipped starter into the library as a regular file (ADR 0049).
+    """Copy the shipped starter into the library as a regular file.
 
     Nothing there: it is written. A file byte-identical to the shipped starter
     is rewritten, so an older copy is refreshed and nothing is lost. Anything
@@ -245,7 +245,7 @@ def _stem(file: Path) -> str:
 
 def empty_library_message(library: Path) -> str:
     """What an empty library says, whichever question reached it: a name that
-    missed, or a listing with nothing to list (ADR 0032).
+    missed, or a listing with nothing to list.
 
     One sentence rather than one per caller, because both answer the same
     fact — there is nothing here — and the remedy for it is the same.

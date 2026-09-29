@@ -7,10 +7,10 @@ process that wrote it and a later reader cannot tell a live Supervisor from a
 number the machine has since handed to something else.
 
 It is an adapter and holds no rules. It answers one question — is anyone else
-supervising — and what each command makes of the answer is the command's
-(ADR 0014). Verified by manual smoke rather than by tests, which is the deal for
-anything holding no logic; what the tests pin is the behaviour that depends on
-the answer.
+supervising — and what each command makes of the answer is the command's.
+Verified by manual smoke rather than by tests, which is the deal for anything
+holding no logic; what the tests pin is the behaviour that depends on the
+answer.
 """
 
 from __future__ import annotations

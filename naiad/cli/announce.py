@@ -1,6 +1,6 @@
 """The agent's side of the Protocol: announcing the State it is in.
 
-Announcing is a command rather than a file edit (ADR 0001). Read-modify-write
+Announcing is a command rather than a file edit. Read-modify-write
 bookkeeping across a Cleared context is exactly the clerical work a model slips
 on, and a slip would be silently inert. The command allocates the ordering,
 writes atomically, and rejects a State the Workflow does not declare — with the
@@ -38,7 +38,7 @@ def announce_state(state: str, *, run: Run, subject: str | None = None) -> Annou
 
     Which States require a Subject is not Naiad's to know — the Workflow says so
     by using the placeholder, which keeps the requirement in the file where the
-    rest of that Workflow's meaning lives (ADR 0009).
+    rest of that Workflow's meaning lives.
 
     The reverse is deliberately not an error. A Subject a Prompt has no slot for
     is still part of what the agent said, and the Run log reads it: a Gate
@@ -58,7 +58,7 @@ def announce_state(state: str, *, run: Run, subject: str | None = None) -> Annou
             f"state '{state}' needs a subject saying what this announcement is about; "
             f"announce it as: naiad {ANNOUNCE_SUBCOMMAND} {state} --subject <value>"
         )
-    # Forgetting to declare a Derived branch is loud, not silent (ADR 0022): a
+    # Forgetting to declare a Derived branch is loud, not silent: a
     # branchless Run that was handed a Prompt asking for one is refused here,
     # in a turn that can still repair it, rather than surfacing later as a
     # silently empty Predecessor. The missing-Subject refusal's shape, on a
@@ -71,7 +71,7 @@ def announce_state(state: str, *, run: Run, subject: str | None = None) -> Annou
             "naiad branch <name>, then announce again"
         )
     # Announcing over an unanswered Question abandons it — permitted, because
-    # the agent owns workflow progress (ADR 0001), but recorded: a log holding
+    # the agent owns workflow progress, but recorded: a log holding
     # only the Questions that were settled would show an unattended Run as
     # tidier than it was. Read before the announce that writes over it, logged
     # after, so a refused Announcement abandons nothing.

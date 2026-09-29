@@ -6,7 +6,7 @@ naiad.domain.supervise; what is left is reading the Queue, one call, and a
 dispatch. If a condition ever needs adding to this module, it belongs in the
 decision function instead.
 
-One pass carries every lane (ADR 0020): each Action the rules return is a
+One pass carries every lane: each Action the rules return is a
 lane's live Run, started if it does not exist yet and then ticked once
 before the pass sleeps and comes round again. Driving a Run was always
 repeated calls to a pure tick, so the interleaving hoists that loop up a level
@@ -18,7 +18,7 @@ they are the two things that open a session and tick a clock, and the loop is
 worth driving in a test without either.
 
 The Supervisor holds no Run of its own. Which Runs are live is derivable from
-the Entries on every pass (ADR 0013).
+the Entries on every pass.
 """
 
 from __future__ import annotations
@@ -124,7 +124,7 @@ def supervise_queue(
 
 def _finished(entries: Sequence[Entry], runs: RunStore) -> set[str]:
     """Which of the Entries' Runs have ended, asked of the Runs rather than of
-    a status the Queue keeps (ADR 0013). Through the same reader the listing
+    a status the Queue keeps. Through the same reader the listing
     uses, so that one place decides what makes an Entry done."""
     return {
         entry.run_id
@@ -135,7 +135,7 @@ def _finished(entries: Sequence[Entry], runs: RunStore) -> set[str]:
 
 def _declared(entries: Sequence[Entry], runs: RunStore) -> dict[str, str]:
     """The branches Runs declared for Entries whose own record carries none,
-    read through the same resolver the claim check uses (ADR 0022), so that one
+    read through the same resolver the claim check uses, so that one
     place decides what branch an Entry works on. A Run that never declared —
     or whose directory has gone — resolves to nothing and is simply absent."""
     return {

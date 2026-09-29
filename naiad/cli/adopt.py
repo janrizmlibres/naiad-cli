@@ -4,10 +4,10 @@ An Adoption is for the flow that did not start with Naiad: the human opened a
 session themselves, did the early States by hand, and wants the machine to
 drive what remains without losing the conversation those States built — which
 is exactly what the non-Clearing States feed on. Kickoff cannot serve it,
-because a fresh session has none of that context (ADR 0028).
+because a fresh session has none of that context.
 
 Nothing here starts anything. The command validates, enqueues, prints and
-exits: the Supervisor remains the one entrance to starting Runs (ADR 0014) and
+exits: the Supervisor remains the one entrance to starting Runs and
 attaches the Run on its ordinary pass, when the Lane is free. So the two things
 this module holds are the mark that tells it to attach, and the text that
 teaches the agent the verbs it is about to need.
@@ -32,7 +32,7 @@ TMUX_PANE_VARIABLE = "TMUX_PANE"
 # not this process's to read — so absent is the expected answer rather than an
 # unlucky one. Gathered anyway because it costs a lookup: it is the resolution
 # seam's second key, and the seam is happy with whichever keys exist. Nothing is
-# inferred from Claude Code's internals to find it (ADR 0002); the pane is the
+# inferred from Claude Code's internals to find it; the pane is the
 # reliable key and the one an Adoption actually turns on.
 CLAUDE_SESSION_VARIABLE = "CLAUDE_SESSION_ID"
 
@@ -42,7 +42,7 @@ class NotInTmux(Exception):
 
     Delivery is typing into a pane, so a session outside tmux is one Naiad can
     never drive; queueing an Entry marked to attach to nowhere would only defer
-    the failure to an attachment that could not happen (ADR 0028).
+    the failure to an attachment that could not happen.
     """
 
 

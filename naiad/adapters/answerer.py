@@ -2,11 +2,11 @@
 
 Turns a ConsultationSpec into a command and runs it. Every rule about what the
 Answerer may settle, and what its reply means, was decided in
-naiad.domain.answerer (ADR 0004); nothing here branches on the outcome.
+naiad.domain.answerer; nothing here branches on the outcome.
 
 Headless rather than a second tmux session because nobody is going to watch it,
 and because its reply must come back as a value rather than as pixels — reading
-it off a terminal is exactly what ADR 0002 rules out.
+it off a terminal is exactly what Naiad never does.
 """
 
 from __future__ import annotations

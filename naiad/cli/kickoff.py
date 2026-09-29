@@ -1,13 +1,13 @@
 """Starting a Run: read the Workflow, meet a session, deliver the first Prompt.
 
 Reached only by the Supervisor taking an Entry off the Queue, since that is the
-one entrance to starting Runs (ADR 0014).
+one entrance to starting Runs.
 
 A Run meets its session one of two ways. Ordinarily one is opened for it and
 handed its first Prompt as it launches. An Adoption's Run instead joins a
 session that has been running all along — the human's own, full of the
 conversation the early States built — and is handed nothing yet: its first
-Prompt waits for a Turn to end and goes out from the tick loop (ADR 0028). What
+Prompt waits for a Turn to end and goes out from the tick loop. What
 the two share is everything before the session: the same refusals, the same Run
 directory, the same record of what the work is.
 
@@ -56,7 +56,7 @@ def start_entry(
     store: RunStore,
     sessions: Sessions,
     # Where the Entry came from, so a Turn end the Stop hook left beside it
-    # through an Adoption's gap moves into the Run being made (ADR 0042).
+    # through an Adoption's gap moves into the Run being made.
     queue_root: Path,
     run_id: str,
     claude_session_id: str,
@@ -67,7 +67,7 @@ def start_entry(
 
     The choice is the Entry's attachment mark and nothing else: an Entry so
     marked names a session that already exists, and every other Entry wants one
-    opened (ADR 0028). It is made here rather than in the wiring above, beside
+    opened. It is made here rather than in the wiring above, beside
     the two functions it chooses between, so that neither entrance can be
     reached without passing this one.
 
@@ -76,7 +76,7 @@ def start_entry(
     attachment when it could be gathered — so it is unused there.
 
     The Predecessor comes from the Action rather than from the Entry, since what
-    an Entry stands on is resolved when it starts (ADR 0015).
+    an Entry stands on is resolved when it starts.
     """
     if entry.attachment is not None:
         run = attach_run(
@@ -96,7 +96,7 @@ def start_entry(
         )
         # After the session is joined rather than before the Run exists, so a
         # Stop firing during this pass finds the Run by its pane and the move
-        # below finds the fresher record already there (ADR 0042).
+        # below finds the fresher record already there.
         EntryTurns(queue_root, entry.id).relocate_into(run.root)
         return run
     return start_run(
@@ -124,7 +124,7 @@ def start_run(
     # Required rather than defaulted, so that a caller cannot forget it and
     # quietly leave the Run without one. Optional in value: an Entry queued
     # without a branch starts a Run with none, and the agent at its head
-    # derives and declares a name there (ADR 0022).
+    # derives and declares a name there.
     working_branch: str | None,
     store: RunStore,
     sessions: Sessions,
@@ -135,7 +135,7 @@ def start_run(
     skip_gates: bool = False,
     subject: str | None = None,
     # Optional, and opaque: recorded and substituted without being read, and
-    # absent for work that stands on nothing (ADR 0015).
+    # absent for work that stands on nothing.
     predecessor: str | None = None,
 ) -> Run:
     # Every refusal first, so that a mistyped State or a missing Subject costs
@@ -180,7 +180,7 @@ def start_run(
             # The three Run-level facts are read back off the Run just written,
             # as the tick loop reads them, so both entrances to delivery draw
             # on one source. The Subject is not among them: it belongs to an
-            # Announcement, and kickoff announces nothing (ADR 0009).
+            # Announcement, and kickoff announces nothing.
             task=run.task,
             branch=run.working_branch,
             predecessor=run.predecessor,
@@ -199,12 +199,12 @@ def start_run(
         claude_session_id=claude_session_id,
         initial_prompt=opening_prompt,
         # A Switch precedes Prompt delivery, so a Gate State first — which
-        # delivers nothing — launches without them (ADR 0026).
+        # delivers nothing — launches without them.
         model=None if opening_prompt is None else first.model,
         effort=None if opening_prompt is None else first.effort,
         # The Workflow's rather than the State's, and carried whichever State
         # comes first: where the Session summarises itself precedes no Prompt,
-        # so a Gate State first does not lose it (ADR 0047).
+        # so a Gate State first does not lose it.
         autocompact=checked.workflow.autocompact,
         environ={RUN_ID_VARIABLE: run_id},
     )
@@ -215,9 +215,9 @@ def start_run(
         claude_session_id=claude_session_id,
     )
     # Read off the spawn rather than off the State, so that what is written down
-    # is what the launch actually carried (ADR 0039). An adopted Run has no
+    # is what the launch actually carried. An adopted Run has no
     # counterpart and needs none: Naiad did not open that Session and knows
-    # nothing of its settings, so its belief starts empty (ADR 0028).
+    # nothing of its settings, so its belief starts empty.
     RunLog(run.root).record_launch(
         state=first.name, model=spec.model, effort=spec.effort, autocompact=spec.autocompact
     )
@@ -232,7 +232,7 @@ def attach_run(
     working_branch: str | None,
     # Where the session is. Required and not optional in value: an Adoption
     # that named no pane was refused at the terminal, because a session Naiad
-    # cannot type into is one it can never drive (ADR 0028).
+    # cannot type into is one it can never drive.
     attachment: Attachment,
     store: RunStore,
     sessions: Sessions,

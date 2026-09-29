@@ -1,11 +1,10 @@
 """The Protocol as the SessionStart hook prints it.
 
 Composition only: which State the agent owes next was decided in
-naiad.domain.transitions and the words were decided in naiad.domain.protocol
-(ADR 0004). What is left is reading the Run's Workflow and its latest
-Announcement — and, after a Compaction, where the agent stands and whether a
-Question of its is still owed an answer, which `naiad ask` already knows how to
-read (ADR 0047).
+naiad.domain.transitions and the words were decided in naiad.domain.protocol.
+What is left is reading the Run's Workflow and its latest Announcement — and,
+after a Compaction, where the agent stands and whether a Question of its is
+still owed an answer, which `naiad ask` already knows how to read.
 """
 
 from __future__ import annotations
@@ -80,15 +79,15 @@ def protocol_for(run: Run, *, compacted: bool = False) -> str:
 
 
 def _reminder(run: Run, announcement: Announcement | None, standing: str) -> str:
-    """The three things a summary may have lost (ADR 0047).
+    """The three things a summary may have lost.
 
     The Subject is the latest Announcement's, or — before one has been made —
     the one the Run was started with, which is what its first Prompt carried
     and what an Adoption's Opening names. The Question is the one `naiad ask`
-    would refuse a second for: still owed an answer, and not handed to a human
-    (ADR 0044). One definition of "unanswered", read from where it lives. A
-    Wait is not among them: a declared wait survives a summary or does not,
-    and either way the agent finds out when it is reminded.
+    would refuse a second for: still owed an answer, and not handed to a human.
+    One definition of "unanswered", read from where it lives. A Wait is not
+    among them: a declared wait survives a summary or does not, and either way
+    the agent finds out when it is reminded.
     """
     subject = announcement.subject if announcement is not None else run.start_subject
     pending = unanswered_question(run)
@@ -101,7 +100,7 @@ def injection_for(run: Run, *, compacted: bool = False) -> str:
 
     Claude Code also adds a hook's plain stdout to the context, but saying so
     explicitly is the documented surface for injection and cannot be mistaken
-    for incidental chatter from the command (ADR 0002).
+    for incidental chatter from the command.
     """
     return json.dumps(
         {
