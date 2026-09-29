@@ -165,6 +165,12 @@ def test_a_terminal_state_asks_no_questions():
     assert "questions" not in marked_line("done")
 
 
+def test_a_state_that_delivers_no_prompt_shows_no_model():
+    """The file's model resolves into every State, but a Terminal State runs
+    nothing and a Gate State types nothing, so it is not theirs to show."""
+    assert "model" not in marked_line("done")
+
+
 def test_the_file_level_keys_stand_above_the_states():
     shown = render_workflow(parse_workflow(MARKED)).splitlines()
 

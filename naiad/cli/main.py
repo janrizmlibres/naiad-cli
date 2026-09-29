@@ -981,16 +981,23 @@ def _states(arguments: argparse.Namespace) -> int:
     if arguments.workflow is None:
         return _every_workflow(library)
 
-    # A name asked for by name is refused: the agent named one thing and
-    # printing something else would answer a question nobody asked.
-    return _print_workflow(arguments.workflow, render_states)
+    return _print_workflow(arguments.workflow, render_states, library=library)
 
 
-def _print_workflow(argument: str, render: Callable[[Workflow], str]) -> int:
+def _print_workflow(
+    argument: str, render: Callable[[Workflow], str], *, library: Path | None = None
+) -> int:
     """A Workflow named by name or path, loaded the way a Run loads it and laid
-    out by `render`, or refused in one line."""
+    out by `render`, or refused in one line.
+
+    A name asked for by name is refused rather than answered with something
+    else: the reader named one thing, and printing another would answer a
+    question nobody asked.
+    """
     try:
-        workflow = load_workflow(resolve_workflow(argument, library=default_library_root()))
+        workflow = load_workflow(
+            resolve_workflow(argument, library=library or default_library_root())
+        )
     except (*FAILURES, WorkflowError) as error:
         print(f"naiad: {error}", file=sys.stderr)
         return 2

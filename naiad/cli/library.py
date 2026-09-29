@@ -109,6 +109,7 @@ def new_workflow(name: str, *, library: Path) -> tuple[Path, Workflow]:
     """Scaffold a Workflow of this name in the library, refusing one that is
     there. Only a bare name is taken: a path would put the file somewhere the
     name does not address."""
+    # An empty name has the shape of a name, and would be the file `.toml`.
     if not name or not _is_name(name):
         raise LibraryError(
             f"'{name}' is not a workflow name: give a bare name, "

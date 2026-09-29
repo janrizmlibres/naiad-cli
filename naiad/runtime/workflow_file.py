@@ -10,6 +10,8 @@ the only place the TOML writer is used.
 
 from __future__ import annotations
 
+import os
+import stat
 from collections.abc import Callable
 from pathlib import Path
 
@@ -33,6 +35,7 @@ def edit_workflow(path: Path, edit: Edit) -> Workflow:
     target = path.resolve()
     try:
         original = target.read_bytes()
+        mode = stat.S_IMODE(target.stat().st_mode)
     except OSError as error:
         raise WorkflowError(f"workflow {path}: cannot be read ({error.strerror})") from error
 
@@ -44,11 +47,11 @@ def edit_workflow(path: Path, edit: Edit) -> Workflow:
         raise WorkflowError(f"workflow {path}: not valid TOML ({error})") from error
 
     parse_workflow(written, source=str(path))
-    write_atomically(target, written.encode())
+    write_atomically(target, written.encode(), mode=mode)
     try:
         return load_workflow(target)
     except WorkflowError:
-        write_atomically(target, original)
+        write_atomically(target, original, mode=mode)
         raise
 
 
@@ -71,8 +74,15 @@ def scaffold_workflow(path: Path, name: str) -> Workflow:
     document.add("states", states)
 
     path.parent.mkdir(parents=True, exist_ok=True)
-    write_atomically(path, tomlkit.dumps(document).encode())
+    write_atomically(path, tomlkit.dumps(document).encode(), mode=_default_mode())
     return load_workflow(path)
+
+
+def _default_mode() -> int:
+    """What a file the author made by hand would get: readable as their umask allows."""
+    umask = os.umask(0)
+    os.umask(umask)
+    return 0o666 & ~umask
 
 
 __all__ = ["edit_workflow", "scaffold_workflow"]

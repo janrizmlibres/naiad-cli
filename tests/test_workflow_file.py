@@ -7,6 +7,8 @@ symlinked library entry is written through, and a file that loads after the
 write is the only outcome a caller ever sees.
 """
 
+import os
+
 import pytest
 
 from naiad.domain.workflow import WorkflowError
@@ -107,6 +109,27 @@ def test_a_symlinked_entry_is_written_through_to_its_target(tmp_path):
 
     assert entry.is_symlink() and entry.readlink() == maintained
     assert 'effort = "high"' in maintained.read_text()
+
+
+def test_an_edit_keeps_the_permissions_the_author_gave_the_file(workflow):
+    """A temporary file is created private, so without care the first write
+    would turn a hand-edited 0644 file into 0600."""
+    workflow.chmod(0o644)
+
+    edit_workflow(workflow, set_effort)
+
+    assert workflow.stat().st_mode & 0o777 == 0o644
+
+
+def test_a_scaffold_is_readable_as_any_file_the_author_makes(tmp_path):
+    path = tmp_path / "demo.toml"
+    umask = os.umask(0o022)
+    try:
+        scaffold_workflow(path, "demo")
+    finally:
+        os.umask(umask)
+
+    assert path.stat().st_mode & 0o777 == 0o644
 
 
 def test_no_temporary_file_is_left_beside_the_workflow(workflow):

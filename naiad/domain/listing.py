@@ -127,14 +127,14 @@ def _marks(state: State) -> str:
         marks.append("clears")
     if state.report:
         marks.append("report")
-    # Whose Questions are asked only where a Prompt is delivered: a Gate hands
-    # the Run to a human and a Terminal State ends it, so neither asks one.
+    # Only where a Prompt is delivered: a Gate hands the Run to a human and a
+    # Terminal State ends it, so neither asks a Question or runs on a Model.
     if _kind(state) == "prompt":
         marks.append(f"questions: {state.questions}")
-    if state.model is not None:
-        marks.append(f"model: {state.model}")
-    if state.effort is not None:
-        marks.append(f"effort: {state.effort}")
+        if state.model is not None:
+            marks.append(f"model: {state.model}")
+        if state.effort is not None:
+            marks.append(f"effort: {state.effort}")
     return GAP.join(marks)
 
 
