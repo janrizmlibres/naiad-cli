@@ -9,8 +9,10 @@ parked at a Gate that stops ticking and never notices the human's reply.
 
 import pytest
 
-from naiad.cli.watch import watch
+from naiad.cli.watch import tick_once, watch
+from naiad.domain.answerer import Answered
 from naiad.domain.decide import Finish, Notify
+from naiad.domain.question import Question
 from naiad.domain.workflow import parse_workflow
 from naiad.runtime.announcements import Announcements
 from naiad.runtime.log import RunLog
@@ -185,3 +187,67 @@ def test_watching_a_cancelled_run_does_not_start_ticking(run):
 
     assert action is None
     assert slept == []
+
+
+class ScriptedAnswerer:
+    def __init__(self, outcome):
+        self.outcome = outcome
+
+    def consult(self, spec):
+        return self.outcome
+
+
+ANSWERED_WORKFLOW = WORKFLOW.replace('name = "feature"\n', 'name = "feature"\n\n[answerer]\n', 1)
+LONG_QUESTION = "Which module should own retries when the upstream vendor rate limits us? " * 3
+QUESTION_OPTIONS = ("the client, which already backs off", "the caller")
+
+
+def narration_of(run, answerer, *, lead=0):
+    """Every line the operator is told while a Question is consulted and answered."""
+    Announcements(run.root).ask(
+        Question(text=LONG_QUESTION, options=QUESTION_OPTIONS), state="grill"
+    )
+    Turns(run.root).record_end(latest_seq=1)
+    lines = []
+    for _ in range(2):
+        tick_once(
+            run=run,
+            workflow=parse_workflow(ANSWERED_WORKFLOW),
+            session=RecordingSession(),
+            notifier=RecordingNotifier(),
+            answerer=answerer,
+            report=lines.append,
+            lead=lead,
+        )
+    return lines
+
+
+def test_the_consultation_echo_is_one_line_cut_to_the_terminal_width(run, monkeypatch):
+    monkeypatch.setenv("COLUMNS", "60")
+
+    consulted, _ = narration_of(run, ScriptedAnswerer(Answered(text="the client")))
+
+    assert consulted.startswith("consulting the answerer: Which module should own retries")
+    assert len(consulted) == 60
+    assert consulted.endswith("…")
+    assert "\n" not in consulted
+
+
+def test_the_answer_echo_drops_the_options_and_keeps_the_first_clause(run, monkeypatch):
+    monkeypatch.setenv("COLUMNS", "60")
+
+    _, answered = narration_of(
+        run, ScriptedAnswerer(Answered(text="the client, since it already backs off"))
+    )
+
+    assert answered == "answered: the client"
+
+
+def test_the_echo_leaves_room_for_what_the_caller_prints_before_it(run, monkeypatch):
+    """Runs in different lanes are told apart by a prefix the Supervisor adds,
+    and the line as the operator sees it is what may not exceed the width."""
+    monkeypatch.setenv("COLUMNS", "60")
+
+    consulted, _ = narration_of(run, ScriptedAnswerer(Answered(text="x")), lead=20)
+
+    assert len(consulted) == 40

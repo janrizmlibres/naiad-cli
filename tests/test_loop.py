@@ -1320,6 +1320,18 @@ def test_an_escalation_notifies_and_is_logged_and_sends_nothing_into_the_session
     assert entry.options == ("Twilio", "Vonage")
 
 
+def test_an_answer_and_an_escalation_each_record_the_state_the_question_was_asked_from(
+    run, workflow, session
+):
+    answerer = RecordingAnswerer(Answered(text="the client"), Escalated(reason="not here"))
+    ask(run, "Which module owns retries?", "the client")
+    resolve(run, workflow, session, answerer)
+    ask(run, "Which SMS vendor?", "Twilio")
+    resolve(run, workflow, session, answerer)
+
+    assert [entry.state for entry in AnswerLog(run.root).entries()] == ["implement", "implement"]
+
+
 def test_a_question_is_consulted_once_however_often_the_loop_ticks(run, workflow, session):
     """Consulting is a headless Claude call: repeating it every couple of
     seconds spends money and risks contradicting the answer already sent."""
@@ -1520,6 +1532,102 @@ def test_a_run_that_reached_its_terminal_state_is_told_as_a_finish(run, workflow
     assert isinstance(action, Finish)
     assert notifier.notified[0][2] is Notification.FINISH
     assert "done" in notifier.notified[0][1]
+
+
+def answered_by_the_answerer(run, count=1):
+    """Questions the Answerer settled, written as the loop writes them."""
+    for _ in range(count):
+        AnswerLog(run.root).record(
+            question=Question(text="Which module owns retries?", options=("the client",)),
+            answer="the client",
+            state="implement",
+        )
+
+
+def drive_with_entry(run, workflow, session, notifier, entry_id):
+    return tick(
+        run=run,
+        workflow=workflow,
+        session=session,
+        notifier=notifier,
+        answerer=RecordingAnswerer(),
+        now=_later(run, 0),
+        entry_id=entry_id,
+    )
+
+
+def test_a_finish_notification_points_at_the_verb_when_the_answerer_answered(
+    run, workflow, session
+):
+    notifier = RecordingNotifier()
+    answered_by_the_answerer(run, count=2)
+    announce(run, "done")
+
+    drive_with_entry(run, workflow, session, notifier, "the-entry")
+
+    assert notifier.notified[0][1] == (
+        "finished at done\n2 answered by the Answerer — naiad queue answers the-entry"
+    )
+
+
+def test_a_gate_notification_points_at_the_verb_beside_what_follows(run, workflow, session):
+    notifier = RecordingNotifier()
+    answered_by_the_answerer(run)
+    announce(run, "review")
+
+    drive_with_entry(run, workflow, session, notifier, "the-entry")
+
+    assert notifier.notified[0][1] == (
+        "state 'review' is a Gate State and is waiting for you; next: implement\n"
+        "1 answered by the Answerer — naiad queue answers the-entry"
+    )
+
+
+def test_a_run_with_no_entry_is_named_by_its_run_id_in_the_pointer(run, workflow, session):
+    notifier = RecordingNotifier()
+    answered_by_the_answerer(run)
+    announce(run, "done")
+
+    drive(run, workflow, session, notifier=notifier)
+
+    assert notifier.notified[0][1].endswith("naiad queue answers a-run")
+
+
+def test_finish_and_gate_notifications_carry_no_line_when_the_answerer_answered_nothing(
+    run, workflow, session
+):
+    notifier = RecordingNotifier()
+    announce(run, "review")
+    drive(run, workflow, session, notifier=notifier)
+    announce(run, "done")
+    drive(run, workflow, session, notifier=notifier)
+
+    assert [message for _, message, _ in notifier.notified] == [
+        "state 'review' is a Gate State and is waiting for you; next: implement",
+        "finished at done",
+    ]
+
+
+def test_escalations_human_questions_and_abandonments_are_not_counted(run, workflow, session):
+    notifier = RecordingNotifier()
+    question = Question(text="Which SMS vendor?", options=("Twilio",))
+    log = AnswerLog(run.root)
+    log.record(question=question, answer="not here", state="implement", escalated=True)
+    log.record(question=question, answer="moved on", state="implement", abandoned=True)
+    announce(run, "done")
+
+    drive(run, workflow, session, notifier=notifier)
+
+    assert notifier.notified[0][1] == "finished at done"
+
+
+def test_the_run_log_keeps_the_reason_of_a_gate_without_the_pointer(run, workflow, session):
+    answered_by_the_answerer(run)
+    announce(run, "review")
+
+    drive(run, workflow, session)
+
+    assert "naiad queue answers" not in RunLog(run.root).path.read_text()
 
 
 # A State that asks for a Report on entry (ADR 0055): the clearing `implement`,

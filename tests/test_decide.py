@@ -191,6 +191,7 @@ def signals(
     hold_reason=None,
     opening=None,
     reported=False,
+    answered=0,
 ):
     return Signals(
         announcement=(
@@ -200,6 +201,7 @@ def signals(
         ),
         opening=opening,
         reported=reported,
+        answered=answered,
         handled_seq=handled_seq,
         stopped=stopped,
         stopped_since_action=stopped_since_action,
@@ -850,6 +852,30 @@ name = "review"
     reason = decide(ending, signals("review")).reason
 
     assert reason == "state 'review' is a Gate State and is waiting for you"
+
+
+def test_a_gate_notification_carries_how_many_questions_the_answerer_answered(workflow):
+    """The count rides on the Action rather than in its reason, so the wording
+    that points at the verb is the loop's, which knows the Entry."""
+    parked = decide(workflow, signals("review", answered=2))
+
+    assert parked.answered == 2
+    assert parked.reason == "state 'review' is a Gate State and is waiting for you; next: implement"
+
+
+def test_a_gate_notification_counts_nothing_the_answerer_did_not_answer(workflow):
+    assert decide(workflow, signals("review")).answered == 0
+
+
+def test_a_finish_carries_how_many_questions_the_answerer_answered(workflow):
+    assert decide(workflow, signals("done", answered=3)) == Finish(state="done", answered=3)
+
+
+def test_a_notification_that_is_not_a_gate_carries_no_count(workflow):
+    hung = decide(workflow, signals("grill", stopped=False, idle_for=HANG_SECONDS, answered=2))
+
+    assert isinstance(hung, Notify)
+    assert hung.answered == 0
 
 
 def test_an_adopted_run_parked_at_a_gate_names_what_follows_too(workflow):

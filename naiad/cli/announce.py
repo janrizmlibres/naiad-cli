@@ -80,7 +80,8 @@ def announce_state(state: str, *, run: Run, subject: str | None = None) -> Annou
     if abandoning is not None and abandoning.question is not None:
         AnswerLog(run.root).record(
             question=abandoning.question,
-            answer=f"abandoned unanswered; the agent announced '{state}' and moved on",
+            answer=f"the agent announced '{state}' and moved on",
+            state=abandoning.state,
             abandoned=True,
         )
     return announcement

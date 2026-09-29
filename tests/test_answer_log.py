@@ -4,6 +4,8 @@ Written by Naiad rather than by the agent, because Naiad holds both halves —
 the agent cannot fail to log an answer it never saw.
 """
 
+import json
+
 from naiad.domain.question import Question
 from naiad.runtime.answers import AnswerLog
 
@@ -73,3 +75,32 @@ def test_a_second_answer_does_not_replace_the_first(tmp_path):
     log.record(question=RETRIES, answer="the caller")
 
     assert [entry.answer for entry in log.entries()] == ["the client", "the caller"]
+
+
+def test_a_recorded_answer_names_the_state_the_question_was_asked_from(tmp_path):
+    """A Question is judgeable only beside where the Run stood when it asked."""
+    log = AnswerLog(tmp_path)
+
+    log.record(question=RETRIES, answer="the client", state="implement")
+
+    assert log.entries()[0].state == "implement"
+
+
+def test_an_entry_written_before_the_state_was_recorded_reads_with_no_state(tmp_path):
+    older = [
+        {
+            "question": RETRIES.text,
+            "options": list(RETRIES.options),
+            "answer": "the client",
+            "escalated": False,
+            "abandoned": False,
+        }
+    ]
+    (tmp_path / "answers.json").write_text(json.dumps(older))
+    log = AnswerLog(tmp_path)
+
+    assert log.entries()[0].state is None
+
+    log.record(question=VENDOR, answer="Twilio", state="review")
+
+    assert [entry.state for entry in log.entries()] == [None, "review"]

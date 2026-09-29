@@ -190,6 +190,12 @@ class Signals:
     apart from notified because nothing that decides parking or the hand-off
     may be able to see it; per Announcement like nudges and cleared, and re-armed
     by the next one.
+
+    answered is how many Questions the Answerer settled with an Answer — not
+    the ones it escalated, the Workflow gave the human, or the agent abandoned,
+    because the human already met each of those. It is a fact about the Run,
+    carried to the two notifications the operator reviews an unattended Run
+    from, and nothing re-arms it.
     """
 
     announcement: Announcement | None
@@ -214,6 +220,7 @@ class Signals:
     holding: bool = False
     hold_reason: str | None = None
     reported: bool = False
+    answered: int = 0
 
 
 @dataclass(frozen=True)
@@ -367,10 +374,15 @@ class Notify:
     the Answer log records what became of it beside the ones that were
     answered. An Escalation is not a separate Action — a Gate reached, an
     Answerer escalating, an agent gone silent and an agent hung are one
-    behaviour, and Naiad needs one behaviour here rather than v1's taxonomy."""
+    behaviour, and Naiad needs one behaviour here rather than v1's taxonomy.
+
+    answered is set only at a Gate, the hand-off the operator reviews an
+    unattended Run from: how many Questions the Answerer settled on the way
+    there."""
 
     reason: str
     question: Question | None = None
+    answered: int = 0
 
 
 @dataclass(frozen=True)
@@ -398,9 +410,12 @@ class Finish:
     The session is deliberately not touched. It is left alive so that the
     evidence of what the Run did is still there to read, which is exactly what
     the operator wants when the result looks wrong.
+
+    answered is how many Questions the Answerer settled during the Run.
     """
 
     state: str
+    answered: int = 0
 
 
 @dataclass(frozen=True)
@@ -446,7 +461,7 @@ def decide(workflow: Workflow, signals: Signals, *, skip_gates: bool = False) ->
         # so it cannot type over an agent still writing its last paragraph, and
         # a Run whose agent has declared itself done should not be left ticking
         # on a turn end that a session about to be abandoned may never fire.
-        return Finish(state=ended.name)
+        return Finish(state=ended.name, answered=signals.answered)
 
     if announcement is not None and announcement.question is not None:
         # A Question outranks the State it was asked from. The agent is
@@ -630,7 +645,7 @@ def _owed(
         waiting = f"state '{state.name}' is a Gate State and is waiting for you"
         if following:
             waiting = f"{waiting}; next: {render_candidates(following)}"
-        return _notify(signals, waiting)
+        return _notify(signals, waiting, answered=signals.answered)
 
     if state.clear and not signals.cleared:
         # The context must be discarded before the Prompt, and the discard
@@ -799,12 +814,18 @@ def _switches(
     )
 
 
-def _notify(signals: Signals, reason: str, *, question: Question | None = None) -> Action:
+def _notify(
+    signals: Signals, reason: str, *, question: Question | None = None, answered: int = 0
+) -> Action:
     """Notification is once per Announcement, not once per tick. Every
     condition reaching here persists with identical signals until a human acts,
     so without this the operator is woken every couple of seconds until they do
     (PRD, 'The Answerer')."""
-    return NOTHING if signals.notified else Notify(reason=reason, question=question)
+    return (
+        NOTHING
+        if signals.notified
+        else Notify(reason=reason, question=question, answered=answered)
+    )
 
 
 __all__ = [

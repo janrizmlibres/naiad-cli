@@ -664,3 +664,19 @@ def test_a_turn_sidecar_beside_an_entry_is_not_read_as_an_entry(queue, repo):
     EntryTurns(queue.root, added.id).record_end()
 
     assert [found.id for found in queue.all()] == [added.id]
+
+
+def test_the_entry_a_run_became_is_found_from_the_run_id(tmp_path, repo):
+    queue = Queue(tmp_path / "queue")
+    started = queue.add(entry(repo, id="first", working_branch=None))
+    queue.attach_run(started, run_id="first-run")
+    queue.add(entry(repo, id="second", working_branch="other"))
+
+    assert queue.entry_of("first-run").id == "first"
+
+
+def test_a_run_no_entry_became_has_no_entry(tmp_path, repo):
+    queue = Queue(tmp_path / "queue")
+    queue.add(entry(repo, id="waiting"))
+
+    assert queue.entry_of("orphaned-run") is None

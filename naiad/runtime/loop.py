@@ -32,7 +32,7 @@ from naiad.domain.decide import (
     decide,
 )
 from naiad.domain.announcement import Announcement
-from naiad.domain.notification import Notification
+from naiad.domain.notification import Notification, render_answered
 from naiad.domain.prompt import render_prompt
 from naiad.domain.protocol import DEFAULT_NAIAD, render_answer, render_nudge
 from naiad.domain.question import Question
@@ -94,10 +94,15 @@ def tick(
     answerer: Answerer,
     now: float | None = None,
     naiad: str = DEFAULT_NAIAD,
+    entry_id: str | None = None,
 ) -> Action:
     """now is a parameter so the rules that depend on elapsed time can be
     driven from data rather than from a test that waits. Every other caller
-    means the current moment, so that is what it defaults to."""
+    means the current moment, so that is what it defaults to.
+
+    entry_id is the Entry this Run became, which is what `naiad queue answers`
+    is best pointed at. The Run knows no Entry, so whoever drives it says; a
+    Run with none is pointed at by its own id."""
     announcement = Announcements(run.root).latest()
     log = RunLog(run.root)
     turns = Turns(run.root)
@@ -114,6 +119,7 @@ def tick(
     waits = Waits(run.root)
     holds = Holds(run.root)
     moment = now if now is not None else time.time()
+    reference = entry_id or run.id
     # Read out of the log rather than out of a record of its own, for the reason
     # `finished` is: every Switch and every Notify is already written there, and
     # one fact deserves one home (ADR 0039). Both come back from one pass, and
@@ -161,6 +167,7 @@ def tick(
             wait_reason=waits.reason(announcement),
             holding=holds.holding(announcement),
             hold_reason=holds.reason(announcement),
+            answered=answers.answered(),
         ),
         skip_gates=run.skip_gates,
     )
@@ -223,7 +230,9 @@ def tick(
         )
     elif isinstance(action, Respond) and announcement is not None:
         session.send(_pane(run), render_answer(action.answer))
-        answers.record(question=action.question, answer=action.answer)
+        answers.record(
+            question=action.question, answer=action.answer, state=announcement.state
+        )
         handled.record(announcement.seq, turns=turns.count())
     elif isinstance(action, Nudge):
         session.send(
@@ -238,7 +247,7 @@ def tick(
         # makes the ending final, so the fact has one home rather than two.
         notifier.notify(
             title=f"naiad: {run.id}",
-            message=f"finished at {action.state}",
+            message=_with_answered(f"finished at {action.state}", action.answered, reference),
             kind=Notification.FINISH,
         )
     elif isinstance(action, Report):
@@ -254,19 +263,34 @@ def tick(
         reports.record(announcement)
     elif isinstance(action, Notify):
         notifier.notify(
-            title=f"naiad: {run.id}", message=action.reason, kind=Notification.NOTIFY
+            title=f"naiad: {run.id}",
+            message=_with_answered(action.reason, action.answered, reference),
+            kind=Notification.NOTIFY,
         )
         notices.record_notified(announcement, wait_count=wait_count, hold_count=hold_count)
-        if action.question is not None:
+        if action.question is not None and announcement is not None:
             # A Question the human is answering: one the Answerer escalated,
             # or one the Workflow gave the human (ADR 0046, 0050). Recorded here rather
             # than at the consultation so that the log holds what became of
             # it, not merely what was said about it — and once, because a
             # second notification for the same Announcement never arrives.
-            answers.record(question=action.question, answer=action.reason, escalated=True)
+            answers.record(
+                question=action.question,
+                answer=action.reason,
+                state=announcement.state,
+                escalated=True,
+            )
 
     log.record(action, seq=announcement.seq if announcement is not None else None)
     return action
+
+
+def _with_answered(message: str, answered: int, reference: str) -> str:
+    """The message with the Answerer's count as a line of its own, and only
+    when it answered something: a Run it never answered has nothing to review."""
+    if answered == 0:
+        return message
+    return f"{message}\n{render_answered(answered, reference=reference)}"
 
 
 def _opening(run: Run, workflow: Workflow, log: RunLog) -> Opening | None:

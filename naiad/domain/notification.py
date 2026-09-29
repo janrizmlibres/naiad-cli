@@ -24,4 +24,11 @@ class Notification(Enum):
     REPORT = "report"
 
 
-__all__ = ["Notification"]
+def render_answered(count: int, *, reference: str) -> str:
+    """The line that tells the operator the Answerer answered for them, and
+    which verb reads what it said. reference is what that verb is given: the
+    Entry, or the Run where the Run has none."""
+    return f"{count} answered by the Answerer — naiad queue answers {reference}"
+
+
+__all__ = ["Notification", "render_answered"]

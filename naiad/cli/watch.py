@@ -14,6 +14,7 @@ from __future__ import annotations
 import time
 from collections.abc import Callable
 
+from naiad.cli.terminal import cut, first_clause, terminal_width
 from naiad.domain.decide import (
     Action,
     Clear,
@@ -45,6 +46,7 @@ def watch(
     notifier: Notifier,
     answerer: Answerer,
     naiad: str = DEFAULT_NAIAD,
+    entry_id: str | None = None,
     sleep: Callable[[float], None] = time.sleep,
     report: Callable[[str], None] = print,
 ) -> Finish | None:
@@ -72,6 +74,7 @@ def watch(
             notifier=notifier,
             answerer=answerer,
             naiad=naiad,
+            entry_id=entry_id,
             report=report,
         )
         if isinstance(action, Finish):
@@ -90,11 +93,17 @@ def tick_once(
     notifier: Notifier,
     answerer: Answerer,
     naiad: str = DEFAULT_NAIAD,
+    entry_id: str | None = None,
     report: Callable[[str], None] = print,
+    lead: int = 0,
 ) -> Action:
     """One tick of a Run, narrated. The watch is this in a loop; the
     Supervisor calls it once per pass per lane instead (ADR 0020), so the two
-    drive a Run through the same tick with the same narration."""
+    drive a Run through the same tick with the same narration.
+
+    lead is how many columns the caller prints before the narration, as the
+    Supervisor prefixes the Run it belongs to: the lines cut to the terminal
+    width are cut to what is left of it."""
     action = tick(
         run=run,
         workflow=workflow,
@@ -102,16 +111,22 @@ def tick_once(
         notifier=notifier,
         answerer=answerer,
         naiad=naiad,
+        entry_id=entry_id,
     )
-    narration = _narrate(action)
+    narration = _narrate(action, width=max(terminal_width() - lead, 1))
     if narration is not None:
         report(narration)
     return action
 
 
-def _narrate(action: Action) -> str | None:
+def _narrate(action: Action, *, width: int) -> str | None:
     """What the operator watching the terminal is told. Nothing for the ticks
-    where nothing happened, which is most of them."""
+    where nothing happened, which is most of them.
+
+    The two lines that carry a Question's or an Answer's words are one line
+    cut to width, options dropped and the answer's first clause kept: they run
+    long and repeat for every Question, and the Run's Answer log holds the rest
+    (`naiad queue answers`)."""
     if isinstance(action, Clear):
         again = "" if action.attempt == 1 else f" again (attempt {action.attempt})"
         return f"clearing {action.state}{again}"
@@ -121,9 +136,9 @@ def _narrate(action: Action) -> str | None:
     if isinstance(action, Confirm):
         return f"confirmed {action.state} landed"
     if isinstance(action, Consult):
-        return f"consulting the answerer: {action.question.text}"
+        return cut(f"consulting the answerer: {_one_line(action.question.text)}", width)
     if isinstance(action, Respond):
-        return f"answered: {action.answer}"
+        return cut(f"answered: {_one_line(first_clause(action.answer))}", width)
     if isinstance(action, Nudge):
         expired = "" if action.expired_wait is None else f" after its wait on '{action.expired_wait}' expired"
         return f"nudged the agent ({action.attempt}){expired}"
@@ -134,6 +149,12 @@ def _narrate(action: Action) -> str | None:
     if isinstance(action, Finish):
         return f"finished at {action.state}"
     return None
+
+
+def _one_line(text: str) -> str:
+    """A Question or Answer with its line breaks made spaces: written as a
+    paragraph, echoed as a line."""
+    return " ".join(text.split())
 
 
 __all__ = ["TICK_SECONDS", "tick_once", "watch"]

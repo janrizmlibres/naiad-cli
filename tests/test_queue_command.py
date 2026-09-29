@@ -11,11 +11,12 @@ import re
 import pytest
 
 from naiad.adapters.lock import SupervisorLock
-from naiad.cli.main import main
+from naiad.cli.main import _drive, _ticker, main
 from naiad.domain.decide import Finish
 from naiad.domain.entry import Entry
 from naiad.domain.question import Question
 from naiad.runtime.announcements import Announcements
+from naiad.runtime.answers import AnswerLog
 from naiad.runtime.log import RunLog
 from naiad.runtime.queue import Queue
 from naiad.runtime.records import Notices
@@ -1004,3 +1005,215 @@ def test_a_run_cancelled_before_its_session_was_recorded_offers_no_pane(home, re
     assert "cancelled run a-run" in printed
     assert "pane" not in printed
     assert RunLog(run.root).ended() is True
+
+
+# `naiad queue answers` is the operator's only way to read what the Answerer,
+# the Workflow and the agent between them did with every Question.
+
+RETRIES = Question(text="Which module owns retries?", options=("the client", "the caller"))
+VENDOR = Question(text="Which SMS vendor?", options=("Twilio", "Vonage"))
+CACHE = Question(text="Should the cache be flushed?", options=("yes", "no"))
+PORT = Question(text="May I stop the server on :3939?", options=("Yes", "No"))
+
+
+def answers_printed(capsys, argument):
+    capsys.readouterr()
+    status = main(["queue", "answers", argument])
+    printed = capsys.readouterr()
+    return status, printed.out, printed.err
+
+
+def test_a_run_prints_one_block_per_question_with_the_outcome_of_each(home, repo, capsys):
+    run = run_entry(home, repo, "night")
+    log = AnswerLog(run.root)
+    log.record(question=RETRIES, answer="the client, since it backs off", state="implement")
+    log.record(
+        question=VENDOR, answer="picking a vendor is not in this repository",
+        state="grill", escalated=True,
+    )
+    log.record(
+        question=CACHE, answer="the implement State reserves its Questions for the human",
+        state="implement", escalated=True,
+    )
+    log.record(
+        question=PORT, answer="the agent announced 'done' and moved on",
+        state="implement", abandoned=True,
+    )
+
+    status, out, _ = answers_printed(capsys, "night")
+
+    assert status == 0
+    assert out == (
+        "1  implement\n"
+        "   Which module owns retries?\n"
+        "   options:\n"
+        "     - the client\n"
+        "     - the caller\n"
+        "   → answerer: the client, since it backs off\n"
+        "\n"
+        "2  grill\n"
+        "   Which SMS vendor?\n"
+        "   options:\n"
+        "     - Twilio\n"
+        "     - Vonage\n"
+        "   → yours: picking a vendor is not in this repository\n"
+        "\n"
+        "3  implement\n"
+        "   Should the cache be flushed?\n"
+        "   options:\n"
+        "     - yes\n"
+        "     - no\n"
+        "   → yours: the implement State reserves its Questions for the human\n"
+        "\n"
+        "4  implement\n"
+        "   May I stop the server on :3939?\n"
+        "   options:\n"
+        "     - Yes\n"
+        "     - No\n"
+        "   → abandoned: the agent announced 'done' and moved on\n"
+    )
+
+
+def test_a_run_id_is_accepted_as_well_as_an_entry_id(home, repo, capsys):
+    run = run_entry(home, repo, "night")
+    AnswerLog(run.root).record(question=RETRIES, answer="the client", state="implement")
+
+    by_entry = answers_printed(capsys, "night")
+    by_run = answers_printed(capsys, run.id)
+
+    assert by_run == by_entry
+    assert "→ answerer: the client" in by_run[1]
+
+
+def test_a_run_no_entry_became_is_read_by_its_run_id(home, repo, capsys):
+    run = RunStore(home / "runs").create(
+        run_id="loose-run",
+        workflow_path=repo / "workflow.toml",
+        task="adopted work",
+        target_repo=repo,
+        created_at="2026-07-22T12:00:00Z",
+    )
+    AnswerLog(run.root).record(question=RETRIES, answer="the client")
+
+    status, out, _ = answers_printed(capsys, "loose-run")
+
+    assert status == 0
+    assert out.startswith("1\n   Which module owns retries?")
+
+
+def test_an_answer_logged_before_states_were_recorded_prints_no_state(home, repo, capsys):
+    run = run_entry(home, repo, "night")
+    (run.root / "answers.json").write_text(
+        json.dumps(
+            [{"question": "Q?", "options": ["a"], "answer": "a", "escalated": False, "abandoned": False}]
+        )
+    )
+
+    _, out, _ = answers_printed(capsys, "night")
+
+    assert out.splitlines()[0] == "1"
+
+
+def test_a_run_that_was_asked_nothing_says_so(home, repo, capsys):
+    run = run_entry(home, repo, "night")
+
+    status, out, _ = answers_printed(capsys, "night")
+
+    assert status == 0
+    assert out == f"no questions were asked in {run.id}\n"
+
+
+def test_an_entry_that_has_not_started_says_so(home, repo, capsys):
+    add(repo)
+    (waiting,) = queue_of(home).all()
+
+    status, out, _ = answers_printed(capsys, waiting.id)
+
+    assert status == 0
+    assert out == f"{waiting.id} has not started, so it has no answers yet\n"
+
+
+def test_naming_nothing_is_a_usage_error_and_never_defaults_to_the_latest_run(
+    home, repo, capsys
+):
+    run_entry(home, repo, "night")
+
+    with pytest.raises(SystemExit) as exited:
+        main(["queue", "answers"])
+
+    assert exited.value.code == 2
+
+
+def test_an_argument_naming_neither_an_entry_nor_a_run_is_refused(home, repo, capsys):
+    run_entry(home, repo, "night")
+
+    status, out, err = answers_printed(capsys, "nigth")
+
+    assert status == 2
+    assert out == ""
+    assert "nigth" in err
+
+
+def test_the_question_is_wrapped_to_the_terminal_width(home, repo, capsys, monkeypatch):
+    run = run_entry(home, repo, "night")
+    long = Question(text="word " * 30, options=("a",))
+    AnswerLog(run.root).record(question=long, answer="a", state="implement")
+    monkeypatch.setenv("COLUMNS", "40")
+
+    _, out, _ = answers_printed(capsys, "night")
+
+    wrapped = out.splitlines()[1:-4]
+    assert len(wrapped) > 1
+    assert all(len(line) <= 40 and line.startswith("   ") for line in wrapped)
+
+
+def test_a_piped_run_wraps_at_eighty_columns(home, repo, capsys, monkeypatch):
+    run = run_entry(home, repo, "night")
+    long = Question(text="word " * 40, options=("a",))
+    AnswerLog(run.root).record(question=long, answer="a", state="implement")
+    monkeypatch.delenv("COLUMNS", raising=False)
+
+    _, out, _ = answers_printed(capsys, "night")
+
+    wrapped = out.splitlines()[1:-4]
+    assert len(wrapped) > 1
+    assert max(len(line) for line in wrapped) <= 80
+
+
+def test_a_supervised_tick_names_the_entry_and_leaves_room_for_the_run_prefix(
+    home, repo, monkeypatch
+):
+    run = run_entry(home, repo, "night")
+    ticked = {}
+    monkeypatch.setattr("naiad.cli.main.tick_once", lambda **arguments: ticked.update(arguments))
+
+    _ticker()(run)
+
+    assert ticked["entry_id"] == "night"
+    assert ticked["lead"] == len(f"{run.id}  ")
+
+
+def test_a_watched_run_that_was_queued_names_its_entry_to_the_loop(home, repo, monkeypatch):
+    run = run_entry(home, repo, "night")
+    watched = {}
+    monkeypatch.setattr("naiad.cli.main.watch", lambda **arguments: watched.update(arguments))
+
+    _drive(run)
+
+    assert watched["entry_id"] == "night"
+
+
+def test_a_watched_run_that_was_never_queued_names_no_entry(home, repo, monkeypatch):
+    run = RunStore(home / "runs").create(
+        run_id="loose-run",
+        workflow_path=repo / "workflow.toml",
+        task="adopted work",
+        target_repo=repo,
+        created_at="2026-07-22T12:00:00Z",
+    )
+    watched = {}
+    monkeypatch.setattr("naiad.cli.main.watch", lambda **arguments: watched.update(arguments))
+
+    _drive(run)
+
+    assert watched["entry_id"] is None

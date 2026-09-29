@@ -97,6 +97,12 @@ class Queue:
         """
         return next((entry for entry in self.all() if entry.id == entry_id), None)
 
+    def entry_of(self, run_id: str) -> Entry | None:
+        """The Entry a Run became, or nothing for a Run that was never queued —
+        an Adoption's Run before its Entry is attached, or one whose Entry was
+        removed. The Run records no Entry, so the Queue is asked."""
+        return next((entry for entry in self.all() if entry.run_id == run_id), None)
+
     def remove(self, entry_id: str) -> bool:
         """Take an Entry out of the Queue, and touch nothing else.
 

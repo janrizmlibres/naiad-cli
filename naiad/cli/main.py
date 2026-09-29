@@ -31,6 +31,7 @@ from naiad.adapters.notify import configured_notifier
 from naiad.adapters.tmux import TmuxError, TmuxSessions
 from naiad.cli.adopt import NotInTmux, attachment_in, teaching_for
 from naiad.cli.announce import AnnounceError, announce_state, announcement_reply
+from naiad.cli.answers import render_answers
 from naiad.cli.ask import AskError, ask_question
 from naiad.cli.batch import BatchError, enqueue_batch, load_batch
 from naiad.cli.branch import BranchError, declare_branch
@@ -47,6 +48,7 @@ from naiad.cli.kickoff import start_entry
 from naiad.cli.protocol import injection_for, standing_in
 from naiad.cli.refusals import ADD_COMMAND, ADOPT_COMMAND, RUN_COMMAND, Remedy
 from naiad.cli.supervisor import supervise_queue
+from naiad.cli.terminal import terminal_width
 from naiad.cli.wait import WaitError, declare_wait
 from naiad.cli.watch import tick_once, watch
 from naiad.domain.entry import Attachment, Entry
@@ -55,6 +57,7 @@ from naiad.domain.protocol import ANNOUNCE_SUBCOMMAND
 from naiad.domain.workflow import WorkflowError, load_workflow
 from naiad.hooks.install import install_hooks
 from naiad.runtime.announcements import Announcements
+from naiad.runtime.answers import AnswerLog
 from naiad.runtime.log import RunLog
 from naiad.runtime.home import (
     StorageError,
@@ -157,6 +160,17 @@ def build_parser() -> argparse.ArgumentParser:
         queue_commands, "watch", help="take the Queue in order, and keep following it for more"
     )
     queue_watch.set_defaults(handler=_queue_watch)
+
+    # The argument is required and nothing defaults to the latest Run: with
+    # lanes in parallel "latest" is ambiguous, and reading the wrong Run's
+    # Answers is worse than a refusal.
+    queue_answers = queue_commands.add_parser(
+        "answers", help="what became of every Question a Run asked, in the order they were asked"
+    )
+    queue_answers.add_argument(
+        "entry_or_run", help="an Entry or a Run, as `naiad queue list` names them"
+    )
+    queue_answers.set_defaults(handler=_queue_answers)
 
     queue_rm = queue_commands.add_parser(
         "rm", help="remove an Entry, cancelling any Run it started and freeing that session"
@@ -703,7 +717,17 @@ def _drive(run: Run) -> None:
         # The naiad driving this Run, so a nudged agent is told to type the
         # command that exists rather than whatever the session's PATH holds.
         naiad=naiad_command(),
+        entry_id=_entry_id_of(run),
     )
+
+
+def _entry_id_of(run: Run) -> str | None:
+    """The Entry a Run became, so that a notification can point the operator at
+    `naiad queue answers` by the id `naiad queue list` shows. The Run records no
+    Entry; the Queue is asked, and a Run it does not know is pointed at by its
+    own id."""
+    entry = Queue(default_queue_root()).entry_of(run.id)
+    return None if entry is None else entry.id
 
 
 def _ticker() -> Callable[[Run], None]:
@@ -732,7 +756,9 @@ def _ticker() -> Callable[[Run], None]:
             notifier=notifier,
             answerer=answerer,
             naiad=naiad,
+            entry_id=_entry_id_of(run),
             report=lambda message: print(f"{run.id}  {message}"),
+            lead=len(f"{run.id}  "),
         )
 
     return tick_run
@@ -1161,6 +1187,41 @@ def _start_entry(entry: Entry, predecessor: str | None) -> Run:
         claude_session_id=str(uuid.uuid4()),
         created_at=_timestamp(started),
     )
+
+
+def _queue_answers(arguments: argparse.Namespace) -> int:
+    """Print a Run's Answer log, for the Entry or the Run the operator named.
+
+    An Entry id and a Run id are both what `naiad queue list` prints, so either
+    is taken. An Entry not yet started has no Run to read and says so, rather
+    than printing the empty block of a Run that was asked nothing.
+    """
+    named = arguments.entry_or_run
+    runs = RunStore(default_runs_root())
+    try:
+        entry = Queue(default_queue_root()).find(named)
+        run_id = named if entry is None else entry.run_id
+        if entry is not None and run_id is None:
+            print(f"{entry.id} has not started, so it has no answers yet")
+            return 0
+        run = runs.load(run_id) if run_id is not None else None
+    except FAILURES as error:
+        print(f"naiad: {error}", file=sys.stderr)
+        return 2
+
+    if run is None:
+        print(
+            f"naiad: no entry '{named}' in the queue at {default_queue_root()}, "
+            f"and no run under {default_runs_root()}",
+            file=sys.stderr,
+        )
+        return 2
+
+    print(
+        render_answers(run.id, AnswerLog(run.root).entries(), width=terminal_width()),
+        end="",
+    )
+    return 0
 
 
 def _queue_rm(arguments: argparse.Namespace) -> int:

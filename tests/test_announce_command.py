@@ -348,7 +348,8 @@ def test_announcing_over_an_unanswered_question_records_it_abandoned(run):
     assert entry.question == "Which module owns retries?"
     assert entry.options == ("the client",)
     assert entry.abandoned is True
-    assert "done" in entry.answer
+    assert entry.answer == "the agent announced 'done' and moved on"
+    assert entry.state == "grill"
 
 
 def test_announcing_over_an_answered_question_records_no_abandonment(run):
