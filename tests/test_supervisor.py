@@ -61,7 +61,7 @@ def queued(queue, repo, identifier, **overrides):
         workflow_path=repo / "workflow.toml",
         task=f"task {identifier}",
         target_repo=repo,
-        working_branch=f"MC-AGENT-{identifier}",
+        working_branch=f"TASK-{identifier}",
         created_at="2026-07-22T12:00:00Z",
     )
     fields.update(overrides)
@@ -191,13 +191,13 @@ def test_a_start_is_followed_by_ticking_the_run_it_created(queue, runs, repo):
 
 
 def test_a_started_entry_is_handed_the_predecessor_the_rules_resolved(queue, runs, repo):
-    entry = queued(queue, repo, "one", pinned_base="MC-AGENT-8000")
+    entry = queued(queue, repo, "one", pinned_base="TASK-8000")
     supervision = Supervision(runs)
 
     supervising(queue, runs, supervision)
 
-    assert supervision.started == [(entry.id, "MC-AGENT-8000")]
-    assert runs.load("run-1").predecessor == "MC-AGENT-8000"
+    assert supervision.started == [(entry.id, "TASK-8000")]
+    assert runs.load("run-1").predecessor == "TASK-8000"
 
 
 def test_the_run_is_recorded_on_the_entry_before_it_is_ticked(queue, runs, repo):

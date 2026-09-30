@@ -92,15 +92,15 @@ def test_metadata_records_the_working_branch_and_the_predecessor(store, repo):
     """Run-level facts, so a Run resumed by a second process — or a Prompt
     delivered long after kickoff — reads them back rather than being told
     again."""
-    run = create(store, repo, working_branch="MC-AGENT-8546", predecessor="MC-AGENT-8000")
+    run = create(store, repo, working_branch="TASK-8546", predecessor="TASK-8000")
 
     reloaded = store.load(run.id)
-    assert reloaded.working_branch == "MC-AGENT-8546"
-    assert reloaded.predecessor == "MC-AGENT-8000"
+    assert reloaded.working_branch == "TASK-8546"
+    assert reloaded.predecessor == "TASK-8000"
 
 
 def test_a_run_with_no_predecessor_reloads_without_one(store, repo):
-    run = create(store, repo, working_branch="MC-AGENT-8546")
+    run = create(store, repo, working_branch="TASK-8546")
 
     assert store.load(run.id).predecessor is None
 
@@ -108,7 +108,7 @@ def test_a_run_with_no_predecessor_reloads_without_one(store, repo):
 def test_metadata_written_before_these_fields_existed_still_loads(store, repo):
     """A Run started by an earlier Naiad is still a Run. It has no Working
     branch because nothing gave it one, not because one was lost."""
-    run = create(store, repo, working_branch="MC-AGENT-8546")
+    run = create(store, repo, working_branch="TASK-8546")
     document = json.loads(run.metadata_path.read_text())
     del document["working_branch"]
     del document["predecessor"]

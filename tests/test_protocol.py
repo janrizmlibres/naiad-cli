@@ -188,7 +188,7 @@ def test_there_is_a_wording_for_every_nudge_naiad_is_willing_to_send():
 
 
 def adoption(**overrides):
-    fields = dict(next_states=("spec",), working_branch="MC-AGENT-8546", supervised=True)
+    fields = dict(next_states=("spec",), working_branch="TASK-8546", supervised=True)
     fields.update(overrides)
     return render_adoption(**fields)
 
@@ -227,9 +227,9 @@ def test_an_adoption_says_the_prompt_arrives_once_the_lane_is_free():
 def test_an_adoption_carrying_a_branch_names_it_rather_than_asking_for_one():
     """The human already made it and the Entry claims it, so an agent told to
     derive one here would create a second branch for the same work."""
-    taught = adoption(working_branch="MC-AGENT-8546")
+    taught = adoption(working_branch="TASK-8546")
 
-    assert "MC-AGENT-8546" in taught
+    assert "TASK-8546" in taught
     assert "naiad branch" not in taught
 
 
@@ -273,7 +273,7 @@ def test_an_adoption_names_the_commands_as_the_agent_must_invoke_them():
 
 
 def test_no_adoption_is_left_holding_a_placeholder():
-    for working_branch in (None, "MC-AGENT-8546"):
+    for working_branch in (None, "TASK-8546"):
         for supervised in (True, False):
             assert "{" not in adoption(working_branch=working_branch, supervised=supervised)
 

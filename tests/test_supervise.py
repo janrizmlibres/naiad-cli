@@ -21,7 +21,7 @@ def entry(identifier, **overrides):
         workflow_path=REPO / "workflow.toml",
         task="add dark mode",
         target_repo=REPO,
-        working_branch=f"MC-AGENT-{identifier}",
+        working_branch=f"TASK-{identifier}",
         created_at="2026-07-22T12:00:00Z",
     )
     fields.update(overrides)
@@ -63,9 +63,9 @@ def test_the_first_entry_with_no_run_is_started():
 def test_a_started_entry_carries_its_pinned_base_as_its_predecessor():
     """Resolution rides on the Action, so the rule that picks an Entry and the
     rule that decides what it stands on are one decision rather than two."""
-    pinned = entry("one", pinned_base="MC-AGENT-8000")
+    pinned = entry("one", pinned_base="TASK-8000")
 
-    assert supervise(draining(pinned)) == [Start(entry=pinned, predecessor="MC-AGENT-8000")]
+    assert supervise(draining(pinned)) == [Start(entry=pinned, predecessor="TASK-8000")]
 
 
 def test_an_entry_whose_run_has_not_finished_is_resumed():
@@ -224,7 +224,7 @@ def test_an_entry_with_no_pinned_base_stands_on_the_entry_before_it():
     second = entry("two")
 
     assert supervise(draining(first, second, finished={"a-run"})) == [
-        Start(entry=second, predecessor="MC-AGENT-one")
+        Start(entry=second, predecessor="TASK-one")
     ]
 
 
@@ -249,7 +249,7 @@ def test_an_entry_for_another_repository_is_walked_over():
 
     assert supervise(
         draining(first, interloper, third, finished={"a-run", "another-run"})
-    ) == [Start(entry=third, predecessor="MC-AGENT-one")]
+    ) == [Start(entry=third, predecessor="TASK-one")]
 
 
 def test_the_first_entry_for_a_repository_stands_on_nothing():
@@ -273,7 +273,7 @@ def test_an_entry_whose_immediate_predecessor_was_removed_takes_the_one_before_i
     third = entry("three")
 
     assert supervise(draining(first, third, finished={"a-run"})) == [
-        Start(entry=third, predecessor="MC-AGENT-one")
+        Start(entry=third, predecessor="TASK-one")
     ]
 
 
@@ -308,7 +308,7 @@ def test_an_entry_with_no_branch_anywhere_is_walked_past():
 
     assert supervise(
         draining(first, headless, third, finished={"a-run", "another-run"})
-    ) == [Start(entry=third, predecessor="MC-AGENT-one")]
+    ) == [Start(entry=third, predecessor="TASK-one")]
 
 
 def test_a_declared_branch_in_another_repository_is_still_walked_over():
@@ -332,4 +332,4 @@ def test_a_preceding_entry_for_the_same_repository_is_never_skipped():
 
     assert supervise(
         draining(landed, stacked, third, finished={"a-run", "another-run"})
-    ) == [Start(entry=third, predecessor="MC-AGENT-two")]
+    ) == [Start(entry=third, predecessor="TASK-two")]

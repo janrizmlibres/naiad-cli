@@ -793,7 +793,7 @@ def _branching_run(tmp_path, **overrides):
         task="t",
         target_repo=repo,
         created_at="2026-07-19T12:00:00Z",
-        working_branch="MC-AGENT-8546",
+        working_branch="TASK-8546",
     )
     fields.update(overrides)
     run = RunStore(tmp_path / "branched-runs").create(**fields)
@@ -807,28 +807,28 @@ def test_a_prompt_after_the_first_still_names_the_branch_and_the_predecessor(
     """Run-level facts, read back off the Run rather than remembered from
     kickoff: the loop runs in a process that outlives it, and the State that
     reads them Clears first."""
-    run, workflow = _branching_run(tmp_path, predecessor="MC-AGENT-8000")
+    run, workflow = _branching_run(tmp_path, predecessor="TASK-8000")
     announce(run, "implement")
 
     deliver_clearing(run, workflow, session)
 
     assert session.sent == [
         ("clear", "%7", None),
-        ("send", "%7", "work on MC-AGENT-8546 based on MC-AGENT-8000"),
+        ("send", "%7", "work on TASK-8546 based on TASK-8000"),
     ]
 
 
 def test_the_branch_reaches_every_delivery_not_only_the_first(tmp_path, session):
     """A State repeating over a series is delivered the branch each time, for
     the reason it is delivered its Subject each time."""
-    run, workflow = _branching_run(tmp_path, predecessor="MC-AGENT-8000")
+    run, workflow = _branching_run(tmp_path, predecessor="TASK-8000")
     announce(run, "implement")
     deliver_clearing(run, workflow, session)
     announce(run, "implement")
     deliver_clearing(run, workflow, session)
 
     delivered = [message for kind, _, message in session.sent if kind == "send"]
-    assert delivered == ["work on MC-AGENT-8546 based on MC-AGENT-8000"] * 2
+    assert delivered == ["work on TASK-8546 based on TASK-8000"] * 2
 
 
 def test_a_run_with_no_predecessor_delivers_the_prompt_with_it_empty(tmp_path, session):
@@ -837,7 +837,7 @@ def test_a_run_with_no_predecessor_delivers_the_prompt_with_it_empty(tmp_path, s
 
     deliver_clearing(run, workflow, session)
 
-    assert ("send", "%7", "work on MC-AGENT-8546 based on ") in session.sent
+    assert ("send", "%7", "work on TASK-8546 based on ") in session.sent
 
 
 def test_a_turn_ending_before_the_announcement_is_not_a_turn_ending_since_it(

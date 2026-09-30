@@ -83,12 +83,12 @@ def add(repo, *arguments):
 
 
 def test_adding_an_entry_records_it_under_the_naiad_home(home, repo, capsys):
-    assert add(repo, "--branch", "MC-AGENT-8546") == 0
+    assert add(repo, "--branch", "TASK-8546") == 0
 
     (queued,) = queue_of(home).all()
     assert queued.task == "add dark mode"
     assert queued.target_repo == repo
-    assert queued.working_branch == "MC-AGENT-8546"
+    assert queued.working_branch == "TASK-8546"
     assert queued.id in capsys.readouterr().out
 
 
@@ -96,9 +96,9 @@ def test_adding_an_entry_records_every_field_it_was_given(home, repo):
     add(
         repo,
         "--branch",
-        "MC-AGENT-8546",
+        "TASK-8546",
         "--base",
-        "MC-AGENT-8000",
+        "TASK-8000",
         "--at",
         "implement",
         "--subject",
@@ -107,7 +107,7 @@ def test_adding_an_entry_records_every_field_it_was_given(home, repo):
     )
 
     (queued,) = queue_of(home).all()
-    assert queued.pinned_base == "MC-AGENT-8000"
+    assert queued.pinned_base == "TASK-8000"
     assert queued.start_state == "implement"
     assert queued.subject == "docs/ticket.md"
     assert queued.skip_gates is True
@@ -116,7 +116,7 @@ def test_adding_an_entry_records_every_field_it_was_given(home, repo):
 def test_adding_an_entry_supervises_nothing(home, repo, no_tmux):
     """It must return promptly: a tool call that becomes a process blocking for
     hours is the failure the Queue exists to avoid."""
-    add(repo, "--branch", "MC-AGENT-8546")
+    add(repo, "--branch", "TASK-8546")
 
     assert no_tmux.spawned == []
     assert RunStore(home / "runs").all() == []
@@ -126,14 +126,14 @@ def test_adding_an_entry_supervises_nothing(home, repo, no_tmux):
 def test_entries_added_in_a_row_each_get_their_own_place_in_the_queue(home, repo):
     """Ids are sortable timestamps, so adding twice in quick succession queues
     two Entries in the order they arrived rather than colliding."""
-    add(repo, "--branch", "MC-AGENT-8546")
-    add(repo, "--branch", "MC-AGENT-8547")
+    add(repo, "--branch", "TASK-8546")
+    add(repo, "--branch", "TASK-8547")
 
     ids = [held.id for held in queue_of(home).all()]
     assert ids == sorted(ids)
     assert [held.working_branch for held in queue_of(home).all()] == [
-        "MC-AGENT-8546",
-        "MC-AGENT-8547",
+        "TASK-8546",
+        "TASK-8547",
     ]
 
 
@@ -155,16 +155,16 @@ def test_two_branchless_entries_for_the_same_repository_coexist(home, repo):
 
 
 def test_adding_an_entry_on_a_branch_another_entry_claims_is_refused(home, repo, capsys):
-    add(repo, "--branch", "MC-AGENT-8546")
+    add(repo, "--branch", "TASK-8546")
 
-    assert add(repo, "--branch", "MC-AGENT-8546") == 2
+    assert add(repo, "--branch", "TASK-8546") == 2
 
-    assert "MC-AGENT-8546" in capsys.readouterr().err
+    assert "TASK-8546" in capsys.readouterr().err
     assert len(queue_of(home).all()) == 1
 
 
 def test_adding_an_entry_starting_at_an_undeclared_state_is_refused(home, repo, capsys):
-    assert add(repo, "--branch", "MC-AGENT-8546", "--at", "grrill") == 2
+    assert add(repo, "--branch", "TASK-8546", "--at", "grrill") == 2
 
     assert "grrill" in capsys.readouterr().err
     assert queue_of(home).all() == []
@@ -175,7 +175,7 @@ def test_adding_a_workflow_with_an_unknown_key_is_refused_in_a_sentence(home, re
         WORKFLOW.replace('name = "grill"', 'name = "grill"\nquestons = "human"')
     )
 
-    assert add(repo, "--branch", "MC-AGENT-8546") == 2
+    assert add(repo, "--branch", "TASK-8546") == 2
 
     err = capsys.readouterr().err
     assert "unknown key 'questons' in state 'grill'" in err
@@ -206,8 +206,8 @@ def test_adding_by_a_name_the_library_does_not_hold_is_refused(home, repo, capsy
 
 
 def test_listing_shows_entries_in_queue_order_with_what_became_of_each(home, repo, capsys):
-    add(repo, "--branch", "MC-AGENT-8546")
-    add(repo, "--branch", "MC-AGENT-8547")
+    add(repo, "--branch", "TASK-8546")
+    add(repo, "--branch", "TASK-8547")
     first, second = queue_of(home).all()
 
     assert main(["queue", "list"]) == 0
@@ -215,7 +215,7 @@ def test_listing_shows_entries_in_queue_order_with_what_became_of_each(home, rep
     printed = capsys.readouterr().out
     assert printed.index(first.id) < printed.index(second.id)
     assert printed.count("waiting") == 2
-    assert "MC-AGENT-8546" in printed and "add dark mode" in printed
+    assert "TASK-8546" in printed and "add dark mode" in printed
 
 
 def run_entry(home, repo, name, *, start_state="grill"):
@@ -330,8 +330,8 @@ def test_listing_tells_apart_two_repositories_that_share_a_name(home, repo, tmp_
     namesake = tmp_path / "elsewhere" / "repo"
     namesake.mkdir(parents=True)
     (namesake / "workflow.toml").write_text(WORKFLOW)
-    add(repo, "--branch", "MC-AGENT-8546")
-    add(namesake, "--branch", "MC-AGENT-8546")
+    add(repo, "--branch", "TASK-8546")
+    add(namesake, "--branch", "TASK-8546")
     capsys.readouterr()
 
     assert main(["queue", "list"]) == 0
@@ -356,7 +356,7 @@ def test_listing_derives_what_became_of_an_entry_from_its_run(home, repo, capsys
             workflow_path=repo / "workflow.toml",
             task="add dark mode",
             target_repo=repo,
-            working_branch="MC-AGENT-8546",
+            working_branch="TASK-8546",
             created_at="2026-07-22T12:00:00Z",
             run_id="a-run",
         )
@@ -373,7 +373,7 @@ def test_listing_a_queue_holding_an_unreadable_entry_reports_it(home, repo, caps
     """Read as a message rather than a traceback: the operator can see these
     files and so can damage one, and a stack trace is not something they can
     act on."""
-    add(repo, "--branch", "MC-AGENT-8546")
+    add(repo, "--branch", "TASK-8546")
     (document,) = (home / "queue").iterdir()
     document.write_text("{ not json")
 
@@ -428,7 +428,7 @@ def test_watching_the_queue_starts_a_run_carrying_everything_the_entry_held(
     add(
         repo,
         "--branch",
-        "MC-AGENT-8546",
+        "TASK-8546",
         "--at",
         "implement",
         "--subject",
@@ -440,11 +440,11 @@ def test_watching_the_queue_starts_a_run_carrying_everything_the_entry_held(
     assert main(["queue", "watch"]) == 0
 
     (queued,) = wiring["queue"].all()
-    run = wiring["start"](queued, "MC-AGENT-8000")
+    run = wiring["start"](queued, "TASK-8000")
     assert run.task == "add dark mode"
     assert run.target_repo == repo
-    assert run.working_branch == "MC-AGENT-8546"
-    assert run.predecessor == "MC-AGENT-8000"
+    assert run.working_branch == "TASK-8546"
+    assert run.predecessor == "TASK-8000"
     assert run.start_state == "implement"
     assert run.skip_gates is True
     assert no_tmux.spawned
@@ -483,7 +483,7 @@ def test_interrupting_the_supervisor_leaves_nothing_to_clean_up(home, monkeypatc
 def test_a_damaged_entry_stops_the_supervisor_with_a_message(home, repo, capsys):
     """Read as a message rather than a traceback, as listing one is: an
     operator can see these files and so can damage one."""
-    add(repo, "--branch", "MC-AGENT-8546")
+    add(repo, "--branch", "TASK-8546")
     (document,) = (home / "queue").iterdir()
     document.write_text("{ not json")
 
@@ -493,8 +493,8 @@ def test_a_damaged_entry_stops_the_supervisor_with_a_message(home, repo, capsys)
 
 
 def test_removing_an_entry_takes_it_out_of_the_queue(home, repo, capsys):
-    add(repo, "--branch", "MC-AGENT-8546")
-    add(repo, "--branch", "MC-AGENT-8547")
+    add(repo, "--branch", "TASK-8546")
+    add(repo, "--branch", "TASK-8547")
     first, second = queue_of(home).all()
 
     assert main(["queue", "rm", first.id]) == 0
@@ -521,7 +521,7 @@ def queued_run(home, repo, *, pane="%7", state="implement"):
             workflow_path=repo / "workflow.toml",
             task="add dark mode",
             target_repo=repo,
-            working_branch="MC-AGENT-8546",
+            working_branch="TASK-8546",
             created_at="2026-07-22T12:00:00Z",
             run_id="a-run",
         )
@@ -568,7 +568,7 @@ def test_removing_an_entry_names_the_session_the_operator_now_has(home, repo, ca
 def test_removing_a_waiting_entry_says_nothing_about_a_session(home, repo, capsys):
     """There is no Run and so no Session, and a line about one would send the
     operator looking for a session that was never opened."""
-    add(repo, "--branch", "MC-AGENT-8546")
+    add(repo, "--branch", "TASK-8546")
     (waiting,) = queue_of(home).all()
 
     assert main(["queue", "rm", waiting.id]) == 0
@@ -614,15 +614,15 @@ repo = "{repo}"
 
 [[entries]]
 task = "the login redirect loops"
-branch = "MC-AGENT-8546"
+branch = "TASK-8546"
 at = "grill"
 
 [[entries]]
 task = "design the audit log"
-branch = "MC-AGENT-8547"
+branch = "TASK-8547"
 at = "implement"
 subject = "docs/ticket.md"
-base = "MC-AGENT-8000"
+base = "TASK-8000"
 skip-gates = true
 """
 
@@ -647,13 +647,13 @@ def test_each_entry_in_a_batch_carries_what_it_declared_for_itself(home, repo):
     main(["queue", "add", "--file", str(batch_file(repo))])
 
     first, second = queue_of(home).all()
-    assert first.working_branch == "MC-AGENT-8546"
+    assert first.working_branch == "TASK-8546"
     assert first.start_state == "grill"
     assert first.skip_gates is False
-    assert second.working_branch == "MC-AGENT-8547"
+    assert second.working_branch == "TASK-8547"
     assert second.start_state == "implement"
     assert second.subject == "docs/ticket.md"
-    assert second.pinned_base == "MC-AGENT-8000"
+    assert second.pinned_base == "TASK-8000"
     assert second.skip_gates is True
 
 
@@ -671,12 +671,12 @@ def test_a_batch_naming_a_different_workflow_per_entry_still_queues_in_file_orde
         [[entries]]
         workflow = "{repo / "zebra.toml"}"
         task = "first"
-        branch = "MC-AGENT-8546"
+        branch = "TASK-8546"
 
         [[entries]]
         workflow = "{repo / "alpha.toml"}"
         task = "second"
-        branch = "MC-AGENT-8547"
+        branch = "TASK-8547"
         """
     )
 
@@ -696,7 +696,7 @@ def test_an_entry_naming_no_repository_stands_in_the_working_directory(
 
         [[entries]]
         task = "one"
-        branch = "MC-AGENT-8546"
+        branch = "TASK-8546"
         """
     )
 
@@ -747,7 +747,7 @@ def test_a_batch_file_and_options_describing_one_entry_cannot_be_given_together(
                 str(repo / "workflow.toml"),
                 "add dark mode",
                 "--branch",
-                "MC-AGENT-8546",
+                "TASK-8546",
                 "--file",
                 str(batch_file(repo)),
             ]
@@ -805,7 +805,7 @@ def test_a_batched_entry_carries_no_mark_of_the_file_it_came_from(home, repo):
     in a file would be the Queue knowing a batch arrived — which it does not,
     because nothing has been asked of it that requires knowing."""
     main(["queue", "add", "--file", str(batch_file(repo))])
-    add(repo, "--branch", "MC-AGENT-8548")
+    add(repo, "--branch", "TASK-8548")
 
     batched, also_batched, alone = queue_of(home).all()
     assert len(batched.id.split("-")) == len(alone.id.split("-"))
@@ -834,7 +834,7 @@ def finished(home, repo, entry_id, run_id):
             workflow_path=repo / "workflow.toml",
             task="add dark mode",
             target_repo=repo,
-            working_branch="MC-AGENT-8546",
+            working_branch="TASK-8546",
             created_at="2026-07-22T12:00:00Z",
             run_id=run_id,
         )
@@ -856,13 +856,13 @@ def test_pruning_reaches_both_stores_from_the_command(home, repo):
 
 def test_pruning_leaves_everything_that_is_not_done(home, repo):
     """Waiting work is future work, and a Prune is not the way to cancel it."""
-    add(repo, "--branch", "MC-AGENT-8547")
+    add(repo, "--branch", "TASK-8547")
     finished(home, repo, entry_id="done-entry", run_id="a-run")
 
     assert main(["queue", "prune"]) == 0
 
     (left,) = queue_of(home).all()
-    assert left.working_branch == "MC-AGENT-8547"
+    assert left.working_branch == "TASK-8547"
 
 
 def test_pruning_names_each_entry_it_took_and_says_how_many(home, repo, capsys):
@@ -882,7 +882,7 @@ def test_pruning_names_each_entry_it_took_and_says_how_many(home, repo, capsys):
 def test_pruning_a_queue_with_nothing_done_says_so_rather_than_printing_nothing(
     home, repo, capsys
 ):
-    add(repo, "--branch", "MC-AGENT-8546")
+    add(repo, "--branch", "TASK-8546")
 
     assert main(["queue", "prune"]) == 0
 
@@ -992,7 +992,7 @@ def test_a_run_cancelled_before_its_session_was_recorded_offers_no_pane(home, re
             workflow_path=repo / "workflow.toml",
             task="add dark mode",
             target_repo=repo,
-            working_branch="MC-AGENT-8546",
+            working_branch="TASK-8546",
             created_at="2026-07-22T12:00:00Z",
             run_id="a-run",
         )

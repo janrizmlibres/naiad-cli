@@ -63,7 +63,7 @@ def work(repo, **overrides):
         workflow_path=repo / "workflow.toml",
         task="add dark mode",
         target_repo=repo,
-        working_branch="MC-AGENT-8546",
+        working_branch="TASK-8546",
     )
     fields.update(overrides)
     return Work(**fields)
@@ -92,7 +92,7 @@ def test_an_entry_joins_the_queue_carrying_what_kickoff_would_be_told(repo, queu
     added = add(
         repo,
         queue,
-        pinned_base="MC-AGENT-8000",
+        pinned_base="TASK-8000",
         start_state="implement",
         subject="docs/ticket.md",
         skip_gates=True,
@@ -102,8 +102,8 @@ def test_an_entry_joins_the_queue_carrying_what_kickoff_would_be_told(repo, queu
     assert queued == added
     assert queued.task == "add dark mode"
     assert queued.target_repo == repo
-    assert queued.working_branch == "MC-AGENT-8546"
-    assert queued.pinned_base == "MC-AGENT-8000"
+    assert queued.working_branch == "TASK-8546"
+    assert queued.pinned_base == "TASK-8000"
     assert queued.start_state == "implement"
     assert queued.subject == "docs/ticket.md"
     assert queued.skip_gates is True
@@ -164,7 +164,7 @@ def test_a_working_branch_already_claimed_in_the_same_repository_is_refused(repo
     with pytest.raises(BranchAlreadyClaimed) as caught:
         add(repo, queue, entry_id="two", task="something else")
 
-    assert "MC-AGENT-8546" in str(caught.value)
+    assert "TASK-8546" in str(caught.value)
     assert "one" in str(caught.value)
     assert [held.id for held in queue.all()] == ["one"]
 
@@ -204,14 +204,14 @@ def test_a_branch_a_branchless_entrys_run_has_recorded_is_claimed(repo, queue):
         task="add dark mode",
         target_repo=repo,
         created_at="2026-07-22T12:15:00Z",
-        working_branch="MC-AGENT-8546",
+        working_branch="TASK-8546",
     )
     queue.attach_run(branchless, run_id="20260722-121500-feature")
 
     with pytest.raises(BranchAlreadyClaimed) as caught:
         add(repo, queue, entry_id="two", task="something else")
 
-    assert "MC-AGENT-8546" in str(caught.value)
+    assert "TASK-8546" in str(caught.value)
     assert "one" in str(caught.value)
 
 
@@ -236,7 +236,7 @@ def test_a_branch_is_free_again_once_the_entry_claiming_it_is_removed(repo, queu
     add(repo, queue, entry_id="one")
     queue.remove("one")
 
-    assert add(repo, queue, entry_id="two").working_branch == "MC-AGENT-8546"
+    assert add(repo, queue, entry_id="two").working_branch == "TASK-8546"
 
 
 def test_an_entry_naming_a_workflow_that_cannot_be_run_is_refused(repo, queue):
@@ -331,9 +331,9 @@ def batch(queue, *works, source="batch.toml"):
 def test_a_batch_queues_every_entry_it_declares_in_file_order(repo, queue):
     batch(
         queue,
-        work(repo, task="first", working_branch="MC-AGENT-8546"),
-        work(repo, task="second", working_branch="MC-AGENT-8547"),
-        work(repo, task="third", working_branch="MC-AGENT-8548"),
+        work(repo, task="first", working_branch="TASK-8546"),
+        work(repo, task="second", working_branch="TASK-8547"),
+        work(repo, task="third", working_branch="TASK-8548"),
     )
 
     assert [held.task for held in queue.all()] == ["first", "second", "third"]
@@ -348,10 +348,10 @@ def test_entries_in_one_batch_may_differ_in_everything_an_entry_carries(repo, ot
         work(
             other_repo,
             workflow_path=other_repo / "workflow.toml",
-            working_branch="MC-AGENT-8547",
+            working_branch="TASK-8547",
             start_state="implement",
             subject="docs/ticket.md",
-            pinned_base="MC-AGENT-8000",
+            pinned_base="TASK-8000",
             skip_gates=True,
         ),
     )
@@ -362,7 +362,7 @@ def test_entries_in_one_batch_may_differ_in_everything_an_entry_carries(repo, ot
     assert second.target_repo == other_repo
     assert second.start_state == "implement"
     assert second.subject == "docs/ticket.md"
-    assert second.pinned_base == "MC-AGENT-8000"
+    assert second.pinned_base == "TASK-8000"
     assert second.skip_gates is True
 
 
@@ -370,9 +370,9 @@ def test_a_batch_with_one_invalid_entry_queues_none_of_them(repo, queue):
     with pytest.raises(BatchError):
         batch(
             queue,
-            work(repo, working_branch="MC-AGENT-8546"),
-            work(repo, working_branch="MC-AGENT-8547", start_state="grrill"),
-            work(repo, working_branch="MC-AGENT-8548"),
+            work(repo, working_branch="TASK-8546"),
+            work(repo, working_branch="TASK-8547", start_state="grrill"),
+            work(repo, working_branch="TASK-8548"),
         )
 
     assert queue.all() == []
@@ -384,8 +384,8 @@ def test_a_refused_entry_is_named_by_the_file_and_its_position(repo, queue):
     with pytest.raises(BatchError) as caught:
         batch(
             queue,
-            work(repo, working_branch="MC-AGENT-8546"),
-            work(repo, working_branch="MC-AGENT-8547", start_state="grrill"),
+            work(repo, working_branch="TASK-8546"),
+            work(repo, working_branch="TASK-8547", start_state="grrill"),
             source="nightly.toml",
         )
 
@@ -400,12 +400,12 @@ def test_two_entries_in_one_file_claiming_one_branch_are_refused(repo, queue):
     with pytest.raises(BatchError) as caught:
         batch(
             queue,
-            work(repo, task="first", working_branch="MC-AGENT-8546"),
-            work(repo, task="second", working_branch="MC-AGENT-8546"),
+            work(repo, task="first", working_branch="TASK-8546"),
+            work(repo, task="second", working_branch="TASK-8546"),
         )
 
     assert "entry 2" in str(caught.value)
-    assert "MC-AGENT-8546" in str(caught.value)
+    assert "TASK-8546" in str(caught.value)
     assert queue.all() == []
 
 
@@ -418,7 +418,7 @@ def test_two_entries_in_one_file_for_different_repositories_may_share_a_branch(
         work(other_repo, workflow_path=other_repo / "workflow.toml"),
     )
 
-    assert [held.working_branch for held in queue.all()] == ["MC-AGENT-8546", "MC-AGENT-8546"]
+    assert [held.working_branch for held in queue.all()] == ["TASK-8546", "TASK-8546"]
 
 
 def test_a_batched_entry_claiming_a_branch_the_queue_already_holds_is_refused(repo, queue):
@@ -440,7 +440,7 @@ def test_named_and_branchless_entries_compose_in_one_file(repo, queue):
         work(repo, task="branchless", working_branch=None),
     )
 
-    assert [held.working_branch for held in queue.all()] == ["MC-AGENT-8546", None]
+    assert [held.working_branch for held in queue.all()] == ["TASK-8546", None]
 
 
 def test_a_batched_entry_whose_start_state_needs_a_subject_and_has_none_is_refused(repo, queue):
@@ -486,9 +486,9 @@ def test_nothing_records_that_a_batch_arrived_together(repo, queue):
     batched, _also_batched = batch(
         queue,
         work(repo, task="one"),
-        work(repo, task="two", working_branch="MC-AGENT-8547"),
+        work(repo, task="two", working_branch="TASK-8547"),
     )
-    alone = add(repo, queue, entry_id="on-its-own", working_branch="MC-AGENT-8548")
+    alone = add(repo, queue, entry_id="on-its-own", working_branch="TASK-8548")
 
     written = {path.name: json.loads(path.read_text()) for path in queue.root.iterdir()}
     assert sorted(written) == sorted(f"{held.id}.json" for held in queue.all())

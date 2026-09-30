@@ -53,7 +53,7 @@ def entry(repo, **overrides):
         workflow_path=repo / "workflow.toml",
         task="add dark mode",
         target_repo=repo,
-        working_branch="MC-AGENT-8546",
+        working_branch="TASK-8546",
         created_at="2026-07-22T12:00:00Z",
     )
     fields.update(overrides)
@@ -64,7 +64,7 @@ def test_an_entry_carries_everything_kickoff_would_otherwise_be_told(queue, repo
     queue.add(
         entry(
             repo,
-            pinned_base="MC-AGENT-8000",
+            pinned_base="TASK-8000",
             start_state="grill",
             subject="docs/ticket.md",
             skip_gates=True,
@@ -75,8 +75,8 @@ def test_an_entry_carries_everything_kickoff_would_otherwise_be_told(queue, repo
     assert reloaded.workflow_path == repo / "workflow.toml"
     assert reloaded.task == "add dark mode"
     assert reloaded.target_repo == repo
-    assert reloaded.working_branch == "MC-AGENT-8546"
-    assert reloaded.pinned_base == "MC-AGENT-8000"
+    assert reloaded.working_branch == "TASK-8546"
+    assert reloaded.pinned_base == "TASK-8000"
     assert reloaded.start_state == "grill"
     assert reloaded.subject == "docs/ticket.md"
     assert reloaded.skip_gates is True
@@ -158,7 +158,7 @@ def test_an_entry_records_the_run_it_became(queue, repo):
 def test_recording_the_run_changes_nothing_else_about_the_entry(queue, repo):
     """Everything else was decided when the Entry was made, so a Supervisor
     writing the Entry again must not quietly restate any of it."""
-    queued = queue.add(entry(repo, pinned_base="MC-AGENT-8000", start_state="grill"))
+    queued = queue.add(entry(repo, pinned_base="TASK-8000", start_state="grill"))
 
     queue.attach_run(queued, run_id="a-run")
 

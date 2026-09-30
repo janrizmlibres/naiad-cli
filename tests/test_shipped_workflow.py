@@ -38,8 +38,8 @@ SHIPPED_PATHS = (
 # values, so none of these encodes anything about the file's content.
 TASK = "add dark mode"
 SUBJECT = "tickets/dark-mode/issues/04-toggle.md"
-BRANCH = "MC-AGENT-8546"
-PREDECESSOR = "MC-AGENT-8500"
+BRANCH = "TASK-8546"
+PREDECESSOR = "TASK-8500"
 
 # The renderer's closed set (naiad.domain.prompt): a slot spelled any other
 # way is delivered to the agent verbatim.

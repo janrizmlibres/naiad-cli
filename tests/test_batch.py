@@ -21,14 +21,14 @@ repo = "/repos/acme"
 
 [[entries]]
 task = "the login redirect loops"
-branch = "MC-AGENT-8546"
+branch = "TASK-8546"
 at = "diagnose"
 
 [[entries]]
 task = "design the audit log"
-branch = "MC-AGENT-8547"
+branch = "TASK-8547"
 at = "grill"
-base = "MC-AGENT-8000"
+base = "TASK-8000"
 subject = "docs/ticket.md"
 skip-gates = true
 """
@@ -42,10 +42,10 @@ def test_a_batch_file_declares_one_piece_of_work_per_entry():
     first, second = parse(BATCH)
 
     assert first.task == "the login redirect loops"
-    assert first.working_branch == "MC-AGENT-8546"
+    assert first.working_branch == "TASK-8546"
     assert first.start_state == "diagnose"
     assert second.task == "design the audit log"
-    assert second.working_branch == "MC-AGENT-8547"
+    assert second.working_branch == "TASK-8547"
 
 
 def test_entries_in_one_file_may_differ_in_everything_that_describes_them():
@@ -55,7 +55,7 @@ def test_entries_in_one_file_may_differ_in_everything_that_describes_them():
     _first, second = parse(BATCH)
 
     assert second.start_state == "grill"
-    assert second.pinned_base == "MC-AGENT-8000"
+    assert second.pinned_base == "TASK-8000"
     assert second.subject == "docs/ticket.md"
     assert second.skip_gates is True
 
@@ -227,14 +227,14 @@ def test_a_default_task_is_the_task_even_beside_an_entrys_own_subject():
     (only,) = parse(
         """
         workflow = "w.toml"
-        task = "fix marketing hub bugs"
+        task = "fix the checkout bugs"
 
         [[entries]]
         subject = "docs/ticket.md"
         """
     )
 
-    assert only.task == "fix marketing hub bugs"
+    assert only.task == "fix the checkout bugs"
     assert only.subject == "docs/ticket.md"
 
 

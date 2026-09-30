@@ -86,7 +86,7 @@ def start(repo, store, sessions, **overrides):
         workflow_path=repo / "workflow.toml",
         task="add dark mode",
         target_repo=repo,
-        working_branch="MC-AGENT-8546",
+        working_branch="TASK-8546",
         store=store,
         sessions=sessions,
         run_id="20260719-120000-feature",
@@ -374,11 +374,11 @@ def test_a_run_started_with_gates_skipped_names_the_next_state_that_has_a_prompt
 def test_the_run_remembers_the_branch_it_was_started_with(repo, store, sessions):
     """The tick loop interpolates them into every later Prompt, in a process
     that outlives kickoff, so they must survive on the Run."""
-    run = start(repo, store, sessions, working_branch="MC-AGENT-8546", predecessor="MC-AGENT-8000")
+    run = start(repo, store, sessions, working_branch="TASK-8546", predecessor="TASK-8000")
 
     reloaded = store.load(run.id)
-    assert reloaded.working_branch == "MC-AGENT-8546"
-    assert reloaded.predecessor == "MC-AGENT-8000"
+    assert reloaded.working_branch == "TASK-8546"
+    assert reloaded.predecessor == "TASK-8000"
 
 
 def test_a_run_started_without_a_working_branch_records_none(repo, store, sessions):
@@ -409,12 +409,12 @@ def test_the_first_prompt_names_the_branch_and_the_predecessor(repo, store, sess
         store,
         sessions,
         workflow_path=_naming_the_branch(repo),
-        working_branch="MC-AGENT-8546",
-        predecessor="MC-AGENT-8000",
+        working_branch="TASK-8546",
+        predecessor="TASK-8000",
     )
 
     (spawn,) = sessions.spawned
-    assert spawn.initial_prompt == "work on MC-AGENT-8546 based on MC-AGENT-8000"
+    assert spawn.initial_prompt == "work on TASK-8546 based on TASK-8000"
 
 
 def test_a_run_with_no_predecessor_delivers_the_prompt_with_it_empty(repo, store, sessions):
@@ -425,11 +425,11 @@ def test_a_run_with_no_predecessor_delivers_the_prompt_with_it_empty(repo, store
         store,
         sessions,
         workflow_path=_naming_the_branch(repo),
-        working_branch="MC-AGENT-8546",
+        working_branch="TASK-8546",
     )
 
     (spawn,) = sessions.spawned
-    assert spawn.initial_prompt == "work on MC-AGENT-8546 based on "
+    assert spawn.initial_prompt == "work on TASK-8546 based on "
 
 
 # An Adoption: the other way a Run meets its session.
@@ -442,7 +442,7 @@ def attach(repo, store, sessions, **overrides):
         workflow_path=repo / "workflow.toml",
         task="add dark mode",
         target_repo=repo,
-        working_branch="MC-AGENT-8546",
+        working_branch="TASK-8546",
         attachment=Attachment(tmux_pane="%7"),
         store=store,
         sessions=sessions,
@@ -576,7 +576,7 @@ def test_an_attach_marked_entry_becomes_a_run_that_joined_its_session(repo, stor
 def test_an_ordinary_entry_becomes_a_run_with_a_session_of_its_own(repo, store, sessions, tmp_path):
     run = start_entry(
         _entry(repo),
-        predecessor="MC-AGENT-8000",
+        predecessor="TASK-8000",
         store=store,
         sessions=sessions,
         queue_root=tmp_path / "naiad" / "queue",
@@ -586,7 +586,7 @@ def test_an_ordinary_entry_becomes_a_run_with_a_session_of_its_own(repo, store, 
     )
 
     assert run.adopted is False
-    assert run.predecessor == "MC-AGENT-8000"
+    assert run.predecessor == "TASK-8000"
     assert sessions.attached == []
     assert len(sessions.spawned) == 1
 
@@ -638,7 +638,7 @@ def _entry(repo, **overrides):
         workflow_path=repo / "workflow.toml",
         task="add dark mode",
         target_repo=repo,
-        working_branch="MC-AGENT-8546",
+        working_branch="TASK-8546",
         created_at="2026-07-19T11:59:00Z",
     )
     fields.update(overrides)

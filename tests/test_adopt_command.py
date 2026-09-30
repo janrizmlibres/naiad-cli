@@ -139,15 +139,15 @@ def test_adopting_records_every_describer_it_was_given(home, repo):
     adopt(
         repo,
         "--branch",
-        "MC-AGENT-8546",
+        "TASK-8546",
         "--base",
-        "MC-AGENT-8000",
+        "TASK-8000",
         "--skip-gates",
     )
 
     (queued,) = queue_of(home).all()
-    assert queued.working_branch == "MC-AGENT-8546"
-    assert queued.pinned_base == "MC-AGENT-8000"
+    assert queued.working_branch == "TASK-8546"
+    assert queued.pinned_base == "TASK-8000"
     assert queued.skip_gates is True
 
 
@@ -173,7 +173,7 @@ def test_an_adoption_takes_its_place_in_the_queue_rather_than_jumping_it(home, r
             "--repo",
             str(repo),
             "--branch",
-            "MC-AGENT-8000",
+            "TASK-8000",
         ]
     )
 
@@ -332,13 +332,13 @@ def test_adopting_on_a_branch_another_entry_claims_is_refused(home, repo, capsys
             "--repo",
             str(repo),
             "--branch",
-            "MC-AGENT-8546",
+            "TASK-8546",
         ]
     )
 
-    assert adopt(repo, "--branch", "MC-AGENT-8546") == 2
+    assert adopt(repo, "--branch", "TASK-8546") == 2
 
-    assert "MC-AGENT-8546" in capsys.readouterr().err
+    assert "TASK-8546" in capsys.readouterr().err
     assert len(queue_of(home).all()) == 1
 
 
@@ -402,11 +402,11 @@ def test_the_output_of_an_adoption_carrying_a_branch_names_it_instead(home, repo
     Read from the taught part alone: the queued report names the branch too, so
     asserting over the whole output would pass on that line and say nothing
     about what the agent was actually told."""
-    _report, taught = teaching(repo, capsys, "--branch", "MC-AGENT-8546").split(
+    _report, taught = teaching(repo, capsys, "--branch", "TASK-8546").split(
         "# Naiad protocol", 1
     )
 
-    assert "MC-AGENT-8546" in taught
+    assert "TASK-8546" in taught
     assert f"{naiad_command()} branch" not in taught
 
 

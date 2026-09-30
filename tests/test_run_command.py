@@ -137,12 +137,12 @@ def test_running_adds_an_entry_rather_than_spawning_a_session(home, repo, no_tmu
     working tree the Supervisor is already driving a Run in."""
     supervision(monkeypatch)
 
-    assert run(repo, "--branch", "MC-AGENT-8546") == 0
+    assert run(repo, "--branch", "TASK-8546") == 0
 
     (queued,) = queue_of(home).all()
     assert queued.task == "add dark mode"
     assert queued.target_repo == repo
-    assert queued.working_branch == "MC-AGENT-8546"
+    assert queued.working_branch == "TASK-8546"
     assert no_tmux.spawned == []
     assert RunStore(home / "runs").all() == []
 
@@ -156,9 +156,9 @@ def test_running_records_every_field_it_was_given(home, repo, monkeypatch):
     run(
         repo,
         "--branch",
-        "MC-AGENT-8546",
+        "TASK-8546",
         "--base",
-        "MC-AGENT-8000",
+        "TASK-8000",
         "--at",
         "implement",
         "--subject",
@@ -167,7 +167,7 @@ def test_running_records_every_field_it_was_given(home, repo, monkeypatch):
     )
 
     (queued,) = queue_of(home).all()
-    assert queued.pinned_base == "MC-AGENT-8000"
+    assert queued.pinned_base == "TASK-8000"
     assert queued.start_state == "implement"
     assert queued.subject == "docs/ticket.md"
     assert queued.skip_gates is True
@@ -186,11 +186,11 @@ def test_running_appends_rather_than_jumping_the_queue(home, repo, monkeypatch):
             "--repo",
             str(repo),
             "--branch",
-            "MC-AGENT-8000",
+            "TASK-8000",
         ]
     )
 
-    run(repo, "--branch", "MC-AGENT-8546")
+    run(repo, "--branch", "TASK-8546")
 
     assert [queued.task for queued in queue_of(home).all()] == [
         "an earlier task",
@@ -255,7 +255,7 @@ def test_running_at_a_state_the_workflow_does_not_declare_is_refused(
 ):
     refuse_supervising(monkeypatch)
 
-    assert run(repo, "--branch", "MC-AGENT-8546", "--at", "grrill") == 2
+    assert run(repo, "--branch", "TASK-8546", "--at", "grrill") == 2
 
     assert "grrill" in capsys.readouterr().err
     assert queue_of(home).all() == []
@@ -266,7 +266,7 @@ def test_running_at_a_state_whose_prompt_names_a_subject_without_one_is_refused(
 ):
     refuse_supervising(monkeypatch)
 
-    assert run(repo, "--branch", "MC-AGENT-8546", "--at", "implement") == 2
+    assert run(repo, "--branch", "TASK-8546", "--at", "implement") == 2
 
     assert "--subject" in capsys.readouterr().err
     assert queue_of(home).all() == []
@@ -279,7 +279,7 @@ def test_running_a_workflow_that_cannot_be_read_is_refused(home, repo, monkeypat
     refuse_supervising(monkeypatch)
     (repo / "workflow.toml").write_text("name = ")
 
-    assert run(repo, "--branch", "MC-AGENT-8546") == 2
+    assert run(repo, "--branch", "TASK-8546") == 2
 
     assert "workflow.toml" in capsys.readouterr().err
     assert queue_of(home).all() == []
@@ -287,12 +287,12 @@ def test_running_a_workflow_that_cannot_be_read_is_refused(home, repo, monkeypat
 
 def test_running_on_a_branch_another_entry_claims_is_refused(home, repo, monkeypatch, capsys):
     supervision(monkeypatch)
-    run(repo, "--branch", "MC-AGENT-8546")
+    run(repo, "--branch", "TASK-8546")
 
     refuse_supervising(monkeypatch)
-    assert run(repo, "--branch", "MC-AGENT-8546") == 2
+    assert run(repo, "--branch", "TASK-8546") == 2
 
-    assert "MC-AGENT-8546" in capsys.readouterr().err
+    assert "TASK-8546" in capsys.readouterr().err
     assert len(queue_of(home).all()) == 1
 
 
@@ -304,7 +304,7 @@ def test_running_with_nothing_supervising_becomes_the_supervisor(home, repo, mon
     supervises is the Queue the Entry just landed in."""
     wiring = supervision(monkeypatch)
 
-    assert run(repo, "--branch", "MC-AGENT-8546") == 0
+    assert run(repo, "--branch", "TASK-8546") == 0
 
     assert [queued.task for queued in wiring["queue"].all()] == ["add dark mode"]
 
@@ -314,7 +314,7 @@ def test_becoming_the_supervisor_drains_rather_than_follows(home, repo, monkeypa
     interrupt something that has finished the work."""
     wiring = supervision(monkeypatch)
 
-    run(repo, "--branch", "MC-AGENT-8546")
+    run(repo, "--branch", "TASK-8546")
 
     assert wiring["following"] is False
 
@@ -325,7 +325,7 @@ def test_the_lock_is_held_for_as_long_as_it_supervises(home, repo, monkeypatch):
     lock = SupervisorLock(home / "supervisor.lock")
     wiring = supervision(monkeypatch, then=lock.held)
 
-    run(repo, "--branch", "MC-AGENT-8546")
+    run(repo, "--branch", "TASK-8546")
 
     assert wiring["during"] is True
     assert lock.held() is False
@@ -340,7 +340,7 @@ def test_the_lock_is_released_when_the_supervisor_is_interrupted(home, repo, mon
 
     monkeypatch.setattr("naiad.cli.main.supervise_queue", interrupted)
 
-    assert run(repo, "--branch", "MC-AGENT-8546") == 0
+    assert run(repo, "--branch", "TASK-8546") == 0
     assert SupervisorLock(home / "supervisor.lock").held() is False
 
 
@@ -355,7 +355,7 @@ def test_running_while_a_supervisor_holds_the_lock_returns_immediately(
     blocks for hours."""
     refuse_supervising(monkeypatch)
 
-    assert run(repo, "--branch", "MC-AGENT-8546") == 0
+    assert run(repo, "--branch", "TASK-8546") == 0
 
     (queued,) = queue_of(home).all()
     assert queued.id in capsys.readouterr().out

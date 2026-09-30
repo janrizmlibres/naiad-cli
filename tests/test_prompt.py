@@ -86,20 +86,20 @@ def test_interpolates_the_working_branch():
     """A Run-level fact like the task, so it reaches every Prompt the Run
     delivers rather than only the first, and survives a Clear."""
     rendered = render_prompt(
-        "check out {branch}", task="t", next_states=("s",), branch="MC-AGENT-8546"
+        "check out {branch}", task="t", next_states=("s",), branch="TASK-8546"
     )
 
-    assert rendered == "check out MC-AGENT-8546"
+    assert rendered == "check out TASK-8546"
 
 
 def test_interpolates_the_predecessor():
     """Substituted without being read, exactly as a Subject is: whether to
     actually stand on it is decided in the Prompt."""
     rendered = render_prompt(
-        "based on {predecessor}", task="t", next_states=("s",), predecessor="MC-AGENT-8000"
+        "based on {predecessor}", task="t", next_states=("s",), predecessor="TASK-8000"
     )
 
-    assert rendered == "based on MC-AGENT-8000"
+    assert rendered == "based on TASK-8000"
 
 
 def test_a_missing_predecessor_renders_as_nothing():
