@@ -286,6 +286,22 @@ in the repository, committed on the branch. Name it by path in both Prompts,
 what it must hold. The Prompt that reads it says to read it first, because it
 starts cold.
 
+### Commit and ship on the Working branch, not on the checkout
+
+A checkout is shared. You, another Run on the same repository, or a Run's own
+earlier State can leave it standing on a branch that is not this Run's, and a
+Clearing State starts with no memory of which branch it was on. So a Prompt that
+commits the Run's work or opens its pull request carries `{branch}` and says to
+act on that branch wherever it is checked out, finding it with `git worktree
+list`, never "the branch that is checked out". Say what to do when the branch
+exists nowhere or the line is empty: stop and hand over, or ask, rather than
+create it from whatever the checkout holds. A tail that opens the pull request
+from the checkout opens the wrong one the first time someone switches it mid-Run.
+
+A Workflow whose Runs have their checkout to themselves may lean on what is
+checked out instead, as the starter does: git keeps the branch across a Clear
+as long as nobody else moves it.
+
 ## 6. The file by hand
 
 One annotated file with each key once. Top-level keys come first, then
