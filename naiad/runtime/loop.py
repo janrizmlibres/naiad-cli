@@ -170,6 +170,7 @@ def tick(
             answered=answers.answered(),
         ),
         skip_gates=run.skip_gates,
+        settings=run.settings,
     )
 
     if isinstance(action, Clear):

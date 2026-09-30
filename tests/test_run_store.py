@@ -2,6 +2,7 @@ import json
 
 import pytest
 
+from naiad.domain.settings import StateSetting
 from naiad.runtime.home import StorageError
 from naiad.runtime.run import RunStore
 
@@ -117,6 +118,27 @@ def test_metadata_written_before_these_fields_existed_still_loads(store, repo):
     reloaded = store.load(run.id)
     assert reloaded.working_branch is None
     assert reloaded.predecessor is None
+
+
+def test_metadata_records_the_settings_its_entry_named(store, repo):
+    """What the tick loop reads the Entry's settings from, in whatever process
+    drives the Run after the one that started it."""
+    named = (
+        StateSetting(state="implement", setting="model", value="sonnet"),
+        StateSetting(state="triage", setting="effort", value="medium"),
+    )
+    run = create(store, repo, settings=named)
+
+    assert store.load(run.id).settings == named
+
+
+def test_metadata_written_before_settings_existed_loads_with_none(store, repo):
+    run = create(store, repo)
+    document = json.loads(run.metadata_path.read_text())
+    del document["settings"]
+    run.metadata_path.write_text(json.dumps(document))
+
+    assert store.load(run.id).settings == ()
 
 
 def test_lists_every_run_it_holds(store, repo):

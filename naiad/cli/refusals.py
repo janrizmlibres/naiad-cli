@@ -20,10 +20,12 @@ refusal about describing work speaks with one voice.
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
 from naiad.domain.prompt import SUBJECT_PLACEHOLDER
+from naiad.domain.settings import StateSetting, check_settings
 from naiad.domain.transitions import start_state as resolve_start_state
 from naiad.domain.workflow import State, Workflow, load_workflow
 
@@ -122,6 +124,7 @@ def check_start(
     subject: str | None,
     working_branch: str | None,
     remedy: Remedy,
+    settings: Sequence[StateSetting],
 ) -> Start:
     """The Workflow and the State this work begins at, or the refusal.
 
@@ -134,6 +137,7 @@ def check_start(
     """
     workflow = load_workflow(workflow_path)
     first = resolve_start_state(workflow, start_state)
+    check_settings(workflow, settings)
     if not subject and first.prompt and SUBJECT_PLACEHOLDER in first.prompt:
         raise MissingSubject(
             f"state '{first.name}' needs a subject saying what it is to start on; "

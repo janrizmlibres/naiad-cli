@@ -15,6 +15,7 @@ from naiad.cli.main import _drive, _ticker, main
 from naiad.domain.decide import Finish
 from naiad.domain.entry import Entry
 from naiad.domain.question import Question
+from naiad.domain.settings import StateSetting
 from naiad.runtime.announcements import Announcements
 from naiad.runtime.answers import AnswerLog
 from naiad.runtime.log import RunLog
@@ -111,6 +112,45 @@ def test_adding_an_entry_records_every_field_it_was_given(home, repo):
     assert queued.start_state == "implement"
     assert queued.subject == "docs/ticket.md"
     assert queued.skip_gates is True
+
+
+def test_adding_an_entry_records_the_settings_it_names_for_states(home, repo):
+    add(
+        repo,
+        "--model",
+        "implement=sonnet",
+        "--effort",
+        "implement=medium",
+        "--model",
+        "grill=haiku",
+    )
+
+    (queued,) = queue_of(home).all()
+    assert set(queued.settings) == {
+        StateSetting(state="implement", setting="model", value="sonnet"),
+        StateSetting(state="implement", setting="effort", value="medium"),
+        StateSetting(state="grill", setting="model", value="haiku"),
+    }
+
+
+def test_a_setting_that_names_no_state_is_refused_before_anything_is_queued(
+    home, repo, capsys
+):
+    """Every setting names its State; a bare value is not read as meaning all
+    of them."""
+    with pytest.raises(SystemExit) as refused:
+        add(repo, "--model", "sonnet")
+
+    assert refused.value.code == 2
+    assert "STATE=VALUE" in capsys.readouterr().err
+    assert queue_of(home).all() == []
+
+
+def test_a_setting_naming_an_undeclared_state_is_refused_in_a_sentence(home, repo, capsys):
+    assert add(repo, "--effort", "implemnt=low") == 2
+
+    assert "implemnt" in capsys.readouterr().err
+    assert queue_of(home).all() == []
 
 
 def test_adding_an_entry_supervises_nothing(home, repo, no_tmux):
@@ -249,6 +289,22 @@ def standing_shown(capsys, entry_id):
     main(["queue", "list"])
     (line,) = [l for l in capsys.readouterr().out.splitlines() if l.startswith(entry_id)]
     return re.split(r"\s{2,}", line)[2]
+
+
+def test_listing_shows_the_settings_an_entry_names_beneath_its_line(home, repo, capsys):
+    """What a night's work will run on is read before it is committed to, so
+    the settings an Entry names are shown where its line is."""
+    add(repo, "--model", "implement=sonnet", "--effort", "implement=medium")
+    add(repo, "--branch", "TASK-8547")
+    named, plain = queue_of(home).all()
+
+    main(["queue", "list"])
+
+    lines = capsys.readouterr().out.splitlines()
+    under_named = lines[lines.index(next(l for l in lines if l.startswith(named.id))) + 1]
+    assert under_named.split() == ["implement:", "model", "sonnet,", "effort", "medium"]
+    assert not any("model" in line for line in lines if line.startswith(plain.id))
+    assert sum("model" in line for line in lines) == 1
 
 
 def test_listing_shows_a_dash_for_a_waiting_entry(home, repo, capsys):
@@ -732,6 +788,21 @@ def test_a_batch_file_that_cannot_be_read_is_reported(home, repo, capsys):
     assert main(["queue", "add", "--file", str(repo / "nowhere.toml")]) == 2
 
     assert "nowhere.toml" in capsys.readouterr().err
+
+
+def test_a_batch_file_with_settings_on_the_command_line_says_no_file_can_hold_them(
+    home, repo, capsys
+):
+    """A batch file has no key for a setting, so the usual advice — move the
+    option into the file — would send the operator to a refusal."""
+    assert (
+        main(["queue", "add", "--file", str(batch_file(repo)), "--model", "implement=sonnet"])
+        == 2
+    )
+
+    refused = capsys.readouterr().err
+    assert "--model" in refused and "batch file" in refused and "belong in the file" not in refused
+    assert queue_of(home).all() == []
 
 
 def test_a_batch_file_and_options_describing_one_entry_cannot_be_given_together(

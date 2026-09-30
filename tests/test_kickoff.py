@@ -4,6 +4,7 @@ from naiad.cli.kickoff import attach_run, start_entry, start_run
 from naiad.domain.announcement import Announcement
 from naiad.cli.refusals import MissingSubject
 from naiad.domain.entry import Attachment, Entry
+from naiad.domain.settings import StateSetting, UnusableSetting
 from naiad.domain.transitions import UnknownState
 from naiad.domain.workflow import WorkflowError
 from naiad.runtime.log import RunLog
@@ -643,6 +644,62 @@ def _entry(repo, **overrides):
     )
     fields.update(overrides)
     return Entry(**fields)
+
+
+def started_from(entry, store, sessions, tmp_path):
+    return start_entry(
+        entry,
+        predecessor=None,
+        store=store,
+        sessions=sessions,
+        queue_root=tmp_path / "naiad" / "queue",
+        run_id="20260719-120000-feature",
+        claude_session_id="11111111-1111-1111-1111-111111111111",
+        created_at="2026-07-19T12:00:00Z",
+    )
+
+
+def test_an_entrys_setting_for_the_first_state_rides_the_spawn(repo, store, sessions, tmp_path):
+    """The launch flags carry the first State's settings, and the Entry's is
+    that State's setting: it beats what the file declares."""
+    (repo / "workflow.toml").write_text(SWITCHED)
+    named = (StateSetting(state="grill", setting="model", value="haiku"),)
+
+    run = started_from(_entry(repo, settings=named), store, sessions, tmp_path)
+
+    (spawn,) = sessions.spawned
+    assert (spawn.model, spawn.effort) == ("haiku", "medium")
+    assert [(e.state, e.setting, e.detail) for e in RunLog(run.root).entries()] == [
+        ("grill", "model", "haiku"),
+        ("grill", "effort", "medium"),
+    ]
+
+
+@pytest.mark.parametrize("attachment", [None, Attachment(tmux_pane="%7")])
+def test_the_run_carries_the_settings_its_entry_named(repo, store, sessions, tmp_path, attachment):
+    """Spawned or adopted, the tick loop reads them off the Run."""
+    named = (StateSetting(state="implement", setting="effort", value="low"),)
+
+    run = started_from(
+        _entry(repo, settings=named, attachment=attachment), store, sessions, tmp_path
+    )
+
+    assert store.load(run.id).settings == named
+
+
+@pytest.mark.parametrize("attachment", [None, Attachment(tmux_pane="%7")])
+def test_a_setting_for_a_state_edited_out_since_queueing_is_refused_at_kickoff(
+    repo, store, sessions, tmp_path, attachment
+):
+    """Checked again where the start State is, for the same reason: the file
+    may have been edited between the queueing and the start."""
+    named = (StateSetting(state="triage", setting="model", value="sonnet"),)
+
+    with pytest.raises(UnusableSetting):
+        started_from(_entry(repo, settings=named, attachment=attachment), store, sessions, tmp_path)
+
+    assert store.all() == []
+    assert sessions.spawned == [] and sessions.attached == []
 
 
 def test_a_malformed_workflow_creates_no_run_directory_and_no_session(repo, store, sessions):

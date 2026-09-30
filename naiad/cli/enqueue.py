@@ -20,6 +20,7 @@ from pathlib import Path
 
 from naiad.cli.refusals import MissingSubject, MissingTask, Remedy, check_start
 from naiad.domain.entry import Attachment, Entry
+from naiad.domain.settings import StateSetting, UnusableSetting
 from naiad.domain.transitions import UnknownState
 from naiad.domain.workflow import WorkflowError
 from naiad.runtime.home import real_path
@@ -58,6 +59,9 @@ class Work:
     # through this same enqueue — a second path could queue something this one
     # would have refused.
     attachment: Attachment | None = None
+    # The Model and Effort named for States of the Workflow, checked against it
+    # with the start State.
+    settings: tuple[StateSetting, ...] = ()
 
 
 class BranchAlreadyClaimed(Exception):
@@ -85,6 +89,7 @@ REFUSALS = (
     MissingSubject,
     MissingTask,
     UnknownState,
+    UnusableSetting,
     WorkflowError,
 )
 
@@ -156,6 +161,7 @@ def prepare(
         subject=work.subject,
         working_branch=work.working_branch,
         remedy=remedy,
+        settings=work.settings,
     )
     # Settled to one spelling before anything compares it, as a Run's target
     # repository already is: the branch claim is per repository, so `.` and
@@ -177,6 +183,7 @@ def prepare(
         subject=work.subject,
         skip_gates=work.skip_gates,
         attachment=work.attachment,
+        settings=work.settings,
     )
 
 

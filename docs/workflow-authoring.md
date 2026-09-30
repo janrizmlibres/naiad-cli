@@ -165,6 +165,8 @@ Marks are optional keys on a State:
   it, plus the Subject when the Announcement carries one, and hands nothing
   over. The Run does not park.
 - **`model`** and **`effort`** switch the Session before the Prompt is typed.
+  An entry can name its own for one State with `--model <state>=<value>`, which
+  beats this key for that entry only.
 - **`questions`** decides whose a Question asked from this State is: `"answerer"`
   or `"human"` (see [Part 6](#6-the-file-by-hand)).
 - **`next`** lists the successors, and makes a State branch when it lists more

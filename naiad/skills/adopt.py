@@ -125,7 +125,26 @@ one line saying what the work is. You are the only party holding that
 conversation, and the line is what the queue reader and the answerer see. Do
 not quote a sentence the human never typed.
 
-## 4. Adopt
+## 4. Settle any model or effort the human named
+
+Skip this step unless the human named a model or an effort for this work, as in
+"on sonnet" or "at medium effort". The workflow already names both for its
+states. An adoption can change them for this run, but only state by state:
+every setting names the state it is for.
+
+- **The human named the states too** ("implement and triage on sonnet"): pass
+  one flag per state and setting, `--model <state>=<model>` and
+  `--effort <state>=<effort>`. Spell each state as the listing does, and each
+  value as the human said it.
+- **The human named no states** ("on sonnet medium"): ask the human which states
+  the settings are for, before you adopt. Suggest every state with a prompt
+  that is reachable from the start state. Follow the listing's arrows to find
+  them, and treat a state with no arrow as leading to the state listed after
+  it. Name those states in the question, so the human can trim the list.
+
+A gate state or a terminal state takes no setting, and the command refuses one.
+
+## 5. Adopt
 
 ```
 {naiad} adopt <workflow> --at <state> --task "<what the work is>"
@@ -134,7 +153,8 @@ not quote a sentence the human never typed.
 The workflow and the state are the two you settled in step 1, as the listing
 spells them, not as the human said them.
 
-Add, where they apply: `--branch <name>` (above), `--repo <path>` if the target
+Add, where they apply: `--branch <name>` (above), `--model` and `--effort`
+(above), `--repo <path>` if the target
 repository is not the working directory, `--base <branch>` for what this work
 stands on, `--subject <value>` where the start state's prompt names a subject,
 `--skip-gates` for an unattended run of a supervised workflow.
@@ -150,7 +170,7 @@ unknown start state is a refusal like any other here: you read the listing
 before you chose, so a refusal means your reading was wrong, and that is the
 human's to see rather than yours to retry.
 
-## 5. Relay what it printed, then end your turn
+## 6. Relay what it printed, then end your turn
 
 What it printed is the naiad protocol, which is the verbs you are about to
 need, followed by the little an adoption has to add. Read it and follow it from

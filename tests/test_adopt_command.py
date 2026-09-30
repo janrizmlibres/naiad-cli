@@ -14,6 +14,7 @@ from naiad.adapters.executable import naiad_command
 from naiad.adapters.lock import SupervisorLock
 from naiad.cli.main import main
 from naiad.domain.entry import Attachment
+from naiad.domain.settings import StateSetting
 from naiad.runtime.queue import Queue
 from naiad.runtime.run import RunStore
 
@@ -149,6 +150,23 @@ def test_adopting_records_every_describer_it_was_given(home, repo):
     assert queued.working_branch == "TASK-8546"
     assert queued.pinned_base == "TASK-8000"
     assert queued.skip_gates is True
+
+
+def test_adopting_records_the_settings_named_for_the_states_that_remain(home, repo):
+    adopt(repo, "--model", "spec=sonnet", "--effort", "implement=medium")
+
+    (queued,) = queue_of(home).all()
+    assert queued.settings == (
+        StateSetting(state="spec", setting="model", value="sonnet"),
+        StateSetting(state="implement", setting="effort", value="medium"),
+    )
+
+
+def test_adopting_with_a_setting_for_a_terminal_state_is_refused(home, repo, capsys):
+    assert adopt(repo, "--model", "done=sonnet") == 2
+
+    assert "done" in capsys.readouterr().err
+    assert queue_of(home).all() == []
 
 
 def test_adopting_supervises_nothing_and_starts_nothing(home, repo, no_tmux):

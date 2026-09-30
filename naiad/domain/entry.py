@@ -11,6 +11,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 
+from naiad.domain.settings import StateSetting
+
 
 @dataclass(frozen=True)
 class Attachment:
@@ -63,6 +65,10 @@ class Entry:
     # for being marked: it takes its place in the Lane, is claim-checked, listed
     # and removed exactly as any other.
     attachment: Attachment | None = None
+    # The Model and Effort it names for States of its Workflow, each beating
+    # what the Workflow file declares for that State. Empty for work that
+    # leaves every setting to the Workflow.
+    settings: tuple[StateSetting, ...] = ()
     # What became of it: absent until the Entry starts, and the only field that
     # says anything about the Run. Everything else is asked of the Run itself.
     run_id: str | None = None

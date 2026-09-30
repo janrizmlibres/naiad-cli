@@ -16,10 +16,37 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from naiad.domain.settings import SETTINGS, Setting, StateSetting
 from naiad.runtime.atomic import write_atomically
 from naiad.runtime.home import StorageError, real_path, refuse_inside_repository
 
 METADATA_FILENAME = "run.json"
+
+
+def settings_document(settings: tuple[StateSetting, ...]) -> list[dict[str, str]]:
+    """The settings an Entry named, as the Entry and the Run each keep them on
+    disk. One spelling for both, because the Run's are the Entry's carried
+    over and a second spelling could come to disagree with the first."""
+    return [
+        {"state": named.state, "setting": named.setting, "value": named.value}
+        for named in settings
+    ]
+
+
+def settings_from(document: list[dict[str, Any]]) -> tuple[StateSetting, ...]:
+    """The settings back off disk. A setting that is not one a Switch can carry
+    is a hand-edited file, refused rather than read as some other setting."""
+    return tuple(
+        StateSetting(state=named["state"], setting=_setting(named["setting"]), value=named["value"])
+        for named in document
+    )
+
+
+def _setting(name: str) -> Setting:
+    for setting in SETTINGS:
+        if setting == name:
+            return setting
+    raise ValueError(f"'{name}' is not a setting ({', '.join(SETTINGS)})")
 
 
 @dataclass
@@ -43,6 +70,11 @@ class Run:
     # How this Run resolves its next State. Options of the Run rather than of
     # the Workflow: the same Workflow file runs supervised or unattended.
     skip_gates: bool = False
+    # The Model and Effort its Entry named for States of the Workflow, carried
+    # over as they were queued. Read on every tick, and never checked again
+    # here: a Workflow edited under a live Run leaves a setting for a State that
+    # no longer delivers simply unused.
+    settings: tuple[StateSetting, ...] = ()
     # The name of the State the Run began at, resolved when it started: the
     # first declared State when the Entry named none. What the Standing State
     # is read from before the Run has announced anything, so that a Workflow
@@ -106,6 +138,7 @@ class Run:
             "working_branch": self.working_branch,
             "predecessor": self.predecessor,
             "skip_gates": self.skip_gates,
+            "settings": settings_document(self.settings),
             "start_state": self.start_state,
             "start_subject": self.start_subject,
             "adopted": self.adopted,
@@ -134,6 +167,7 @@ class RunStore:
         working_branch: str | None = None,
         predecessor: str | None = None,
         skip_gates: bool = False,
+        settings: tuple[StateSetting, ...] = (),
         start_state: str | None = None,
         start_subject: str | None = None,
         adopted: bool = False,
@@ -156,6 +190,7 @@ class RunStore:
             working_branch=working_branch,
             predecessor=predecessor,
             skip_gates=skip_gates,
+            settings=settings,
             start_state=start_state,
             start_subject=start_subject,
             adopted=adopted,
@@ -217,6 +252,7 @@ class RunStore:
             working_branch=document.get("working_branch"),
             predecessor=document.get("predecessor"),
             skip_gates=document.get("skip_gates", False),
+            settings=settings_from(document.get("settings", [])),
             start_state=document.get("start_state"),
             start_subject=document.get("start_subject"),
             adopted=document.get("adopted", False),
@@ -229,4 +265,4 @@ class RunStore:
         )
 
 
-__all__ = ["Run", "RunStore"]
+__all__ = ["Run", "RunStore", "settings_document", "settings_from"]

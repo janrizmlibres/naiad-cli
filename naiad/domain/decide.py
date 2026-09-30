@@ -8,7 +8,7 @@ so even the timeouts are decided over a number handed in.
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from typing import Literal
 
@@ -16,6 +16,7 @@ from naiad.domain.announcement import Announcement
 from naiad.domain.answerer import Consultation, Escalated
 from naiad.domain.question import Question
 from naiad.domain.prompt import render_candidates
+from naiad.domain.settings import SETTINGS, Setting, StateSetting, setting_of
 from naiad.domain.transitions import next_states as resolve_next_states
 from naiad.domain.transitions import parks_on
 from naiad.domain.workflow import State, Workflow
@@ -241,10 +242,6 @@ class Clear:
 Submission = Literal["landed", "rejected"] | None
 
 
-# The settings a Switch can carry, by the name the session's command takes.
-Setting = Literal["model", "effort"]
-
-
 @dataclass(frozen=True)
 class Switch:
     """Type one of this State's settings into the session, ahead of its Prompt
@@ -437,11 +434,20 @@ Action = (
 )
 
 
-def decide(workflow: Workflow, signals: Signals, *, skip_gates: bool = False) -> Action:
+def decide(
+    workflow: Workflow,
+    signals: Signals,
+    *,
+    skip_gates: bool = False,
+    settings: Sequence[StateSetting] = (),
+) -> Action:
     """skip_gates is an option of the Run rather than a signal of it — it does
     not change from tick to tick — so it is a parameter rather than a Signal.
     It only ever changes which State is interpolated into the Prompt; Naiad
     still never writes the State file.
+
+    settings are the ones the Run's Entry named for its States, a parameter for
+    the same reason: they were fixed when the work was queued.
     """
     if signals.finished:
         # The Run ended. Nothing that arrives now is Naiad's business: the
@@ -540,6 +546,7 @@ def decide(workflow: Workflow, signals: Signals, *, skip_gates: bool = False) ->
                 f"which is not a State of this workflow"
             ),
             skip_gates=skip_gates,
+            settings=settings,
         )
 
     if announcement is not None and signals.stopped and not _resolved_past(
@@ -562,6 +569,7 @@ def decide(workflow: Workflow, signals: Signals, *, skip_gates: bool = False) ->
                 f"which is not a State of this workflow"
             ),
             skip_gates=skip_gates,
+            settings=settings,
         )
 
     # Nothing to deliver. Either the agent is working — the common case, and
@@ -607,6 +615,7 @@ def _owed(
     subject: str | None,
     unknown: str,
     skip_gates: bool,
+    settings: Sequence[StateSetting],
 ) -> Action:
     """What a Run standing at one State is owed: its Prompt, the Clear that has
     to come first, or why there is nothing to send at all.
@@ -650,7 +659,9 @@ def _owed(
         # it waits on a turn ending.
         return _clear(signals, state.name)
 
-    pending = _switches(state, signals.belief, handed_over=signals.handed_over)
+    pending = _switches(
+        state, signals.belief, handed_over=signals.handed_over, settings=settings
+    )
     if signals.switches < len(pending):
         # One Switch a tick, the Prompt behind them. The session drops whatever
         # arrives while it is handling a slash command, so typing the two
@@ -773,7 +784,11 @@ def _deliver(signals: Signals, delivery: Deliver) -> Action:
 
 
 def _switches(
-    state: State, belief: Mapping[str, str], *, handed_over: bool
+    state: State,
+    belief: Mapping[str, str],
+    *,
+    handed_over: bool,
+    settings: Sequence[StateSetting],
 ) -> tuple[Switch, ...]:
     """The Switches this State owes its session, in the order they are typed.
 
@@ -798,9 +813,8 @@ def _switches(
     meaning: neither setting depends on the other, and the sequence exists to
     put a tick between them rather than to sequence the settings themselves.
     """
-    named: tuple[tuple[Setting, str | None], ...] = (
-        ("model", state.model),
-        ("effort", state.effort),
+    named: tuple[tuple[Setting, str | None], ...] = tuple(
+        (setting, setting_of(state, setting, settings)) for setting in SETTINGS
     )
     return tuple(
         Switch(state=state.name, setting=setting, value=value)

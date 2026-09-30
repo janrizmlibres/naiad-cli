@@ -61,6 +61,7 @@ from naiad.domain.entry import Attachment, Entry
 from naiad.domain.key_table import file_key_help, file_row, file_value
 from naiad.domain.listing import render_states, render_workflow
 from naiad.domain.protocol import ANNOUNCE_SUBCOMMAND
+from naiad.domain.settings import Setting, StateSetting
 from naiad.domain.workflow import Workflow, WorkflowError, load_workflow
 from naiad.hooks.install import install_hooks
 from naiad.runtime.announcements import Announcements
@@ -517,6 +518,48 @@ def _describe_where_and_how(parser: argparse.ArgumentParser) -> None:
         action="store_true",
         help="resolve past Gate States, for an unattended run of a supervised Workflow",
     )
+    # Repeated rather than comma-joined, one flag per State, and never bare:
+    # a setting for the whole Run would reach States nobody meant it for.
+    parser.add_argument(
+        "--model",
+        action="append",
+        type=_named_setting,
+        metavar="STATE=VALUE",
+        help="the Model one State runs on for this work, over what the Workflow "
+        "declares for it; repeat for each State",
+    )
+    parser.add_argument(
+        "--effort",
+        action="append",
+        type=_named_setting,
+        metavar="STATE=VALUE",
+        help="the Effort one State runs at for this work, over what the Workflow "
+        "declares for it; repeat for each State",
+    )
+
+
+def _named_setting(argument: str) -> tuple[str, str]:
+    """One `STATE=VALUE`, refused by argparse when it names no State. The value
+    is left as typed: what names a model is the session's to judge."""
+    state, separator, value = argument.partition("=")
+    if not separator or not state or not value:
+        raise argparse.ArgumentTypeError(
+            f"'{argument}' names no State; write STATE=VALUE, such as implement=sonnet"
+        )
+    return state, value
+
+
+def _settings_given(arguments: argparse.Namespace) -> tuple[StateSetting, ...]:
+    """Every setting the command line named, whichever flag named it."""
+    named: tuple[tuple[Setting, list[tuple[str, str]] | None], ...] = (
+        ("model", arguments.model),
+        ("effort", arguments.effort),
+    )
+    return tuple(
+        StateSetting(state=state, setting=setting, value=value)
+        for setting, pairs in named
+        for state, value in pairs or ()
+    )
 
 
 def _announce(arguments: argparse.Namespace) -> int:
@@ -965,6 +1008,15 @@ def _queue_add(arguments: argparse.Namespace) -> int:
     operator who typed both believes both were read.
     """
     if arguments.batch_file is not None:
+        if arguments.model or arguments.effort:
+            # Its own refusal, because the one below sends the option into the
+            # file, and a batch file has no key for a setting.
+            print(
+                "naiad: --model and --effort name settings for one entry, and a batch "
+                "file cannot name them; queue that entry on its own or drop --file",
+                file=sys.stderr,
+            )
+            return 2
         if _describes_one_entry(arguments):
             print(
                 "naiad: --file describes the work itself, so the options that "
@@ -1200,8 +1252,9 @@ def _every_workflow(library: Path) -> int:
 
 def _describes_one_entry(arguments: argparse.Namespace) -> bool:
     """Whether anything on the command line describes a single piece of work.
-    Every option `_describe_the_work` adds, because a batch file says all of
-    them and each has a key of its own to say it with."""
+    Every option `_describe_the_work` adds but the settings, because a batch
+    file says all of them and each has a key of its own to say it with. The
+    settings have none, and are refused before this is asked."""
     return any(
         said not in (None, False)
         for said in (
@@ -1285,6 +1338,7 @@ def _queued(
                 subject=arguments.subject,
                 skip_gates=arguments.skip_gates,
                 attachment=attachment,
+                settings=_settings_given(arguments),
             ),
             queue=Queue(default_queue_root()),
             runs=RunStore(default_runs_root()),
@@ -1329,7 +1383,19 @@ def _queue_list(arguments: argparse.Namespace) -> int:
     width = max(len(name) for name in standing)
     for entry, state in zip(entries, standing):
         print(_queue_line(entry, runs, state=f"{state:<{width}}"))
+        for line in _settings_shown(entry):
+            print(f"    {line}")
     return 0
+
+
+def _settings_shown(entry: Entry) -> list[str]:
+    """The settings an Entry names, one line per State in the order they were
+    first named: what a night's work runs on, read before it is committed to.
+    Nothing for an Entry that leaves every setting to its Workflow."""
+    by_state: dict[str, list[str]] = {}
+    for named in entry.settings:
+        by_state.setdefault(named.state, []).append(f"{named.setting} {named.value}")
+    return [f"{state}: {', '.join(said)}" for state, said in by_state.items()]
 
 
 def _standing_shown(entry: Entry, runs: RunStore) -> str:

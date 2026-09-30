@@ -28,6 +28,7 @@ from naiad.domain.decide import (
     decide,
 )
 from naiad.domain.question import Question
+from naiad.domain.settings import StateSetting
 from naiad.domain.workflow import parse_workflow
 
 WORKFLOW = """
@@ -366,6 +367,59 @@ def test_a_state_declaring_nothing_types_nothing_and_keeps_what_is_there():
 
     assert decide(inherits, signals("spec", belief=held)) == delivered
     assert decide(inherits, signals("spec", belief=held, handed_over=True)) == delivered
+
+
+def test_an_entrys_setting_beats_the_states_own_key(switched):
+    """An Entry naming a setting for a State is a declaration like the
+    Workflow's, and the nearer one: the operator queueing the task knows when
+    its phase needs less than the Workflow gives it."""
+    named = (StateSetting(state="grill", setting="model", value="sonnet"),)
+
+    assert decide(switched, signals("grill"), settings=named) == Switch(
+        state="grill", setting="model", value="sonnet"
+    )
+
+
+def test_an_entrys_setting_gives_a_keyless_state_an_opinion():
+    """A State the file left without a Model has none of its own, and an Entry
+    naming one for it is a declaration like any other: it is typed."""
+    keyless = parse_workflow(
+        """
+        name = "feature"
+
+        [[states]]
+        name = "spec"
+        prompt = "/to-spec {task}"
+
+        [[states]]
+        name = "done"
+        terminal = true
+        """
+    )
+    named = (StateSetting(state="spec", setting="effort", value="low"),)
+
+    assert decide(keyless, signals("spec"), settings=named) == Switch(
+        state="spec", setting="effort", value="low"
+    )
+
+
+def test_an_entrys_setting_reaches_only_the_state_it_names(switched):
+    named = (StateSetting(state="grill", setting="model", value="haiku"),)
+
+    assert decide(switched, signals("spec"), settings=named) == Switch(
+        state="spec", setting="model", value="sonnet"
+    )
+
+
+def test_a_hand_off_types_an_entrys_setting_again(switched):
+    """The Notify heal reaches an Entry's setting as it reaches a Workflow's:
+    past a hand-off a human may have set their own Model."""
+    named = (StateSetting(state="grill", setting="model", value="sonnet"),)
+    held = {"model": "sonnet", "effort": "medium"}
+
+    assert decide(
+        switched, signals("grill", belief=held, handed_over=True), settings=named
+    ) == Switch(state="grill", setting="model", value="sonnet")
 
 
 def test_a_state_with_one_switch_spends_one_tick_on_it():

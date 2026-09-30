@@ -14,6 +14,7 @@ from naiad.cli.batch import BatchError, enqueue_batch
 from naiad.cli.enqueue import BranchAlreadyClaimed, Work, enqueue
 from naiad.cli.refusals import ADD_COMMAND, MissingSubject, MissingTask
 from naiad.domain.entry import Attachment
+from naiad.domain.settings import StateSetting, UnusableSetting
 from naiad.domain.transitions import UnknownState
 from naiad.domain.workflow import WorkflowError
 from naiad.runtime.queue import Queue
@@ -107,6 +108,17 @@ def test_an_entry_joins_the_queue_carrying_what_kickoff_would_be_told(repo, queu
     assert queued.start_state == "implement"
     assert queued.subject == "docs/ticket.md"
     assert queued.skip_gates is True
+
+
+def test_an_entry_carries_the_settings_it_names_for_its_states(repo, queue):
+    named = (
+        StateSetting(state="implement", setting="model", value="sonnet"),
+        StateSetting(state="implement", setting="effort", value="medium"),
+    )
+
+    add(repo, queue, settings=named)
+
+    assert queue.all()[0].settings == named
 
 
 def test_work_marked_to_attach_becomes_an_entry_carrying_the_mark(repo, queue):
@@ -254,6 +266,81 @@ def test_an_entry_starting_at_a_state_the_workflow_does_not_declare_is_refused(r
 
     assert "grrill" in str(caught.value) and "grill" in str(caught.value)
     assert queue.all() == []
+
+
+def test_a_setting_naming_a_state_the_workflow_does_not_declare_is_refused(repo, queue):
+    with pytest.raises(UnusableSetting) as caught:
+        add(repo, queue, settings=(StateSetting(state="implemnt", setting="model", value="sonnet"),))
+
+    assert "implemnt" in str(caught.value) and "implement" in str(caught.value)
+    assert queue.all() == []
+
+
+def test_a_setting_naming_a_gate_state_is_refused(repo, queue):
+    """A Gate State delivers no Prompt, so no Switch is ever typed for it: a
+    setting there would do nothing while reading as if it did."""
+    (repo / "gated.toml").write_text(
+        """
+        name = "gated"
+
+        [[states]]
+        name = "grill"
+        prompt = "/grill-with-docs {task}"
+
+        [[states]]
+        name = "review"
+
+        [[states]]
+        name = "done"
+        terminal = true
+        """
+    )
+
+    with pytest.raises(UnusableSetting) as caught:
+        add(
+            repo,
+            queue,
+            workflow_path=repo / "gated.toml",
+            settings=(StateSetting(state="review", setting="model", value="sonnet"),),
+        )
+
+    assert "review" in str(caught.value) and "gate" in str(caught.value).lower()
+    assert queue.all() == []
+
+
+def test_a_setting_naming_a_terminal_state_is_refused(repo, queue):
+    with pytest.raises(UnusableSetting) as caught:
+        add(repo, queue, settings=(StateSetting(state="done", setting="effort", value="low"),))
+
+    assert "done" in str(caught.value) and "terminal" in str(caught.value).lower()
+    assert queue.all() == []
+
+
+def test_a_state_named_twice_for_one_setting_is_refused(repo, queue):
+    """Neither value is guessed to be the one meant: a flag an agent wrote
+    should never lose to another quietly."""
+    with pytest.raises(UnusableSetting) as caught:
+        add(
+            repo,
+            queue,
+            settings=(
+                StateSetting(state="grill", setting="model", value="sonnet"),
+                StateSetting(state="grill", setting="model", value="haiku"),
+            ),
+        )
+
+    assert "grill" in str(caught.value) and "twice" in str(caught.value)
+    assert queue.all() == []
+
+
+def test_a_setting_for_a_state_the_run_may_never_reach_is_kept(repo, queue):
+    """Where a Run goes is known only as it goes, so a setting for a State
+    behind the one it starts at is not refused."""
+    named = (StateSetting(state="grill", setting="model", value="sonnet"),)
+
+    add(repo, queue, start_state="implement", subject="docs/ticket.md", settings=named)
+
+    assert queue.all()[0].settings == named
 
 
 def test_an_entry_whose_start_state_needs_a_subject_and_has_none_is_refused(repo, queue):

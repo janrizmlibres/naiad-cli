@@ -29,7 +29,7 @@ from naiad.runtime.atomic import write_atomically
 from naiad.runtime.home import StorageError, refuse_inside_repository
 from naiad.runtime.log import RunLog
 from naiad.runtime.records import EntryTurns, Notices, Waits
-from naiad.runtime.run import Run, RunStore
+from naiad.runtime.run import Run, RunStore, settings_document, settings_from
 
 ENTRY_SUFFIX = ".json"
 
@@ -173,6 +173,7 @@ class Queue:
             subject=document.get("subject"),
             skip_gates=document.get("skip_gates", False),
             attachment=Queue._attachment_from(document.get("attachment")),
+            settings=settings_from(document.get("settings", [])),
             run_id=document.get("run_id"),
         )
 
@@ -447,6 +448,7 @@ def _document(entry: Entry) -> dict[str, Any]:
         "subject": entry.subject,
         "skip_gates": entry.skip_gates,
         "attachment": _attachment_document(entry.attachment),
+        "settings": settings_document(entry.settings),
         "run_id": entry.run_id,
     }
 

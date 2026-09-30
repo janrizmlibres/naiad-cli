@@ -12,6 +12,7 @@ import pytest
 
 from naiad.domain.decide import Finish
 from naiad.domain.entry import Attachment, Entry
+from naiad.domain.settings import StateSetting
 from naiad.domain.question import Question
 from naiad.runtime.announcements import Announcements
 from naiad.runtime.home import StorageError
@@ -210,6 +211,28 @@ def test_an_entry_file_that_cannot_be_read_is_reported_and_names_itself(queue, r
         queue.all()
 
     assert str(document) in str(caught.value)
+
+
+def test_an_entry_written_before_settings_existed_loads_with_none(queue, repo):
+    queue.add(entry(repo))
+    (document,) = queue.root.iterdir()
+    written = json.loads(document.read_text())
+    del written["settings"]
+    document.write_text(json.dumps(written))
+
+    assert queue.all()[0].settings == ()
+
+
+def test_an_entry_file_naming_a_setting_no_switch_carries_is_reported(queue, repo):
+    """A hand-edited setting is refused rather than read as some other one."""
+    queue.add(entry(repo, settings=(StateSetting(state="grill", setting="model", value="x"),)))
+    (document,) = queue.root.iterdir()
+    document.write_text(document.read_text().replace('"model"', '"temperature"'))
+
+    with pytest.raises(StorageError) as caught:
+        queue.all()
+
+    assert str(document) in str(caught.value) and "temperature" in str(caught.value)
 
 
 # What became of an Entry is read of its Run: no Run means waiting,

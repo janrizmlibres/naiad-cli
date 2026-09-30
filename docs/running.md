@@ -49,6 +49,20 @@ prune` removes every done entry together with the Run it became.
 `naiad queue add --help` lists every option, including `--branch`, `--base`,
 `--at` and `--subject`.
 
+An entry can run some States on a different model or effort from the one the
+Workflow names, without editing the Workflow. Name each State with `--model` or
+`--effort`, once per State:
+
+```
+naiad queue add starter "Add a --dry-run flag to the export command" --model implement=sonnet --effort implement=medium --model verify=sonnet
+```
+
+A setting beats the State's own key and the file's default, for that entry only.
+It is refused before anything is queued, and again when the entry starts, if it
+names a State the Workflow lacks, a Gate, a Terminal State, or one State twice.
+`naiad queue list` shows an entry's settings under its line. `naiad adopt` and
+`naiad run` take the same flags. A batch file cannot name settings yet.
+
 ## Watching and attaching
 
 Leave `queue watch` running in a terminal. It prints what happens to each Run,

@@ -119,6 +119,15 @@ def test_it_says_the_workflow_and_the_start_state_are_named(skill):
     assert "workflow" in skill.lower()
 
 
+def test_it_passes_a_model_or_effort_the_human_named_for_named_states(skill):
+    """Every setting names its State. "on sonnet medium" names none, and an
+    agent that picked the States itself would set a scope nobody said, so it
+    asks — suggesting the prompted States the start State leads to."""
+    assert "--model <state>=" in skill and "--effort <state>=" in skill
+    assert "which states" in skill.lower()
+    assert "reachable" in skill.lower()
+
+
 def test_it_says_the_task_is_distilled_from_the_conversation(skill):
     """The agent is the one party holding that conversation, and `--task` is
     required."""

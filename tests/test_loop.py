@@ -30,6 +30,7 @@ from naiad.domain.decide import (
 )
 from naiad.domain.notification import Notification
 from naiad.domain.question import Question
+from naiad.domain.settings import StateSetting
 from naiad.domain.workflow import parse_workflow
 from naiad.runtime.announcements import Announcements
 from naiad.runtime.answers import AnswerLog
@@ -290,6 +291,20 @@ def test_each_switch_is_typed_on_its_own_tick_ahead_of_the_prompt(run, session):
 
     drive(run, keyed, session)
     assert session.sent[-1] == ("send", "%42", "work, then announce done")
+
+
+def test_a_setting_the_runs_entry_named_is_the_one_typed(run, session):
+    """The Run carries its Entry's settings, and the loop hands them to the
+    decision: the State's Switch types the Entry's value, not the file's."""
+    run.settings = (StateSetting(state="grill", setting="effort", value="low"),)
+    run.save()
+    keyed = parse_workflow(SWITCHED)
+    announce(run, "grill")
+
+    drive(run, keyed, session)
+    drive(run, keyed, session)
+
+    assert session.sent == [("send", "%42", "/model opus"), ("send", "%42", "/effort low")]
 
 
 # The same States with a Gate among them, so a Notify can be driven rather than

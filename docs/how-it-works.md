@@ -166,9 +166,13 @@ changes them the only way a session takes a change, by typing `/model` or
 the Prompt, because the session drops whatever arrives while it is handling a
 slash command. Typing a setting and the Prompt together would lose one of them.
 
-A State that declares neither key runs on whatever the last one set, and Naiad
-types nothing for it. Only the first State of a spawned Run gets its model and
-effort as launch flags instead, because nothing has yet been running.
+An entry may name its own `model` or `effort` for a State
+(`--model implement=sonnet`), and for that State it beats the Workflow's.
+
+A State that declares neither key, and has none from its entry, runs on whatever
+the last one set, and Naiad types nothing for it. Only the first State of a
+spawned Run gets its model and effort as launch flags instead, because nothing
+has yet been running.
 
 Claude Code fires no hook on a Switch and Naiad never reads the session back. So
 what Naiad knows about the session's model and effort is a **Belief**: what it last

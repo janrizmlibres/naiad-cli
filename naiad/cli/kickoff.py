@@ -28,6 +28,7 @@ from naiad.cli.refusals import ADD_COMMAND, ADOPT_COMMAND, check_start
 from naiad.domain.entry import Attachment, Entry
 from naiad.domain.prompt import render_prompt
 from naiad.domain.session import SessionSpec, session_name
+from naiad.domain.settings import StateSetting, setting_of
 from naiad.domain.transitions import next_states
 from naiad.runtime.log import RunLog
 from naiad.runtime.records import EntryTurns
@@ -92,6 +93,7 @@ def start_entry(
             created_at=created_at,
             start_state=entry.start_state,
             skip_gates=entry.skip_gates,
+            settings=entry.settings,
             subject=entry.subject,
         )
         # After the session is joined rather than before the Run exists, so a
@@ -112,6 +114,7 @@ def start_entry(
         created_at=created_at,
         start_state=entry.start_state,
         skip_gates=entry.skip_gates,
+        settings=entry.settings,
         subject=entry.subject,
     )
 
@@ -133,6 +136,7 @@ def start_run(
     created_at: str,
     start_state: str | None = None,
     skip_gates: bool = False,
+    settings: tuple[StateSetting, ...] = (),
     subject: str | None = None,
     # Optional, and opaque: recorded and substituted without being read, and
     # absent for work that stands on nothing.
@@ -150,6 +154,7 @@ def start_run(
         # rather than `naiad run`, which would queue a second Entry for work the
         # Queue is already holding and start supervising on top of it.
         remedy=ADD_COMMAND,
+        settings=settings,
     )
     first = checked.state
     successors = next_states(checked.workflow, first.name, skip_gates=skip_gates)
@@ -163,6 +168,7 @@ def start_run(
         working_branch=working_branch,
         predecessor=predecessor,
         skip_gates=skip_gates,
+        settings=settings,
         start_state=first.name,
         start_subject=subject,
     )
@@ -200,8 +206,8 @@ def start_run(
         initial_prompt=opening_prompt,
         # A Switch precedes Prompt delivery, so a Gate State first — which
         # delivers nothing — launches without them.
-        model=None if opening_prompt is None else first.model,
-        effort=None if opening_prompt is None else first.effort,
+        model=None if opening_prompt is None else setting_of(first, "model", settings),
+        effort=None if opening_prompt is None else setting_of(first, "effort", settings),
         # The Workflow's rather than the State's, and carried whichever State
         # comes first: where the Session summarises itself precedes no Prompt,
         # so a Gate State first does not lose it.
@@ -240,6 +246,7 @@ def attach_run(
     created_at: str,
     start_state: str | None = None,
     skip_gates: bool = False,
+    settings: tuple[StateSetting, ...] = (),
     subject: str | None = None,
     predecessor: str | None = None,
 ) -> Run:
@@ -268,6 +275,7 @@ def attach_run(
         subject=subject,
         working_branch=working_branch,
         remedy=ADOPT_COMMAND,
+        settings=settings,
     )
 
     run = store.create(
@@ -279,6 +287,7 @@ def attach_run(
         working_branch=working_branch,
         predecessor=predecessor,
         skip_gates=skip_gates,
+        settings=settings,
         start_state=checked.state.name,
         # Read back by the delivery that follows, in a later tick and possibly
         # a later process: what an adopted Run's first Prompt renders from
