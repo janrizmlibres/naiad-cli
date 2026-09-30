@@ -3,9 +3,6 @@
 
 name = "matt-pocock"
 
-# Where each Session summarises its own context, carried as a launch flag.
-autocompact = "300k"
-
 # Every State, however a Run enters this file — an Entry may name the State it
 # starts at, and a batch of known bugs starts at `diagnose`.
 
