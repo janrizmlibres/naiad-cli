@@ -16,6 +16,7 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass
 from pathlib import Path
+from typing import TypedDict
 
 from naiad.domain.announcement import Announcement
 from naiad.domain.answerer import Answered, Consultation, Escalated
@@ -445,7 +446,7 @@ class Notices:
         the human's 'pause' relayed — and a Hold whose own notification the
         earlier alarm swallowed would park the Run silently, the exact failure
         its notification is load-bearing against. Every reader must pass the
-        counts the writer keyed with — Waits.count and Holds.count — or a parked
+        counts the writer keyed with — notice_key gives both — or a parked
         Run reads as running."""
         document = _current(self.path, announcement)
         if int(document.get("wait", 0) or 0) != wait_count:
@@ -493,6 +494,22 @@ class Notices:
                 "hold": hold_count,
             },
         )
+
+
+class NoticeKey(TypedDict):
+    wait_count: int
+    hold_count: int
+
+
+def notice_key(run_root: Path, announcement: Announcement | None) -> NoticeKey:
+    """The counts the Notices record is keyed with for this Announcement, as
+    keyword arguments to every Notices call. One home for the key, so the loop
+    that writes a park and a status reading that asks after it cannot pass
+    different counts and see a parked Run as running."""
+    return {
+        "wait_count": Waits(run_root).count(announcement),
+        "hold_count": Holds(run_root).count(announcement),
+    }
 
 
 class Reports:

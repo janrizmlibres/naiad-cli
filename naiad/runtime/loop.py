@@ -55,6 +55,7 @@ from naiad.runtime.records import (
     Turns,
     Waits,
     idle_seconds,
+    notice_key,
 )
 from naiad.runtime.run import Run
 
@@ -129,9 +130,8 @@ def tick(
     # the nudge allowance the way a fresh Announcement does, and a
     # fresh Hold re-arms the notification an earlier alarm would otherwise
     # swallow.
-    wait_count = waits.count(announcement)
-    hold_count = holds.count(announcement)
-    notified, nudges = notices.of(announcement, wait_count=wait_count, hold_count=hold_count)
+    key = notice_key(run.root, announcement)
+    notified, nudges = notices.of(announcement, **key)
     typed = deliveries.attempts(announcement)
 
     # Written before the decision rather than after it, because where the agent
@@ -239,7 +239,7 @@ def tick(
             _pane(run),
             render_nudge(attempt=action.attempt, naiad=naiad, expired_wait=action.expired_wait),
         )
-        notices.record_nudge(announcement, wait_count=wait_count, hold_count=hold_count)
+        notices.record_nudge(announcement, **key)
     elif isinstance(action, Finish):
         # The session is deliberately not touched: nothing is sent into it and
         # it is not killed, because it holds the evidence of what the Run did.
@@ -267,7 +267,7 @@ def tick(
             message=_with_answered(action.reason, action.answered, reference),
             kind=Notification.NOTIFY,
         )
-        notices.record_notified(announcement, wait_count=wait_count, hold_count=hold_count)
+        notices.record_notified(announcement, **key)
         if action.question is not None and announcement is not None:
             # A Question the human is answering: one the Answerer escalated,
             # or one the Workflow gave the human. Recorded here rather

@@ -7,20 +7,25 @@ tests hold it to returning without supervising anything.
 
 import json
 import re
+import time
 
 import pytest
 
 from naiad.adapters.lock import SupervisorLock
+from naiad.cli.hold import declare_hold
 from naiad.cli.main import _drive, _ticker, main
-from naiad.domain.decide import Finish
+from naiad.cli.wait import declare_wait
+from naiad.domain.decide import NUDGE_LIMIT, SILENCE_SECONDS, Finish, Notify
 from naiad.domain.entry import Entry
 from naiad.domain.question import Question
 from naiad.domain.settings import StateSetting
+from naiad.domain.workflow import parse_workflow
 from naiad.runtime.announcements import Announcements
 from naiad.runtime.answers import AnswerLog
 from naiad.runtime.log import RunLog
+from naiad.runtime.loop import tick
 from naiad.runtime.queue import Queue
-from naiad.runtime.records import Notices
+from naiad.runtime.records import Handled, Notices, Turns
 from naiad.runtime.resolve import RunResolver
 from naiad.runtime.run import RunStore
 
@@ -282,13 +287,24 @@ def run_entry(home, repo, name, *, start_state="grill"):
     return run
 
 
-def standing_shown(capsys, entry_id):
-    """The State column of one Entry's line: the third cell, after the id and
-    the status, cells being told apart by two spaces or more."""
+def _cells(capsys, entry_id):
+    """One Entry's line in a listing, split into cells told apart by two
+    spaces or more."""
     capsys.readouterr()
     main(["queue", "list"])
     (line,) = [l for l in capsys.readouterr().out.splitlines() if l.startswith(entry_id)]
-    return re.split(r"\s{2,}", line)[2]
+    return re.split(r"\s{2,}", line)
+
+
+def status_shown(capsys, entry_id):
+    """The status column of one Entry's line: the second cell."""
+    return _cells(capsys, entry_id)[1]
+
+
+def standing_shown(capsys, entry_id):
+    """The State column of one Entry's line: the third cell, after the id and
+    the status."""
+    return _cells(capsys, entry_id)[2]
 
 
 def test_listing_shows_the_settings_an_entry_names_beneath_its_line(home, repo, capsys):
@@ -327,6 +343,76 @@ def test_listing_shows_the_gate_a_parked_run_stands_at(home, repo, capsys):
     Notices(run.root).record_notified(Announcements(run.root).announce("review"))
 
     assert standing_shown(capsys, "parked") == "review"
+
+
+class _Quiet:
+    """Session, Notifier and Answerer at once for a tick that only parks: the
+    loop's records are what these tests read, not what it sent anywhere."""
+
+    def send(self, pane, text): ...
+
+    def clear(self, pane): ...
+
+    def notify(self, title, message, kind): ...
+
+    def consult(self, spec): ...
+
+
+def tick_at(run, seconds_idle):
+    """One tick of the real loop, idle for this long since the Run's newest
+    record, so the park it writes is the loop's own."""
+    newest = max(path.stat().st_mtime for path in run.root.iterdir() if path.is_file())
+    quiet = _Quiet()
+    return tick(
+        run=RunStore(run.root.parent).load(run.id),
+        workflow=parse_workflow(WORKFLOW),
+        session=quiet,
+        notifier=quiet,
+        answerer=quiet,
+        now=newest + seconds_idle,
+    )
+
+
+def announced_and_handled(run):
+    """A Run whose agent was given its Prompt and has since ended a turn."""
+    run.attach_session(tmux_session=f"naiad-{run.id}", tmux_pane="%42")
+    announcement = Announcements(run.root).announce("implement")
+    Handled(run.root).record(announcement.seq)
+    Turns(run.root).record_end(latest_seq=announcement.seq)
+
+
+def held(run):
+    """A Run whose agent relayed the human's 'pause', parked by the loop."""
+    announced_and_handled(run)
+    declare_hold("user typed 'pause'", run=run)
+    assert isinstance(tick_at(run, 1), Notify)
+
+
+def parked_after_a_hold(run):
+    """A Hold, then the usual silence rule: Nudges run out and the loop parks
+    the Run. A Wait stands between them because only a Wait or a new
+    Announcement lifts a Hold, and the Hold count outlives the lifting."""
+    announced_and_handled(run)
+    declare_hold("user typed 'pause'", run=run)
+    tick_at(run, 1)
+    declare_wait("a background agent", run=run, now=time.time(), seconds=1)
+    for _ in range(NUDGE_LIMIT + 1):
+        action = tick_at(run, SILENCE_SECONDS * 2)
+    assert isinstance(action, Notify) and "silent" in action.reason
+
+
+def test_a_held_run_reads_parked(home, repo, capsys):
+    """The Hold count keys the park the loop records, so a reading that asks
+    without it finds the record stale and calls a Held Run running."""
+    held(run_entry(home, repo, "held"))
+
+    assert status_shown(capsys, "held") == "parked"
+
+
+def test_a_run_parked_by_silence_after_a_hold_reads_parked(home, repo, capsys):
+    parked_after_a_hold(run_entry(home, repo, "silent"))
+
+    assert status_shown(capsys, "silent") == "parked"
 
 
 def test_listing_shows_the_final_state_of_a_done_run(home, repo, capsys):
@@ -1015,6 +1101,25 @@ def test_a_running_orphan_is_left_and_named_without_failing(home, repo, capsys):
 
     assert run.root.is_dir()
     assert str(run.root) in capsys.readouterr().out
+
+
+def test_pruning_takes_an_orphan_parked_after_a_hold(home, repo):
+    """Parked is finished history to a Prune, Held or not."""
+    run = orphan(home, repo)
+    parked_after_a_hold(run)
+
+    assert main(["queue", "prune"]) == 0
+
+    assert not run.root.exists()
+
+
+def test_pruning_takes_a_held_orphan(home, repo):
+    run = orphan(home, repo)
+    held(run)
+
+    assert main(["queue", "prune"]) == 0
+
+    assert not run.root.exists()
 
 
 def test_pruning_a_queue_holding_a_damaged_entry_reports_it_and_takes_nothing(
