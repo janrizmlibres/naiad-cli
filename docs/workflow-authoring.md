@@ -171,6 +171,14 @@ Marks are optional keys on a State:
   or `"human"` (see [Part 6](#6-the-file-by-hand)).
 - **`next`** lists the successors, and makes a State branch when it lists more
   than one.
+- **`join = true`** makes a Join State, the place a Run that spawns Children
+  takes them in. Its Prompt is held while Children are working and goes out
+  as soon as one finishes that the Run has not been told of, naming it in
+  `{children}`. It goes out at once, naming none, when no Child is unfinished,
+  so the same State can make the first `naiad spawn` and notice the end.
+  While the Prompt is held there is no Nudge and no notification, and the
+  listing shows the Run as `joining`. A Join State needs a Prompt and cannot
+  be Terminal.
 
 `report` is easiest to see on the starter's `ship`, the State that hands the
 work over. Give it `report = true`:
@@ -193,8 +201,8 @@ again with `naiad state unset mine ship report`.
 
 ## 4. The slots
 
-A Prompt is prose, and five slots in it are filled in when it is typed. Only
-these five are substituted. Anything else that looks like a placeholder, such as
+A Prompt is prose, and six slots in it are filled in when it is typed. Only
+these six are substituted. Anything else that looks like a placeholder, such as
 JSON in a Prompt, is left alone.
 
 | Slot | Renders as | Empty when |
@@ -204,6 +212,7 @@ JSON in a Prompt, is left alone.
 | `{predecessor}` | The branch the work stands on, from `queue add --base`. Naiad does not check that it exists, so the Prompt decides what to do with it. | No `--base` was given, which is ordinary. |
 | `{subject}` | What the agent said its last Announcement was about: `naiad announce <state> --subject <value>`. For the State a Run starts at, the `--subject` given to `queue add`. | The Announcement carried none. A Prompt with `{subject}` in it refuses an Announcement of its State that has none, so the agent corrects itself in its own turn. |
 | `{next_state}` | The States the agent may announce next, read as a phrase: `verify`, or `no-repro or pull-request`. It is the State's `next` list when it has one, otherwise the next State in declared order. | Nothing follows: a Terminal State, the last State, or only skipped Gates. |
+| `{children}` | One line per finished Child the Run has not been told of: its Subject, `completed` or `cancelled`, its Working branch and its working tree. Each Child is named once across all deliveries. A retyped Prompt names the same Children again. Allowed only in a Join State. | No Child has finished untold, which is the delivery a Join State makes when none is unfinished. |
 
 `{branch}` and `{predecessor}` are facts of the Run, like the task, so they reach
 every Prompt, and a State that has forgotten everything can still name the branch
@@ -380,6 +389,22 @@ name = "done"
 # Announcing this State ends the Run. Give it no Prompt. A Workflow needs at
 # least one.
 terminal = true
+
+[[states]]
+# A State after the Terminal State is entered only when the agent names it.
+name = "coordinate"
+# A Join State: its Prompt waits until a Child it spawned finishes, and
+# `{children}` names the finished ones. It needs a Prompt and is never Terminal.
+join = true
+next = ["coordinate", "done"]
+prompt = """
+Take in each finished Child:
+
+{children}
+
+Spawn what is ready with `naiad spawn`. While any Child is still working,
+announce coordinate. Once none is, announce done.
+"""
 ```
 
 `naiad workflow check` loads a file exactly as a Run does, so run it after every

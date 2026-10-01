@@ -40,7 +40,9 @@ from naiad.domain.transitions import UnknownState, deviation, start_state
 from naiad.domain.workflow import Workflow
 from naiad.runtime.announcements import Announcements
 from naiad.runtime.answers import AnswerLog
+from naiad.runtime.family import read_join
 from naiad.runtime.log import RunLog
+from naiad.runtime.queue import Queue, entered_in
 from naiad.runtime.records import (
     ClearAttempts,
     Clears,
@@ -48,6 +50,7 @@ from naiad.runtime.records import (
     Deliveries,
     Handled,
     Holds,
+    Joins,
     Notices,
     Reports,
     Submissions,
@@ -57,7 +60,7 @@ from naiad.runtime.records import (
     idle_seconds,
     notice_key,
 )
-from naiad.runtime.run import Run
+from naiad.runtime.run import Run, RunStore
 
 
 class UndrivableRun(Exception):
@@ -96,6 +99,8 @@ def tick(
     now: float | None = None,
     naiad: str = DEFAULT_NAIAD,
     entry_id: str | None = None,
+    runs: RunStore | None = None,
+    queue: Queue | None = None,
 ) -> Action:
     """now is a parameter so the rules that depend on elapsed time can be
     driven from data rather than from a test that waits. Every other caller
@@ -103,7 +108,12 @@ def tick(
 
     entry_id is the Entry this Run became, which is what `naiad queue answers`
     is best pointed at. The Run knows no Entry, so whoever drives it says; a
-    Run with none is pointed at by its own id."""
+    Run with none is pointed at by its own id.
+
+    runs and queue are where this Run's Children are read from. runs defaults
+    to the store this Run is kept in. Without a queue no Entry is asked
+    after, so a Child that never started reads as unfinished however it was
+    called off."""
     announcement = Announcements(run.root).latest()
     log = RunLog(run.root)
     turns = Turns(run.root)
@@ -119,6 +129,7 @@ def tick(
     answers = AnswerLog(run.root)
     waits = Waits(run.root)
     holds = Holds(run.root)
+    joins = Joins(run.root)
     moment = now if now is not None else time.time()
     reference = entry_id or run.id
     # Read out of the log rather than out of a record of its own, for the reason
@@ -168,6 +179,12 @@ def tick(
             holding=holds.holding(announcement),
             hold_reason=holds.reason(announcement),
             answered=answers.answered(),
+            join=read_join(
+                run.root,
+                announcement,
+                runs=runs if runs is not None else RunStore(run.root.parent),
+                entered=entered_in(queue),
+            ),
         ),
         skip_gates=run.skip_gates,
         settings=run.settings,
@@ -207,7 +224,14 @@ def tick(
             # Subject is.
             branch=run.working_branch,
             predecessor=run.predecessor,
+            children=action.children or (),
         )
+        if action.children is not None:
+            # Told-once: the Children named are recorded against the
+            # Announcement before the Prompt is typed, so that a retry or a
+            # tick after a restart names this same set, and no later
+            # Announcement names any of them again.
+            joins.record(announcement, action.children)
         # Recorded before it is typed, because the UserPromptSubmit hook fires
         # while it is being typed and judges the submission against this. The
         # Announcement is not handled yet: a Confirm does that once the hook has

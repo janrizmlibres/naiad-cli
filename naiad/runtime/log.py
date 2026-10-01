@@ -21,6 +21,7 @@ import json
 from collections.abc import Sequence
 from dataclasses import dataclass, replace
 from pathlib import Path
+from typing import Literal
 
 from naiad.domain.announcement import Announcement
 from naiad.domain.decide import (
@@ -147,6 +148,18 @@ class RunLog:
         ended must find nothing to do, however much the agent says afterwards.
         """
         return any(entry.kind in ENDING_KINDS for entry in self.entries())
+
+    def ending(self) -> Literal["finished", "cancelled"] | None:
+        """Which of the endings this Run's log records first, `finished` or
+        `cancelled`, or None while it has not ended. Asked where the two must
+        be told apart: a Parent is told whether its Child completed or was
+        called off."""
+        for entry in self.entries():
+            if entry.kind == "finished":
+                return "finished"
+            if entry.kind == "cancelled":
+                return "cancelled"
+        return None
 
     def previous_state(self, announcement: Announcement | None) -> str | None:
         """Where the agent stood before this Announcement, which is what a

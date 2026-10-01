@@ -26,6 +26,7 @@ from typing import Any, Literal
 from naiad.domain.entry import Attachment, Entry
 from naiad.runtime.announcements import Announcements
 from naiad.runtime.atomic import write_atomically
+from naiad.runtime.family import Entered, every_entry, joining
 from naiad.runtime.home import StorageError, refuse_inside_repository
 from naiad.runtime.log import RunLog
 from naiad.runtime.records import EntryTurns, Notices, notice_key
@@ -34,13 +35,15 @@ from naiad.runtime.run import Run, RunStore, settings_document, settings_from
 ENTRY_SUFFIX = ".json"
 
 # What became of an Entry, derived from its Run and never stored.
-# The four states an Entry can be in and no fifth: a word the Queue invented
+# The five states an Entry can be in and no sixth: a word the Queue invented
 # would be a claim about a Run that the Run had not made — which is why the
-# type is closed rather than a bare string.
-Status = Literal["waiting", "running", "parked", "done"]
+# type is closed rather than a bare string. Joining is a live Run held at a
+# Join State while its Children work.
+Status = Literal["waiting", "running", "joining", "parked", "done"]
 
 WAITING: Status = "waiting"
 RUNNING: Status = "running"
+JOINING: Status = "joining"
 PARKED: Status = "parked"
 DONE: Status = "done"
 
@@ -181,20 +184,25 @@ class Queue:
         )
 
 
-def status_of(entry: Entry, runs: RunStore) -> Status:
+def status_of(entry: Entry, runs: RunStore, queue: Queue | None = None) -> Status:
     """What became of an Entry, asked of its Run.
 
-    Read rather than stored, and in the order the four answers
+    Read rather than stored, and in the order the five answers
     exclude one another: no Run at all is waiting; a Run whose log records an
-    ending is done however loudly it asked for a human on the way; a Run
-    notified about the Announcement it is still standing in is parked, since a
+    ending is done however loudly it asked for a human on the way; a Run whose
+    latest Announcement names a Join State still holding its Prompt is
+    joining; a Run notified about the Announcement it is still standing in is parked, since a
     notice against an Announcement the agent has left was re-armed by the
     announcing; anything else is running.
 
     A Run whose directory somebody has deleted therefore reads as running, and
     that is the honest answer rather than a gap: the Entry started it and
-    nothing in what remains says it ended. Inventing a fifth word for it would
+    nothing in what remains says it ended. Inventing a word for it would
     have the Queue claiming something no Run ever recorded.
+
+    The queue is what a Parent's unstarted Children are looked up in, to tell
+    one waiting from one whose Entry was removed. Without it every unstarted
+    Child reads as waiting, which never shows a held Parent as released.
     """
     if entry.run_id is None:
         return WAITING
@@ -203,15 +211,36 @@ def status_of(entry: Entry, runs: RunStore) -> Status:
     # Run's files live is the Run store's to know. Its directory rather than its
     # metadata, because every fact below is a file in it and none of them needs
     # the Run object to answer.
-    return _run_status(runs.root_for(entry.run_id))
+    return _run_status(runs.root_for(entry.run_id), runs=runs, entered=entered_in(queue))
 
 
-def _run_status(root: Path) -> Status:
+def entered_in(queue: Queue | None) -> Entered:
+    """Whether an Entry is still in this Queue. Read once and only when first
+    asked, which is only for a Child that never started: most Runs have none.
+
+    Without a Queue every Entry is taken to be there, so an unstarted Child
+    reads as unfinished, the reading that never releases a Join early."""
+    if queue is None:
+        return every_entry
+    present: set[str] | None = None
+
+    def entered(entry_id: str) -> bool:
+        nonlocal present
+        if present is None:
+            present = {entry.id for entry in queue.all()}
+        return entry_id in present
+
+    return entered
+
+
+def _run_status(root: Path, *, runs: RunStore, entered: Entered) -> Status:
     """What a Run's directory records, never waiting: a directory exists, so the
     Run does too. One reading shared by an Entry's status and a Prune's judgment
     of an orphan, so the two cannot come apart."""
     if RunLog(root).ended():
         return DONE
+    if joining(root, runs=runs, entered=entered):
+        return JOINING
     # Read with the same key the loop wrote it under, or a Run parked after
     # its Waits ran out, or Held, would show as running.
     latest = Announcements(root).latest()
@@ -403,7 +432,7 @@ def _take_orphans(
         if directory.name in tended:
             continue
         try:
-            status = _run_status(directory)
+            status = _run_status(directory, runs=runs, entered=entered_in(None))
         except (OSError, ValueError, KeyError, TypeError, StorageError) as error:
             failures.append(f"orphaned run directory {directory} cannot be read ({error})")
             continue
@@ -468,6 +497,7 @@ def _attachment_document(attachment: Attachment | None) -> dict[str, Any] | None
 
 __all__ = [
     "DONE",
+    "JOINING",
     "PARKED",
     "RUNNING",
     "WAITING",
@@ -476,6 +506,7 @@ __all__ = [
     "Queue",
     "branch_of",
     "cancel",
+    "entered_in",
     "prune",
     "status_of",
 ]

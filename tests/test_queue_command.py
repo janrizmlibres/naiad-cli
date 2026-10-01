@@ -25,7 +25,7 @@ from naiad.runtime.answers import AnswerLog
 from naiad.runtime.log import RunLog
 from naiad.runtime.loop import tick
 from naiad.runtime.queue import Queue
-from naiad.runtime.records import Handled, Notices, Turns
+from naiad.runtime.records import Children, Handled, Notices, Turns
 from naiad.runtime.resolve import RunResolver
 from naiad.runtime.run import RunStore
 
@@ -399,6 +399,82 @@ def parked_after_a_hold(run):
     for _ in range(NUDGE_LIMIT + 1):
         action = tick_at(run, SILENCE_SECONDS * 2)
     assert isinstance(action, Notify) and "silent" in action.reason
+
+
+JOINING = """
+name = "fan-out"
+
+[[states]]
+name = "implement"
+prompt = "take in {children}"
+join = true
+
+[[states]]
+name = "done"
+terminal = true
+
+[[states]]
+name = "build"
+prompt = "build {subject}"
+"""
+
+
+def joining_parent(home, repo, *, child_finished, announced=True):
+    """A Parent that has announced its Join State, with one started Child
+    listed beneath it."""
+    (repo / "workflow.toml").write_text(JOINING)
+    parent = run_entry(home, repo, "parent", start_state="implement")
+    worktree = repo.parent / "repo-wt--01"
+    worktree.mkdir()
+    child = RunStore(home / "runs").create(
+        run_id="child-run",
+        workflow_path=repo / "workflow.toml",
+        task="t",
+        target_repo=worktree,
+        created_at="2026-07-22T12:00:00Z",
+        start_state="build",
+    )
+    queue_of(home).add(
+        Entry(
+            id="child",
+            workflow_path=repo / "workflow.toml",
+            task="t",
+            target_repo=worktree,
+            working_branch="feat--01",
+            created_at="2026-07-22T12:00:01Z",
+            parent=parent.id,
+            run_id=child.id,
+        )
+    )
+    Children(parent.root).record_spawn("child", subject="01.md", worktree=worktree)
+    Children(parent.root).record_start("child", run_id=child.id)
+    if child_finished:
+        RunLog(child.root).record(Finish(state="done"), seq=1)
+    if announced:
+        Announcements(parent.root).announce("implement")
+
+
+def test_a_parent_held_at_a_join_state_reads_joining(home, repo, capsys):
+    joining_parent(home, repo, child_finished=False)
+
+    assert status_shown(capsys, "parent") == "joining"
+
+
+def test_a_parent_adopted_at_a_held_join_state_reads_joining(home, repo, capsys):
+    """Before it announces anything, an adopted Run is owed the Prompt of the
+    State it was adopted at, and the tick holds that one too."""
+    joining_parent(home, repo, child_finished=False, announced=False)
+    parent = RunStore(home / "runs").load("parent-run")
+    parent.adopted = True
+    parent.save()
+
+    assert status_shown(capsys, "parent") == "joining"
+
+
+def test_a_parent_whose_join_is_released_reads_running(home, repo, capsys):
+    joining_parent(home, repo, child_finished=True)
+
+    assert status_shown(capsys, "parent") == "running"
 
 
 def test_a_held_run_reads_parked(home, repo, capsys):

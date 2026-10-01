@@ -32,11 +32,13 @@ nobody else's.
 
 That is the entry's id, what became of it, the State it stands in, the repository,
 the branch (`-` until the agent has derived one) and the task. The Run's id is in
-brackets once it has one. What became of an entry is one of four words:
+brackets once it has one. What became of an entry is one of five words:
 
 - `waiting`: no Run yet. It is queued behind another entry for its tree, or no
   Supervisor has reached it.
 - `running`: the agent is working.
+- `joining`: the Run stands at a Join State and is waiting on its Children.
+  Nothing is wrong: its Prompt goes out as soon as a Child finishes.
 - `parked`: Naiad has stopped and told you it needs you. The State column says
   where.
 - `done`: the Run reached its last State, or you removed it.

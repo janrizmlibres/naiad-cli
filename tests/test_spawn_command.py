@@ -154,6 +154,22 @@ def test_the_parents_children_record_holds_the_childs_entry(parent, worktree):
     ]
 
 
+def test_the_childrens_record_keeps_what_its_parent_is_told_of_it(parent, worktree):
+    """Subject, Working branch and working tree, so that a Child whose Entry is
+    gone before it started can still be named to its Parent."""
+    spawn(
+        parent, "--repo", str(worktree), "--branch", "feat--01", "--at", "build",
+        "--subject", "t-01",
+    )
+
+    (found,) = Children(parent.root).all()
+    assert (found.subject, found.branch, found.worktree) == (
+        "t-01",
+        "feat--01",
+        str(worktree.resolve()),
+    )
+
+
 def test_spawn_supervises_nothing(parent, worktree):
     """It returns as soon as the Entry is on disk: nothing was started."""
     spawn(parent, "--repo", str(worktree), "--at", "build", "--subject", "t-01")

@@ -106,7 +106,8 @@ When this phase is done, announce: review
   Run, from a Run that has ended, from inside a Child (only one level), into
   the Parent's own working tree, and wherever `naiad queue add` would refuse
   the same Entry. `naiad queue list` shows each Child indented under its
-  Parent.
+  Parent. A Parent takes its Children in at a Join State (see
+  [Writing Workflows](workflow-authoring.md#3-state-kinds-and-marks)).
 
 ### Rejections
 

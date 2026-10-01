@@ -90,7 +90,12 @@ def spawn_child(
     # there the Supervisor may start it at once and record its Run, and a
     # record written after that would write the Run back out of it.
     children = Children(run.root)
-    children.record_spawn(child.id)
+    children.record_spawn(
+        child.id,
+        subject=child.subject,
+        branch=child.working_branch,
+        worktree=child.target_repo,
+    )
     try:
         return queue.add(child)
     except BaseException:

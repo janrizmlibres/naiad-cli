@@ -581,3 +581,73 @@ def test_report_false_is_accepted_anywhere():
     source = 'name = "w"\n[[states]]\nname = "review"\nreport = false\n[[states]]\nname = "done"\nterminal = true\nreport = false'
 
     assert parse_workflow(source).state("review").report is False
+
+
+JOINING = """
+name = "w"
+
+[[states]]
+name = "implement"
+prompt = "take in {children}, then announce {next_state}"
+join = true
+
+[[states]]
+name = "build"
+prompt = "build {subject}"
+
+[[states]]
+name = "done"
+terminal = true
+"""
+
+
+def test_a_state_may_declare_that_it_is_a_join_state():
+    workflow = parse_workflow(JOINING)
+
+    assert workflow.state("implement").join is True
+    assert workflow.state("build").join is False
+
+
+def test_join_must_be_a_boolean():
+    with pytest.raises(WorkflowError, match="state 'implement': join must be a boolean"):
+        parse_workflow(JOINING.replace("join = true", 'join = "yes"'))
+
+
+@pytest.mark.parametrize(
+    ("states", "problem"),
+    [
+        pytest.param(
+            'name = "review"\njoin = true',
+            "join is refused on a State with no Prompt",
+            id="gate",
+        ),
+        pytest.param(
+            'name = "review"\nterminal = true\njoin = true',
+            "join is refused on a Terminal State",
+            id="terminal",
+        ),
+        pytest.param(
+            'name = "review"\nprompt = "x"\nterminal = true\njoin = true',
+            "join is refused on a Terminal State",
+            id="terminal with a prompt",
+        ),
+        pytest.param(
+            'name = "review"\nprompt = "take in {children}"',
+            "the {children} slot is filled only at a Join State",
+            id="slot outside a join state",
+        ),
+    ],
+)
+def test_a_join_state_of_the_wrong_shape_is_refused_at_load(states, problem):
+    source = f'name = "w"\n[[states]]\n{states}\n[[states]]\nname = "done"\nterminal = true'
+
+    with pytest.raises(WorkflowError) as caught:
+        parse_workflow(source, source="w.toml")
+
+    assert f"workflow w.toml: state 'review': {problem}" in str(caught.value)
+
+
+def test_join_false_is_accepted_anywhere():
+    source = 'name = "w"\n[[states]]\nname = "review"\njoin = false\n[[states]]\nname = "done"\nterminal = true\njoin = false'
+
+    assert parse_workflow(source).state("review").join is False

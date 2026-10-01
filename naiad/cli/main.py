@@ -963,6 +963,7 @@ def _drive(run: Run) -> None:
         # command that exists rather than whatever the session's PATH holds.
         naiad=naiad_command(),
         entry_id=_entry_id_of(run),
+        queue=Queue(default_queue_root()),
     )
 
 
@@ -1002,6 +1003,7 @@ def _ticker() -> Callable[[Run], None]:
             answerer=answerer,
             naiad=naiad,
             entry_id=_entry_id_of(run),
+            queue=Queue(default_queue_root()),
             report=lambda message: print(f"{run.id}  {message}"),
             lead=len(f"{run.id}  "),
         )
@@ -1430,7 +1432,8 @@ def _queue_list(arguments: argparse.Namespace) -> int:
     """The Entries in id order, which is Queue order, each with what became of
     it — asked of its Run rather than read from a status the Queue keeps."""
     try:
-        entries = Queue(default_queue_root()).all()
+        queue = Queue(default_queue_root())
+        entries = queue.all()
     except FAILURES as error:
         # An Entry file the operator has damaged. They can see these files, so
         # they can break one, and a traceback is not something they can act on.
@@ -1448,7 +1451,10 @@ def _queue_list(arguments: argparse.Namespace) -> int:
     width = max(len(name) for name in standing.values())
     for entry, depth in _families(entries):
         indent = "  " * depth
-        print(indent + _queue_line(entry, runs, state=f"{standing[entry.id]:<{width}}"))
+        print(
+            indent
+            + _queue_line(entry, runs, queue, state=f"{standing[entry.id]:<{width}}")
+        )
         for line in _settings_shown(entry):
             print(f"{indent}    {line}")
     return 0
@@ -1492,7 +1498,7 @@ def _standing_shown(entry: Entry, runs: RunStore) -> str:
     return (standing_in(run) if run is not None else None) or "-"
 
 
-def _queue_line(entry: Entry, runs: RunStore, *, state: str) -> str:
+def _queue_line(entry: Entry, runs: RunStore, queue: Queue, *, state: str) -> str:
     """One Entry as one line: which, what became of it, the State it stands in,
     where, on what branch, and what the work is.
 
@@ -1500,7 +1506,7 @@ def _queue_line(entry: Entry, runs: RunStore, *, state: str) -> str:
     Queue spans every repository and two checkouts of the same project — a
     worktree, a second clone — share that name and would otherwise read as one.
     """
-    became = status_of(entry, runs)
+    became = status_of(entry, runs, queue)
     line = (
         f"{entry.id}  {became:<7}  {state}  {_shortened(entry.target_repo)}  "
         f"{_branch_shown(entry)}  {entry.task}"

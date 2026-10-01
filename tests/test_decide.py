@@ -1,5 +1,7 @@
 """Every rule, as data in and Action out. No tmux, no subprocess, no clock."""
 
+from dataclasses import replace
+
 import pytest
 
 from naiad.domain.announcement import Announcement
@@ -27,6 +29,7 @@ from naiad.domain.decide import (
     Switch,
     decide,
 )
+from naiad.domain.join import FinishedChild, Join
 from naiad.domain.question import Question
 from naiad.domain.settings import StateSetting
 from naiad.domain.workflow import parse_workflow
@@ -193,8 +196,10 @@ def signals(
     opening=None,
     reported=False,
     answered=0,
+    join=None,
 ):
     return Signals(
+        join=join if join is not None else Join(),
         announcement=(
             Announcement(seq=seq, state=state, question=question, subject=subject)
             if state
@@ -1595,3 +1600,156 @@ def test_an_adoption_at_a_reporting_state_reports_nothing(reporting):
 
 def test_a_finished_run_reports_nothing(reporting):
     assert decide(reporting, signals("ship", finished=True)) is NOTHING
+
+
+# A Join State that Clears, so that holding can be seen to come before the Clear.
+JOINING = """
+name = "fan-out"
+
+[[states]]
+name = "implement"
+prompt = "take in {children}, then announce {next_state}"
+join = true
+clear = true
+
+[[states]]
+name = "build"
+prompt = "build {subject}"
+
+[[states]]
+name = "done"
+terminal = true
+"""
+
+
+@pytest.fixture
+def joining():
+    return parse_workflow(JOINING)
+
+
+def finished(entry_id="e-1", outcome="completed"):
+    return FinishedChild(
+        entry_id=entry_id,
+        subject=f"ticket {entry_id}",
+        branch=f"feat--{entry_id}",
+        worktree=f"/work/{entry_id}",
+        outcome=outcome,
+    )
+
+
+def joined(joining, **overrides):
+    """The Join State announced, its Clear confirmed, so that a release goes
+    straight to the Prompt."""
+    return replace(signals("implement", cleared=True, clear_attempts=1), **overrides)
+
+
+@pytest.mark.parametrize("idle_for", [0.0, SILENCE_SECONDS + 1, HANG_SECONDS + 1])
+@pytest.mark.parametrize("stopped_since_action", [False, True])
+@pytest.mark.parametrize("stopped", [False, True])
+def test_a_held_join_state_takes_no_action_at_any_idle_time(
+    joining, idle_for, stopped_since_action, stopped
+):
+    """Holding is waiting on Children, not silence: no Nudge, no Notify after
+    the Nudge limit, and no hang Notify."""
+    for nudges in (0, NUDGE_LIMIT):
+        action = decide(
+            joining,
+            joined(
+                joining,
+                join=Join(unfinished=1),
+                idle_for=idle_for,
+                stopped=stopped,
+                stopped_since_action=stopped_since_action,
+                nudges=nudges,
+            ),
+        )
+
+        assert action == NOTHING
+
+
+def test_one_untold_finished_child_releases_the_join_naming_it(joining):
+    child = finished()
+
+    action = decide(joining, joined(joining, join=Join(unfinished=2, named=(child,))))
+
+    assert action == Deliver(
+        state="implement",
+        prompt="take in {children}, then announce {next_state}",
+        next_states=("build",),
+        children=(child,),
+    )
+
+
+def test_no_unfinished_child_delivers_at_once_naming_none(joining):
+    action = decide(joining, joined(joining, join=Join()))
+
+    assert isinstance(action, Deliver)
+    assert action.children == ()
+
+
+def test_a_cancelled_child_releases_the_join_as_cancelled(joining):
+    child = finished(outcome="cancelled")
+
+    action = decide(joining, joined(joining, join=Join(unfinished=1, named=(child,))))
+
+    assert isinstance(action, Deliver)
+    assert action.children == (child,)
+
+
+def test_a_join_already_recorded_for_this_announcement_stays_released(joining):
+    """A redelivery renders the set recorded the first time, even when that
+    set was empty and a Child has since been spawned."""
+    action = decide(joining, joined(joining, join=Join(unfinished=1, recorded=True)))
+
+    assert isinstance(action, Deliver)
+    assert action.children == ()
+
+
+def test_a_retyped_join_prompt_names_the_same_children(joining):
+    child = finished()
+
+    action = decide(
+        joining,
+        joined(
+            joining,
+            join=Join(unfinished=1, named=(child,), recorded=True),
+            deliveries=1,
+            submission="rejected",
+        ),
+    )
+
+    assert isinstance(action, Deliver)
+    assert action.attempt == 2
+    assert action.children == (child,)
+
+
+def test_the_clear_waits_for_the_release(joining):
+    held = signals("implement", join=Join(unfinished=1))
+    released = signals("implement", join=Join(unfinished=1, named=(finished(),)))
+
+    assert decide(joining, held) == NOTHING
+    assert decide(joining, released) == Clear(state="implement", attempt=1)
+
+
+def test_a_run_adopted_at_a_held_join_state_takes_no_action(joining):
+    action = decide(
+        joining,
+        signals(None, opening=Opening(state="implement"), join=Join(unfinished=1)),
+    )
+
+    assert action == NOTHING
+
+
+def test_a_state_that_is_not_a_join_state_is_never_held(workflow):
+    action = decide(workflow, signals("grill", join=Join(unfinished=3)))
+
+    assert isinstance(action, Deliver)
+    assert action.children is None
+
+
+def test_a_parked_child_does_not_release_the_join(joining):
+    """A parked Child is unfinished and not finished: it reaches the decision
+    as one more unfinished Child and names nothing."""
+    action = decide(joining, joined(joining, join=Join(unfinished=1), idle_for=HANG_SECONDS + 1))
+
+    assert action == NOTHING

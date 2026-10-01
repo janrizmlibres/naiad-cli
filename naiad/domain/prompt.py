@@ -9,6 +9,8 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 
+from naiad.domain.join import FinishedChild, render_children
+
 # The placeholders something asks a Prompt about rather than merely
 # substituting, which is what earns a placeholder a name here: the askers must
 # be asking about the same string as the substitution below. Three guards
@@ -17,6 +19,9 @@ from collections.abc import Sequence
 # placeholder has gone out.
 SUBJECT_PLACEHOLDER = "{subject}"
 BRANCH_PLACEHOLDER = "{branch}"
+# Asked about by the Workflow loader, which refuses the slot outside a Join
+# State: nowhere else are Children named.
+CHILDREN_PLACEHOLDER = "{children}"
 
 
 def render_candidates(candidates: Sequence[str]) -> str:
@@ -46,6 +51,7 @@ def render_prompt(
     subject: str | None = None,
     branch: str | None = None,
     predecessor: str | None = None,
+    children: Sequence[FinishedChild] = (),
 ) -> str:
     """next_states is plural even though most States have exactly one: at a
     Branching State the Prompt reads as naming both exits, and the Prompt's own
@@ -76,10 +82,9 @@ def render_prompt(
     called Run — both callers pass exactly its fields — but this module is
     domain and the Run is runtime, so taking one would invert the layering
     every other rule here observes. A second type holding a copy of three of
-    the Run's fields buys nothing but a place for them to drift, and it would
-    guard against a sixth placeholder the spec does not foresee: the set is
-    closed at the task, the next State, the Subject, the branch and what it
-    stands on.
+    the Run's fields buys nothing but a place for them to drift. The Children
+    a Join State names are no Run-level fact either, being decided per
+    Announcement as the Subject is.
 
     Both are opaque. The Predecessor especially is substituted without being
     read — Naiad neither asks git whether that branch exists nor decides
@@ -89,6 +94,10 @@ def render_prompt(
     and rendering empty is the Prompt's cue to derive and declare one; a
     declaration then forgotten is refused at the next Announcement, where the
     agent can still correct it, rather than here.
+
+    children is the finished Children a Join State's delivery names, one line
+    each. The loader refuses the slot anywhere else, and it renders as nothing
+    when none is named.
     """
     return (
         prompt.replace("{task}", task)
@@ -96,7 +105,14 @@ def render_prompt(
         .replace(SUBJECT_PLACEHOLDER, subject or "")
         .replace(BRANCH_PLACEHOLDER, branch or "")
         .replace("{predecessor}", predecessor or "")
+        .replace(CHILDREN_PLACEHOLDER, render_children(children))
     )
 
 
-__all__ = ["BRANCH_PLACEHOLDER", "SUBJECT_PLACEHOLDER", "render_candidates", "render_prompt"]
+__all__ = [
+    "BRANCH_PLACEHOLDER",
+    "CHILDREN_PLACEHOLDER",
+    "SUBJECT_PLACEHOLDER",
+    "render_candidates",
+    "render_prompt",
+]

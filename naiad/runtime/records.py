@@ -14,13 +14,14 @@ without a clock inside any rule.
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass, replace
 from pathlib import Path
-from typing import TypedDict
+from typing import Any, TypedDict
 
 from naiad.domain.announcement import Announcement
 from naiad.domain.answerer import Answered, Consultation, Escalated
 from naiad.domain.decide import WAIT_BUDGET_SECONDS, WAIT_DEFAULT_SECONDS, Submission
+from naiad.domain.join import FinishedChild
 from naiad.domain.submission import Verdict
 from naiad.runtime.announcements import STATE_FILENAME
 from naiad.runtime.atomic import write_atomically
@@ -42,6 +43,9 @@ HOLDS_FILENAME = "holds.json"
 # files: Spawn writes it from the agent's process and the Supervisor from its
 # own, and neither writing is a sign of the Run's life.
 CHILDREN_DIRNAME = "children"
+# Not among the signal files either: it is written in the same tick as the
+# delivery it belongs to, and the delivery is the sign of life.
+JOINS_FILENAME = "joins.json"
 
 # Beside the Entry in the queue directory, under the Entry's id. Not `.json`,
 # which the Queue reads as an Entry file.
@@ -674,10 +678,17 @@ class Holds:
 @dataclass(frozen=True)
 class Child:
     """One Child of a Run: the Entry it was spawned as, and once the Supervisor
-    has started it, the Run it became."""
+    has started it, the Run it became.
+
+    The Subject, the Working branch it was given and its working tree are
+    copied from the Entry at Spawn, so that a Child whose Entry is gone before
+    it ever started can still be named to its Parent."""
 
     entry_id: str
     run_id: str | None = None
+    subject: str | None = None
+    branch: str | None = None
+    worktree: str | None = None
 
 
 class Children:
@@ -700,23 +711,33 @@ class Children:
         sortable timestamp."""
         if not self.path.is_dir():
             return []
-        found = []
-        for path in sorted(self.path.glob("*.json")):
-            document = _read(path)
-            run_id = document.get("run_id")
-            found.append(
-                Child(
-                    entry_id=str(document["entry_id"]),
-                    run_id=run_id if isinstance(run_id, str) else None,
-                )
-            )
-        return found
+        return [_child(_read(path)) for path in sorted(self.path.glob("*.json"))]
 
-    def record_spawn(self, entry_id: str) -> None:
-        self._write(Child(entry_id=entry_id))
+    def record_spawn(
+        self,
+        entry_id: str,
+        *,
+        subject: str | None = None,
+        branch: str | None = None,
+        worktree: Path | None = None,
+    ) -> None:
+        self._write(
+            Child(
+                entry_id=entry_id,
+                subject=subject,
+                branch=branch,
+                worktree=None if worktree is None else str(worktree),
+            )
+        )
 
     def record_start(self, entry_id: str, *, run_id: str) -> None:
-        self._write(Child(entry_id=entry_id, run_id=run_id))
+        """The Run a Child became, kept beside what Spawn recorded of it."""
+        recorded = _child(_read(self._file(entry_id))) if self._file(entry_id).is_file() else None
+        self._write(
+            replace(recorded, run_id=run_id)
+            if recorded is not None
+            else Child(entry_id=entry_id, run_id=run_id)
+        )
 
     def forget(self, entry_id: str) -> None:
         """Take back a Child whose Entry never reached the Queue."""
@@ -727,7 +748,84 @@ class Children:
 
     def _write(self, child: Child) -> None:
         self.path.mkdir(parents=True, exist_ok=True)
-        _write(self._file(child.entry_id), {"entry_id": child.entry_id, "run_id": child.run_id})
+        _write(
+            self._file(child.entry_id),
+            {
+                "entry_id": child.entry_id,
+                "run_id": child.run_id,
+                "subject": child.subject,
+                "branch": child.branch,
+                "worktree": child.worktree,
+            },
+        )
+
+
+def _child(document: Document) -> Child:
+    def text(key: str) -> str | None:
+        value = document.get(key)
+        return value if isinstance(value, str) else None
+
+    return Child(
+        entry_id=str(document["entry_id"]),
+        run_id=text("run_id"),
+        subject=text("subject"),
+        branch=text("branch"),
+        worktree=text("worktree"),
+    )
+
+
+class Joins:
+    """The Children each Join delivery named, against the Announcement it
+    answered.
+
+    Kept for every Announcement rather than only the current one, because
+    told-once is a question about all of them: a later Announcement of a Join
+    State names only Children no earlier one named. Written before the
+    Prompt is typed, so that a retry, or a tick after a restart, names the set
+    the first typing was about to name rather than reading the Children afresh.
+
+    Each set keeps the lines as they were told, so that a redelivery reads
+    the same even when a Child's own Run has since been pruned.
+    """
+
+    def __init__(self, run_root: Path) -> None:
+        self.path = Path(run_root) / JOINS_FILENAME
+
+    def named(self, announcement: Announcement | None) -> tuple[FinishedChild, ...] | None:
+        """The set recorded against this Announcement, or None before one is."""
+        for recorded in self._sets():
+            if recorded["seq"] == _seq(announcement):
+                return tuple(FinishedChild(**child) for child in recorded["children"])
+        return None
+
+    def told(self, announcement: Announcement | None) -> set[str]:
+        """The Entry ids of every Child named against some other Announcement."""
+        return {
+            child["entry_id"]
+            for recorded in self._sets()
+            if recorded["seq"] != _seq(announcement)
+            for child in recorded["children"]
+        }
+
+    def record(self, announcement: Announcement | None, children: tuple[FinishedChild, ...]) -> None:
+        """Once per Announcement: a set already recorded is the one told."""
+        if self.named(announcement) is not None:
+            return
+        sets = [
+            *self._sets(),
+            {
+                "seq": _seq(announcement),
+                "children": [asdict(child) for child in children],
+            },
+        ]
+        write_atomically(self.path, json.dumps(sets, indent=2) + "\n")
+
+    def _sets(self) -> list[dict[str, Any]]:
+        try:
+            sets: list[dict[str, Any]] = json.loads(self.path.read_text())
+        except FileNotFoundError:
+            return []
+        return sets
 
 
 class Consultations:
@@ -779,6 +877,7 @@ __all__ = [
     "EntryTurns",
     "Handled",
     "Holds",
+    "Joins",
     "Notices",
     "Reports",
     "Submissions",
