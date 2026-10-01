@@ -75,7 +75,7 @@ from naiad.runtime.home import (
     default_queue_root,
     default_runs_root,
 )
-from naiad.runtime.queue import Queue, cancel, prune, status_of
+from naiad.runtime.queue import Queue, cancel, entered_in, prune, status_of
 from naiad.runtime.records import Clears, EntryTurns, Turns
 from naiad.runtime.resolve import NoRunError, RunResolver, turn_recipient
 from naiad.runtime.run import Run, RunStore
@@ -591,7 +591,13 @@ def _settings_given(arguments: argparse.Namespace) -> tuple[StateSetting, ...]:
 def _announce(arguments: argparse.Namespace) -> int:
     try:
         run = _current_run()
-        announcement = announce_state(arguments.name, run=run, subject=arguments.subject)
+        announcement = announce_state(
+            arguments.name,
+            run=run,
+            subject=arguments.subject,
+            runs=RunStore(default_runs_root()),
+            entered=entered_in(Queue(default_queue_root())),
+        )
         reply = announcement_reply(announcement, run=run)
     except FAILURES as error:
         print(f"naiad: {error}", file=sys.stderr)

@@ -10,11 +10,13 @@ import subprocess
 
 import pytest
 
-from naiad.domain.decide import Deliver
-from naiad.runtime.announcements import STATE_FILENAME
+from naiad.domain.decide import Deliver, Finish
+from naiad.domain.entry import Entry
+from naiad.runtime.announcements import STATE_FILENAME, Announcements
 from naiad.runtime.answers import AnswerLog
 from naiad.runtime.log import RunLog
-from naiad.runtime.records import Handled
+from naiad.runtime.queue import Queue
+from naiad.runtime.records import Children, Handled, Notices, notice_key
 from naiad.runtime.run import RunStore
 from naiad_command import NAIAD, naiad_environment, requires_installed_naiad
 
@@ -456,3 +458,157 @@ def test_a_run_whose_branch_was_given_is_never_touched_by_the_guard(tmp_path):
     finished = announce(run, "implement", "--subject", "01-a.md")
 
     assert finished.returncode == 0, finished.stderr
+
+
+# A Parent's Workflow: a Join State to take Children in, a Gate to hand over
+# at, the Terminal State, and the State a Child starts at.
+JOIN_WORKFLOW = """
+name = "fan-out"
+
+[[states]]
+name = "implement"
+prompt = "take in:\\n{children}"
+join = true
+
+[[states]]
+name = "handover"
+
+[[states]]
+name = "done"
+terminal = true
+
+[[states]]
+name = "build"
+prompt = "build {subject}"
+"""
+
+
+@pytest.fixture
+def parent(tmp_path):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    workflow = repo / "workflow.toml"
+    workflow.write_text(JOIN_WORKFLOW)
+    return RunStore(tmp_path / "naiad" / "runs").create(
+        run_id="a-run",
+        workflow_path=workflow,
+        task="fan out",
+        target_repo=repo,
+        created_at="2026-07-19T12:00:00Z",
+        start_state="implement",
+    )
+
+
+def spawned(parent, name, *, start=True, queued=False):
+    """A Child of the parent Run as Spawn and the Supervisor leave it: on the
+    Parent's Children record, started as a Run of its own unless told not to,
+    and with an Entry in the Queue when queued."""
+    worktree = parent.target_repo.parent / f"repo-wt--{name}"
+    worktree.mkdir()
+    entry_id = f"entry-{name}"
+    Children(parent.root).record_spawn(
+        entry_id, subject=f"{name}.md", branch=f"feat--{name}", worktree=worktree
+    )
+    if queued:
+        Queue(parent.root.parents[1] / "queue").add(
+            Entry(
+                id=entry_id,
+                workflow_path=parent.workflow_path,
+                task=parent.task,
+                target_repo=worktree,
+                working_branch=f"feat--{name}",
+                created_at="2026-07-19T12:00:00Z",
+                parent=parent.id,
+            )
+        )
+    if not start:
+        return None
+    child = RunStore(parent.root.parent).create(
+        run_id=f"run-{name}",
+        workflow_path=parent.workflow_path,
+        task=parent.task,
+        target_repo=worktree,
+        created_at="2026-07-19T12:00:00Z",
+        start_state="build",
+        start_subject=f"{name}.md",
+    )
+    Children(parent.root).record_start(entry_id, run_id=child.id)
+    return child
+
+
+def test_ending_over_a_running_child_is_refused_naming_it_and_the_join_state(parent):
+    spawned(parent, "03")
+
+    finished = announce(parent, "done")
+
+    assert finished.returncode != 0
+    assert "03.md" in finished.stderr
+    assert "naiad announce implement" in finished.stderr
+    assert not (parent.root / STATE_FILENAME).exists()
+
+
+def test_ending_over_a_parked_child_is_refused(parent):
+    child = spawned(parent, "03")
+    parked_at = Announcements(child.root).announce("build")
+    Notices(child.root).record_notified(parked_at, **notice_key(child.root, parked_at))
+
+    finished = announce(parent, "done")
+
+    assert finished.returncode != 0
+    assert "03.md" in finished.stderr
+
+
+def test_ending_over_a_child_not_yet_started_is_refused(parent):
+    spawned(parent, "03", start=False, queued=True)
+
+    finished = announce(parent, "done")
+
+    assert finished.returncode != 0
+    assert "03.md" in finished.stderr
+
+
+def test_the_refusal_names_only_the_unfinished_children(parent):
+    RunLog(spawned(parent, "03").root).record(Finish(state="done"), seq=1)
+    spawned(parent, "04")
+
+    finished = announce(parent, "done")
+
+    assert "04.md" in finished.stderr
+    assert "03.md" not in finished.stderr
+
+
+def test_ending_once_every_child_finished_is_accepted(parent):
+    RunLog(spawned(parent, "03").root).record(Finish(state="done"), seq=1)
+    RunLog(spawned(parent, "04").root).record_cancellation(state="build")
+    # Never started and its Entry gone: called off, so finished too.
+    spawned(parent, "05", start=False)
+
+    finished = announce(parent, "done")
+
+    assert finished.returncode == 0, finished.stderr
+    assert state_file(parent)["state"] == "done"
+
+
+def test_ending_with_no_children_is_accepted(parent):
+    finished = announce(parent, "done")
+
+    assert finished.returncode == 0, finished.stderr
+
+
+def test_a_gate_announced_with_children_in_flight_is_accepted(parent):
+    spawned(parent, "03")
+
+    finished = announce(parent, "handover")
+
+    assert finished.returncode == 0, finished.stderr
+    assert state_file(parent)["state"] == "handover"
+
+
+def test_ending_over_a_child_in_a_workflow_without_a_join_state_says_to_wait(run):
+    spawned(run, "03")
+
+    finished = announce(run, "done")
+
+    assert finished.returncode != 0
+    assert "03.md" in finished.stderr
+    assert "wait for them to finish" in finished.stderr

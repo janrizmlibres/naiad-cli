@@ -178,7 +178,8 @@ Marks are optional keys on a State:
   so the same State can make the first `naiad spawn` and notice the end.
   While the Prompt is held there is no Nudge and no notification, and the
   listing shows the Run as `joining`. A Join State needs a Prompt and cannot
-  be Terminal.
+  be Terminal. A Run cannot announce its Terminal State while a Child is
+  unfinished; the refusal points the agent at the Join State.
 
 `report` is easiest to see on the starter's `ship`, the State that hands the
 work over. Give it `report = true`:

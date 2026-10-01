@@ -120,8 +120,10 @@ unknown state 'reveiw'; this workflow declares: plan, review, implement, verify,
 
 It also refuses a State whose Prompt uses `{subject}` when no `--subject` was
 given, and it refuses an announcement in a branchless Run that has already been
-asked to derive a branch but has not declared it. Each message ends with the
-command to type instead.
+asked to derive a branch but has not declared it. It refuses a Terminal State
+while the Run has a Child that has not finished, whether not yet started,
+running or parked, naming those Children and pointing at the Join State. Each
+message ends with the command to type instead.
 
 If the agent announces over a Question it has not had answered, the announcement
 stands. The Question is recorded as abandoned, so the log of an unattended Run is

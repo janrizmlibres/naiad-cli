@@ -23,15 +23,24 @@ from naiad.domain.transitions import (
 from naiad.domain.workflow import Workflow, load_workflow
 from naiad.runtime.announcements import Announcements
 from naiad.runtime.answers import AnswerLog
+from naiad.runtime.family import Entered, unfinished_children
 from naiad.runtime.log import RunLog
-from naiad.runtime.run import Run
+from naiad.runtime.records import Child
+from naiad.runtime.run import Run, RunStore
 
 
 class AnnounceError(Exception):
     """An Announcement the agent must see and correct."""
 
 
-def announce_state(state: str, *, run: Run, subject: str | None = None) -> Announcement:
+def announce_state(
+    state: str,
+    *,
+    run: Run,
+    subject: str | None = None,
+    runs: RunStore,
+    entered: Entered,
+) -> Announcement:
     """Rejects an Announcement the Prompt cannot be rendered from, for the same
     reason it rejects an undeclared State: both are clerical slips the agent can
     correct inside its own turn, and both would otherwise be silently inert.
@@ -44,6 +53,10 @@ def announce_state(state: str, *, run: Run, subject: str | None = None) -> Annou
     is still part of what the agent said, and the Run log reads it: a Gate
     State's Subject is substituted nowhere and is what tells the human which
     item they have been handed.
+
+    A Terminal State is refused while the Run has an unfinished Child, which
+    would otherwise go on building work nobody takes in. runs is where its
+    Children's Runs are read, and entered says which Entries are still queued.
     """
     workflow = load_workflow(run.workflow_path)
     declared = workflow.state(state)
@@ -70,6 +83,10 @@ def announce_state(state: str, *, run: Run, subject: str | None = None) -> Annou
             "(`git branch --show-current` names the checked-out one) as: "
             "naiad branch <name>, then announce again"
         )
+    if declared.terminal:
+        working = unfinished_children(run.root, runs=runs, entered=entered)
+        if working:
+            raise AnnounceError(_ending_over(working, workflow))
     # Announcing over an unanswered Question abandons it — permitted, because
     # the agent owns workflow progress, but recorded: a log holding
     # only the Questions that were settled would show an unattended Run as
@@ -101,6 +118,20 @@ def announcement_reply(announcement: Announcement, *, run: Run) -> str:
         return f"announced {announcement.state} ({announcement.seq})\n"
     following = next_states(workflow, announcement.state, skip_gates=run.skip_gates)
     return render_gate_reply(announcement.state, next_states=following)
+
+
+def _ending_over(working: list[Child], workflow: Workflow) -> str:
+    """The refusal to end over unfinished Children: which they are, and the
+    Join State that takes them in once they finish."""
+    named = ", ".join(child.subject or child.entry_id for child in working)
+    joins = [known.name for known in workflow.states if known.join]
+    if not joins:
+        remedy = "wait for them to finish before ending"
+    else:
+        remedy = "announce your join state instead: " + " or ".join(
+            f"naiad {ANNOUNCE_SUBCOMMAND} {name}" for name in joins
+        )
+    return f"this run still has unfinished children: {named}; {remedy}"
 
 
 def _branch_prompt_delivered(run: Run, workflow: Workflow) -> bool:

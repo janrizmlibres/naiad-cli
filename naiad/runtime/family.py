@@ -65,6 +65,16 @@ def read_join(
     )
 
 
+def unfinished_children(parent_root: Path, *, runs: RunStore, entered: Entered) -> list[Child]:
+    """The Run's Children that have not finished, in the order they were
+    spawned: not started while their Entry waits, running, or parked."""
+    return [
+        child
+        for child in Children(parent_root).all()
+        if _finished(child, runs=runs, entered=entered) is None
+    ]
+
+
 def joining(root: Path, *, runs: RunStore, entered: Entered = every_entry) -> bool:
     """Whether the Run in this directory is held at a Join State: the Prompt
     it is owed belongs to one and the Join is not released. The Prompt owed is
@@ -127,4 +137,4 @@ def _finished(child: Child, *, runs: RunStore, entered: Entered) -> FinishedChil
     )
 
 
-__all__ = ["Entered", "every_entry", "joining", "read_join"]
+__all__ = ["Entered", "every_entry", "joining", "read_join", "unfinished_children"]
