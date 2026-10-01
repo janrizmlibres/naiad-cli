@@ -41,3 +41,12 @@ def install_healthy(directory: Path) -> None:
     directory.mkdir(parents=True, exist_ok=True)
     install_tmux(directory)
     install_claude(directory)
+
+
+def install_sysctl(directory: Path, *, memsize: int | None) -> Path:
+    """A sysctl answering `-n hw.memsize` with `memsize` bytes, or failing to
+    when None."""
+    answer = "exit 1" if memsize is None else f"echo {memsize}; exit 0"
+    return _script(
+        directory, "sysctl", f'if [ "$2" = "hw.memsize" ]; then {answer}; fi\nexit 1'
+    )

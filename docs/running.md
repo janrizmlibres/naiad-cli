@@ -24,6 +24,21 @@ Entries in the same working tree go one after another, and entries in different
 working trees go side by side. A parked Run holds its own tree's place and
 nobody else's.
 
+How many Runs go side by side is capped. The Supervisor starts no Run while the
+live ones are at its ceiling, and starts at most one each time round. A Run
+counts from the moment it starts until it finishes, parked or not, except while
+it stands at a Join State waiting on its Children. Nothing already working is
+ever stopped. The ceiling is sized from the machine's memory, one Run for each
+1.5 GiB above 8 GiB and never fewer than one. Set it yourself with `--capacity`
+on `queue watch` or `run`, or with `NAIAD_CAPACITY`; the flag wins over the
+variable:
+
+```
+naiad queue watch --capacity 6
+```
+
+While nothing can start for that reason, the Supervisor says so once.
+
 `queue list` prints one line per entry, in queue order:
 
 ```text
@@ -35,7 +50,8 @@ the branch (`-` until the agent has derived one) and the task. The Run's id is i
 brackets once it has one. What became of an entry is one of five words:
 
 - `waiting`: no Run yet. It is queued behind another entry for its tree, it is
-  a Child held by its Parent's Child limit, or no Supervisor has reached it.
+  a Child held by its Parent's Child limit, the Supervisor is at its ceiling,
+  or no Supervisor has reached it.
 - `running`: the agent is working.
 - `joining`: the Run stands at a Join State and is waiting on its Children.
   Nothing is wrong: its Prompt goes out as soon as a Child finishes.

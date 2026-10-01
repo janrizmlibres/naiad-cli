@@ -380,3 +380,27 @@ def test_running_refuses_a_child_limit_of_zero(home, repo, monkeypatch, capsys):
     assert refused.value.code == 2
     assert "--child-limit" in capsys.readouterr().err
     assert queue_of(home).all() == []
+
+
+# The ceiling, resolved as the Supervisor starts and refused before anything
+# is queued, so that fixing a typo and running again does not queue twice.
+
+
+def test_running_hands_the_supervisor_the_capacity_it_was_given(home, repo, monkeypatch):
+    wiring = supervision(monkeypatch)
+
+    assert run(repo, "--capacity", "3") == 0
+
+    assert wiring["ceiling"] == 3
+
+
+def test_running_with_a_capacity_variable_that_is_not_one_queues_nothing(
+    home, repo, monkeypatch, capsys
+):
+    monkeypatch.setenv("NAIAD_CAPACITY", "0")
+    refuse_supervising(monkeypatch)
+
+    assert run(repo) == 2
+
+    assert queue_of(home).all() == []
+    assert "NAIAD_CAPACITY" in capsys.readouterr().err

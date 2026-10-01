@@ -669,6 +669,68 @@ def test_watching_the_queue_starts_a_run_carrying_everything_the_entry_held(
     assert no_tmux.spawned
 
 
+# The ceiling is resolved once, as the Supervisor starts: the option, then the
+# environment variable, then what the machine's memory allows.
+
+
+class SixteenGibibytes:
+    def total_memory(self):
+        return 16 * (1 << 30)
+
+
+def test_the_capacity_option_beats_the_environment_variable(home, monkeypatch):
+    monkeypatch.setenv("NAIAD_CAPACITY", "20")
+    wiring = supervision(monkeypatch)
+
+    assert main(["queue", "watch", "--capacity", "3"]) == 0
+
+    assert wiring["ceiling"] == 3
+
+
+def test_the_environment_variable_beats_the_derived_ceiling(home, monkeypatch):
+    monkeypatch.setenv("NAIAD_CAPACITY", "20")
+    monkeypatch.setattr("naiad.cli.main.Machine", SixteenGibibytes)
+    wiring = supervision(monkeypatch)
+
+    assert main(["queue", "watch"]) == 0
+
+    assert wiring["ceiling"] == 20
+
+
+def test_with_neither_the_ceiling_is_derived_from_the_machines_memory(home, monkeypatch):
+    monkeypatch.setattr("naiad.cli.main.Machine", SixteenGibibytes)
+    wiring = supervision(monkeypatch)
+
+    assert main(["queue", "watch"]) == 0
+
+    assert wiring["ceiling"] == 5
+
+
+@pytest.mark.parametrize("capacity", ["0", "-1", "two", "2.5"])
+def test_a_capacity_option_that_is_not_a_positive_whole_number_is_refused(
+    home, monkeypatch, capsys, capacity
+):
+    refused = supervision(monkeypatch)
+
+    with pytest.raises(SystemExit):
+        main(["queue", "watch", "--capacity", capacity])
+
+    assert refused == {}
+    assert "positive whole number" in capsys.readouterr().err
+
+
+def test_a_capacity_variable_that_is_not_a_positive_whole_number_is_refused(
+    home, monkeypatch, capsys
+):
+    monkeypatch.setenv("NAIAD_CAPACITY", "twenty")
+    refused = supervision(monkeypatch)
+
+    assert main(["queue", "watch"]) == 2
+
+    assert refused == {}
+    assert "NAIAD_CAPACITY" in capsys.readouterr().err
+
+
 def test_a_second_supervisor_is_refused(home, monkeypatch, capsys):
     """Two Supervisors each take the first waiting Entry and put two agents in
     one working tree, which is the single thing one-at-a-time exists to

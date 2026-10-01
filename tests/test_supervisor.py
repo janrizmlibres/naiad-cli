@@ -18,6 +18,7 @@ import pytest
 from naiad.cli.supervisor import supervise_queue
 from naiad.domain.decide import Finish
 from naiad.domain.entry import Attachment, Entry
+from naiad.runtime.announcements import Announcements
 from naiad.runtime.home import StorageError
 from naiad.runtime.log import RunLog
 from naiad.runtime.queue import Queue
@@ -122,12 +123,23 @@ class Supervision:
         RunLog(run.root).record(Finish(state="done"))
 
 
-def supervising(queue, runs, supervision, *, following=False, naps_allowed=8, waking=None):
+def supervising(
+    queue,
+    runs,
+    supervision,
+    *,
+    following=False,
+    naps_allowed=8,
+    waking=None,
+    ceiling=None,
+    reports=None,
+):
     """Run the Supervisor with the operator's Ctrl-C standing by. A loop that is
     supposed to end on its own never reaches it.
 
     waking is called on each nap, for the test where something happens to the
-    Queue while the Supervisor is following it.
+    Queue while the Supervisor is following it. reports, when given, collects
+    what the Supervisor told the operator.
     """
     slept = []
 
@@ -145,7 +157,8 @@ def supervising(queue, runs, supervision, *, following=False, naps_allowed=8, wa
         tick=supervision.tick,
         following=following,
         sleep=sleep,
-        report=lambda _message: None,
+        report=(lambda _message: None) if reports is None else reports.append,
+        ceiling=ceiling,
     )
     return slept
 
@@ -254,7 +267,8 @@ def test_a_run_that_never_finishes_holds_its_lane(queue, runs, repo):
 
 def test_entries_for_two_repositories_run_at_the_same_time(queue, runs, repo, other_repo):
     """The pass ticks every lane's live Run once: a Run still working in one
-    repository is interleaved with, not ahead of, the other repository's."""
+    repository is interleaved with, not ahead of, the other repository's. A
+    pass starts one Run, so the other repository's starts on the next."""
     queued(queue, repo, "one")
     queued(queue, other_repo, "two")
     supervision = Supervision(runs, never_finishes={"run-1"})
@@ -264,7 +278,7 @@ def test_entries_for_two_repositories_run_at_the_same_time(queue, runs, repo, ot
 
     assert supervision.started == [("one", None), ("two", None)]
     # The parked lane keeps being ticked after the other lane's Run finished.
-    assert supervision.ticked[:3] == ["run-1", "run-2", "run-1"]
+    assert supervision.ticked[:4] == ["run-1", "run-1", "run-2", "run-1"]
 
 
 def test_a_lane_that_parks_does_not_stop_another_repository_finishing(
@@ -476,3 +490,85 @@ def test_starting_a_child_records_its_run_on_its_parents_children_record(
 
     (child,) = Children(runs.root_for("run-1")).all()
     assert (child.entry_id, child.run_id) == ("child", "run-2")
+
+
+# Capacity: the ceiling holds back starting, never ticking.
+
+JOINING = """
+name = "fan-out"
+
+[[states]]
+name = "implement"
+prompt = "take in {children}"
+join = true
+
+[[states]]
+name = "done"
+terminal = true
+"""
+
+
+def test_at_the_ceiling_a_waiting_entry_is_not_started(queue, runs, repo, other_repo):
+    queued(queue, repo, "one")
+    queued(queue, other_repo, "two")
+    supervision = Supervision(runs, never_finishes={"run-1"})
+
+    with pytest.raises(Interrupted):
+        supervising(queue, runs, supervision, ceiling=1)
+
+    assert supervision.started == [("one", None)]
+    assert set(supervision.ticked) == {"run-1"}
+
+
+def test_the_reason_nothing_starts_is_reported_once_not_every_pass(
+    queue, runs, repo, other_repo
+):
+    queued(queue, repo, "one")
+    queued(queue, other_repo, "two")
+    supervision = Supervision(runs, never_finishes={"run-1"})
+    reports = []
+
+    with pytest.raises(Interrupted):
+        supervising(queue, runs, supervision, ceiling=1, reports=reports)
+
+    assert len([report for report in reports if "ceiling" in report]) == 1
+
+
+def test_a_parent_held_at_its_join_does_not_keep_its_child_from_a_ceiling_of_one(
+    queue, runs, repo, other_repo
+):
+    (repo / "workflow.toml").write_text(JOINING)
+    queued(queue, repo, "1-parent", start_state="implement")
+    supervision = Supervision(runs, never_finishes={"run-1", "run-2"})
+
+    def spawning(run):
+        supervision.tick(run)
+        if run.id == "run-1" and not Children(run.root).all():
+            Children(run.root).record_spawn("2-child", worktree=other_repo)
+            queued(queue, other_repo, "2-child", parent="run-1")
+            Announcements(run.root).announce("implement")
+
+    with pytest.raises(Interrupted):
+        supervise_queue(
+            queue=queue,
+            runs=runs,
+            start=supervision.start,
+            tick=spawning,
+            following=False,
+            sleep=_interrupting_after(4),
+            report=lambda _message: None,
+            ceiling=1,
+        )
+
+    assert [started for started, _ in supervision.started] == ["1-parent", "2-child"]
+
+
+def _interrupting_after(naps):
+    slept = []
+
+    def sleep(seconds):
+        slept.append(seconds)
+        if len(slept) >= naps:
+            raise Interrupted
+
+    return sleep

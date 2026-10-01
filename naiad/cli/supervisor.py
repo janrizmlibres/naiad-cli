@@ -28,9 +28,19 @@ from collections.abc import Callable, Sequence
 from typing import assert_never
 
 from naiad.domain.entry import Entry
-from naiad.domain.supervise import Drained, Idle, Resume, Signals, Start, supervise
+from naiad.domain.supervise import (
+    CEILING,
+    AtCapacity,
+    Drained,
+    Idle,
+    Reason,
+    Resume,
+    Signals,
+    Start,
+    supervise,
+)
 from naiad.runtime.home import StorageError
-from naiad.runtime.queue import DONE, Queue, branch_of, status_of
+from naiad.runtime.queue import DONE, JOINING, Queue, Status, branch_of, status_of
 from naiad.runtime.records import Children
 from naiad.runtime.run import Run, RunStore
 
@@ -54,9 +64,13 @@ def supervise_queue(
     following: bool,
     sleep: Callable[[float], None] = time.sleep,
     report: Callable[[str], None] = print,
+    ceiling: int | None = None,
 ) -> None:
     """Take the Queue lane by lane until it is drained, or forever when
     following.
+
+    ceiling is how many Runs may be live at once, resolved by the caller when
+    the Supervisor started; None sets none.
 
     sleep and report are handed in so that a test can drive the loop without
     waiting on a clock or printing to the operator's terminal; the loop is the
@@ -66,15 +80,21 @@ def supervise_queue(
     # rather than state: a Resume comes round every pass by design, and the
     # operator is told about each Run once, not once per tick.
     announced: set[str] = set()
+    # Why nothing started on the last pass, so that the operator is told once
+    # each time it changes rather than every pass it stays the same.
+    reported: Reason | None = None
 
     while True:
         entries = queue.all()
+        statuses = _statuses(entries, runs, queue)
         scanned = supervise(
             Signals(
                 entries=entries,
-                finished=_finished(entries, runs),
+                finished={run_id for run_id, status in statuses.items() if status == DONE},
                 following=following,
                 declared=_declared(entries, runs),
+                ceiling=ceiling,
+                joining={run_id for run_id, status in statuses.items() if status == JOINING},
             )
         )
 
@@ -88,7 +108,16 @@ def supervise_queue(
             report("the queue is drained")
             return
 
+        reason = next(
+            (action.reason for action in scanned if isinstance(action, AtCapacity)), None
+        )
+        if reason is not None and reason != reported:
+            report(_held_back(reason, ceiling=ceiling))
+        reported = reason
+
         for action in scanned:
+            if isinstance(action, AtCapacity):
+                continue
             if isinstance(action, Start):
                 entry = action.entry
                 report(f"starting {entry.id}: {entry.task}")
@@ -134,15 +163,22 @@ def supervise_queue(
         sleep(TICK_SECONDS)
 
 
-def _finished(entries: Sequence[Entry], runs: RunStore) -> set[str]:
-    """Which of the Entries' Runs have ended, asked of the Runs rather than of
-    a status the Queue keeps. Through the same reader the listing
-    uses, so that one place decides what makes an Entry done."""
+def _statuses(entries: Sequence[Entry], runs: RunStore, queue: Queue) -> dict[str, Status]:
+    """What became of each started Entry's Run, asked of the Runs rather than
+    of a status the Queue keeps. Through the same reader the listing uses, so
+    that one place decides what makes a Run done or joining."""
     return {
-        entry.run_id
+        entry.run_id: status_of(entry, runs, queue)
         for entry in entries
-        if entry.run_id is not None and status_of(entry, runs) == DONE
+        if entry.run_id is not None
     }
+
+
+def _held_back(reason: Reason, *, ceiling: int | None) -> str:
+    """The operator's line for why nothing is starting."""
+    if reason == CEILING:
+        return f"not starting anything: the ceiling of {ceiling} live runs is reached"
+    assert_never(reason)
 
 
 def _declared(entries: Sequence[Entry], runs: RunStore) -> dict[str, str]:

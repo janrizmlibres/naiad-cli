@@ -27,6 +27,7 @@ from typing import Any
 from naiad.adapters.answerer import HeadlessAnswerer
 from naiad.adapters.executable import naiad_command
 from naiad.adapters.lock import SupervisorLock
+from naiad.adapters.machine import Machine
 from naiad.adapters.notify import configured_notifier
 from naiad.adapters.tmux import TmuxError, TmuxSessions
 from naiad.cli.adopt import NotInTmux, attachment_in, teaching_for
@@ -58,6 +59,12 @@ from naiad.cli.supervisor import supervise_queue
 from naiad.cli.terminal import terminal_width
 from naiad.cli.wait import WaitError, declare_wait
 from naiad.cli.watch import tick_once, watch
+from naiad.domain.capacity import (
+    CAPACITY_VARIABLE,
+    CapacityError,
+    capacity_given,
+    resolve_ceiling,
+)
 from naiad.domain.entry import Attachment, Entry
 from naiad.domain.key_table import file_key_help, file_row, file_value
 from naiad.domain.listing import render_states, render_workflow
@@ -158,6 +165,7 @@ def build_parser() -> argparse.ArgumentParser:
         help="queue a Workflow against a task, and supervise if nothing else is",
     )
     _describe_the_work(run)
+    _capacity_option(run)
     run.set_defaults(handler=_run)
 
     queue = subcommands.add_parser("queue", help="the backlog of Entries waiting to run")
@@ -184,6 +192,7 @@ def build_parser() -> argparse.ArgumentParser:
     queue_watch = _driving_parser(
         queue_commands, "watch", help="take the Queue in order, and keep following it for more"
     )
+    _capacity_option(queue_watch)
     queue_watch.set_defaults(handler=_queue_watch)
 
     # The argument is required and nothing defaults to the latest Run: with
@@ -582,6 +591,47 @@ def _named_setting(argument: str) -> tuple[str, str]:
             f"'{argument}' names no State; write STATE=VALUE, such as implement=sonnet"
         )
     return state, value
+
+
+def _capacity_option(parser: argparse.ArgumentParser) -> None:
+    """The ceiling on live Runs, on the commands that may become the
+    Supervisor."""
+    parser.add_argument(
+        "--capacity",
+        type=_capacity,
+        default=None,
+        metavar="N",
+        help=(
+            f"start no Run while N are live; beats {CAPACITY_VARIABLE}, and both "
+            "beat the ceiling sized from this machine's memory"
+        ),
+    )
+
+
+def _capacity(argument: str) -> int:
+    """A ceiling, refused by argparse when it is not one: a typo must not
+    stop everything or mean no ceiling."""
+    number = capacity_given(argument)
+    if number is None:
+        raise argparse.ArgumentTypeError(
+            f"'{argument}' is not a positive whole number; write --capacity N, such as 4"
+        )
+    return number
+
+
+def _ceiling(arguments: argparse.Namespace) -> int | None:
+    """The ceiling the Supervisor will hold to, or None having said why the
+    one given is refused. Resolved at the entrance, before anything is queued,
+    so that fixing a typo and running again does not queue the work twice."""
+    try:
+        return resolve_ceiling(
+            option=arguments.capacity,
+            variable=os.environ.get(CAPACITY_VARIABLE),
+            total_memory=Machine().total_memory,
+        )
+    except CapacityError as error:
+        print(f"naiad: {error}", file=sys.stderr)
+        return None
 
 
 def _child_limit(argument: str) -> int:
@@ -1077,6 +1127,10 @@ def _run(arguments: argparse.Namespace) -> int:
     if _refused_at_the_door():
         return 2
 
+    ceiling = _ceiling(arguments)
+    if ceiling is None:
+        return 2
+
     queued = _queued(arguments, remedy=RUN_COMMAND)
     if queued is None:
         return 2
@@ -1088,7 +1142,7 @@ def _run(arguments: argparse.Namespace) -> int:
             # its turn.
             print("a supervisor is already running; it will take this in turn")
             return 0
-        return _supervise(following=False)
+        return _supervise(following=False, ceiling=ceiling)
 
 
 def _queue_add(arguments: argparse.Namespace) -> int:
@@ -1572,6 +1626,10 @@ def _queue_watch(arguments: argparse.Namespace) -> int:
     if _refused_at_the_door():
         return 2
 
+    ceiling = _ceiling(arguments)
+    if ceiling is None:
+        return 2
+
     with SupervisorLock(default_lock_path()).taken() as mine:
         if not mine:
             print(
@@ -1580,10 +1638,10 @@ def _queue_watch(arguments: argparse.Namespace) -> int:
                 file=sys.stderr,
             )
             return 2
-        return _supervise(following=True)
+        return _supervise(following=True, ceiling=ceiling)
 
 
-def _supervise(*, following: bool) -> int:
+def _supervise(*, following: bool, ceiling: int) -> int:
     """Drive the Queue, with the lock already in hand.
 
     One loop for both entrances, differing only in what it does with nothing to
@@ -1602,6 +1660,7 @@ def _supervise(*, following: bool) -> int:
             start=_start_entry,
             tick=_ticker(),
             following=following,
+            ceiling=ceiling,
         )
     except FAILURES as error:
         print(f"naiad: {error}", file=sys.stderr)
