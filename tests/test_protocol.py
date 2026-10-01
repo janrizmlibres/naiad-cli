@@ -322,3 +322,13 @@ def test_with_no_question_open_none_is_mentioned():
 def test_no_compaction_reminder_is_left_holding_a_placeholder():
     for told in (compaction(), compaction(subject=None, question="Why?")):
         assert "{" not in told and "}" not in told
+
+
+def test_names_the_command_that_spawns_a_child_and_when_to_use_it():
+    """Spawn is for a Workflow whose Prompt asks for it, and a Child that
+    shared this working tree would wait behind its Parent forever."""
+    protocol = render_protocol(next_states=("spec",), naiad="/opt/naiad/bin/naiad")
+
+    assert "/opt/naiad/bin/naiad spawn --repo" in protocol
+    assert "only when" in protocol.lower()
+    assert "working tree of its own" in protocol

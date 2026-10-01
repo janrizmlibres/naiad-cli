@@ -25,12 +25,27 @@ from __future__ import annotations
 
 import time
 from collections.abc import Callable, Sequence
-from typing import assert_never
+from pathlib import Path
+from typing import Protocol, assert_never
 
+from naiad.domain.capacity import DISK_FLOOR, DISK_SHARE, GB, Disk, low_on_disk
 from naiad.domain.entry import Entry
-from naiad.domain.supervise import Drained, Idle, Resume, Signals, Start, supervise
+from naiad.domain.supervise import (
+    CEILING,
+    DISK,
+    MEMORY,
+    AtCapacity,
+    Drained,
+    Idle,
+    Reason,
+    Resume,
+    Signals,
+    Start,
+    supervise,
+)
 from naiad.runtime.home import StorageError
-from naiad.runtime.queue import DONE, Queue, branch_of, status_of
+from naiad.runtime.queue import DONE, JOINING, Queue, Status, branch_of, status_of
+from naiad.runtime.records import Children
 from naiad.runtime.run import Run, RunStore
 
 # How long a following Supervisor waits before looking at the Queue again.
@@ -44,6 +59,14 @@ POLL_SECONDS = 5.0
 TICK_SECONDS = 2.0
 
 
+class MachineReading(Protocol):
+    """What the Supervisor asks of the machine each pass."""
+
+    def strained(self) -> bool | None: ...
+
+    def free_disk(self, path: Path) -> Disk | None: ...
+
+
 def supervise_queue(
     *,
     queue: Queue,
@@ -53,9 +76,16 @@ def supervise_queue(
     following: bool,
     sleep: Callable[[float], None] = time.sleep,
     report: Callable[[str], None] = print,
+    ceiling: int | None = None,
+    machine: MachineReading | None = None,
 ) -> None:
     """Take the Queue lane by lane until it is drained, or forever when
     following.
+
+    ceiling is how many Runs may be live at once, resolved by the caller when
+    the Supervisor started; None sets none. machine is read each pass for
+    memory pressure and free disk; None reads nothing, as a machine that
+    answers neither.
 
     sleep and report are handed in so that a test can drive the loop without
     waiting on a clock or printing to the operator's terminal; the loop is the
@@ -65,15 +95,23 @@ def supervise_queue(
     # rather than state: a Resume comes round every pass by design, and the
     # operator is told about each Run once, not once per tick.
     announced: set[str] = set()
+    # Why nothing started on the last pass, so that the operator is told once
+    # each time it changes rather than every pass it stays the same.
+    reported: Reason | None = None
 
     while True:
         entries = queue.all()
+        statuses = _statuses(entries, runs, queue)
         scanned = supervise(
             Signals(
                 entries=entries,
-                finished=_finished(entries, runs),
+                finished={run_id for run_id, status in statuses.items() if status == DONE},
                 following=following,
                 declared=_declared(entries, runs),
+                ceiling=ceiling,
+                joining={run_id for run_id, status in statuses.items() if status == JOINING},
+                strained=machine is not None and machine.strained() is True,
+                low_disk=_low_disk(entries, machine),
             )
         )
 
@@ -87,11 +125,31 @@ def supervise_queue(
             report("the queue is drained")
             return
 
+        reason = next(
+            (action.reason for action in scanned if isinstance(action, AtCapacity)), None
+        )
+        if reason is not None and reason != reported:
+            report(_held_back(reason, ceiling=ceiling))
+        reported = reason
+
         for action in scanned:
+            if isinstance(action, AtCapacity):
+                continue
             if isinstance(action, Start):
                 entry = action.entry
                 report(f"starting {entry.id}: {entry.task}")
                 run = start(entry, action.predecessor)
+                # A Child needs no rule of its own to start, its working tree
+                # being a Lane of its own; what is owed is the Run it became,
+                # on its Parent's record. Written before the Entry learns it,
+                # so that the narrow window below leaves the record naming the
+                # Run a restarted Supervisor would start in its place rather
+                # than none.
+                # A Parent whose Run directory has gone is given no stub of one.
+                if entry.parent is not None and runs.load(entry.parent) is not None:
+                    Children(runs.root_for(entry.parent)).record_start(
+                        entry.id, run_id=run.id
+                    )
                 # Recorded before the Run is ticked rather than after it,
                 # because this is what a Supervisor restarted mid-Run reads to
                 # find the same Entry again — and recorded afterwards it would
@@ -122,15 +180,41 @@ def supervise_queue(
         sleep(TICK_SECONDS)
 
 
-def _finished(entries: Sequence[Entry], runs: RunStore) -> set[str]:
-    """Which of the Entries' Runs have ended, asked of the Runs rather than of
-    a status the Queue keeps. Through the same reader the listing
-    uses, so that one place decides what makes an Entry done."""
+def _statuses(entries: Sequence[Entry], runs: RunStore, queue: Queue) -> dict[str, Status]:
+    """What became of each started Entry's Run, asked of the Runs rather than
+    of a status the Queue keeps. Through the same reader the listing uses, so
+    that one place decides what makes a Run done or joining."""
     return {
-        entry.run_id
+        entry.run_id: status_of(entry, runs, queue)
         for entry in entries
-        if entry.run_id is not None and status_of(entry, runs) == DONE
+        if entry.run_id is not None
     }
+
+
+def _low_disk(entries: Sequence[Entry], machine: MachineReading | None) -> set[Path]:
+    """The working trees waiting to start whose volume is short of free disk.
+    Only those not started are asked, because a live Run is never held back."""
+    if machine is None:
+        return set()
+    return {
+        entry.target_repo
+        for entry in entries
+        if entry.run_id is None and low_on_disk(machine.free_disk(entry.target_repo))
+    }
+
+
+def _held_back(reason: Reason, *, ceiling: int | None) -> str:
+    """The operator's line for why nothing is starting."""
+    if reason == CEILING:
+        return f"not starting anything: the ceiling of {ceiling} live runs is reached"
+    if reason == MEMORY:
+        return "not starting anything: the machine reports memory under pressure"
+    if reason == DISK:
+        return (
+            "not starting anything: free disk where the waiting runs would work is "
+            f"below the larger of {DISK_SHARE:.0%} and {DISK_FLOOR // GB} GB"
+        )
+    assert_never(reason)
 
 
 def _declared(entries: Sequence[Entry], runs: RunStore) -> dict[str, str]:

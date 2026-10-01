@@ -27,6 +27,7 @@ from typing import Any
 from naiad.adapters.answerer import HeadlessAnswerer
 from naiad.adapters.executable import naiad_command
 from naiad.adapters.lock import SupervisorLock
+from naiad.adapters.machine import Machine
 from naiad.adapters.notify import configured_notifier
 from naiad.adapters.tmux import TmuxError, TmuxSessions
 from naiad.cli.adopt import NotInTmux, attachment_in, teaching_for
@@ -53,14 +54,21 @@ from naiad.cli.library import (
 from naiad.cli.kickoff import start_entry
 from naiad.cli.protocol import injection_for, standing_in
 from naiad.cli.refusals import ADD_COMMAND, ADOPT_COMMAND, RUN_COMMAND, Remedy
+from naiad.cli.spawn import SpawnError, spawn_child
 from naiad.cli.supervisor import supervise_queue
 from naiad.cli.terminal import terminal_width
 from naiad.cli.wait import WaitError, declare_wait
 from naiad.cli.watch import tick_once, watch
+from naiad.domain.capacity import (
+    CAPACITY_VARIABLE,
+    CapacityError,
+    capacity_given,
+    resolve_ceiling,
+)
 from naiad.domain.entry import Attachment, Entry
 from naiad.domain.key_table import file_key_help, file_row, file_value
 from naiad.domain.listing import render_states, render_workflow
-from naiad.domain.protocol import ANNOUNCE_SUBCOMMAND
+from naiad.domain.protocol import ANNOUNCE_SUBCOMMAND, SPAWN_SUBCOMMAND
 from naiad.domain.settings import Setting, StateSetting
 from naiad.domain.workflow import Workflow, WorkflowError, load_workflow
 from naiad.hooks.install import install_hooks
@@ -74,7 +82,7 @@ from naiad.runtime.home import (
     default_queue_root,
     default_runs_root,
 )
-from naiad.runtime.queue import Queue, cancel, prune, status_of
+from naiad.runtime.queue import Queue, cancel, entered_in, prune, status_of
 from naiad.runtime.records import Clears, EntryTurns, Turns
 from naiad.runtime.resolve import NoRunError, RunResolver, turn_recipient
 from naiad.runtime.run import Run, RunStore
@@ -96,6 +104,7 @@ FAILURES = (
     LibraryError,
     NoRunError,
     NotInTmux,
+    SpawnError,
     StorageError,
     TmuxError,
     # Everything describing a piece of work can be refused for, taken from the
@@ -156,6 +165,7 @@ def build_parser() -> argparse.ArgumentParser:
         help="queue a Workflow against a task, and supervise if nothing else is",
     )
     _describe_the_work(run)
+    _capacity_option(run)
     run.set_defaults(handler=_run)
 
     queue = subcommands.add_parser("queue", help="the backlog of Entries waiting to run")
@@ -182,6 +192,7 @@ def build_parser() -> argparse.ArgumentParser:
     queue_watch = _driving_parser(
         queue_commands, "watch", help="take the Queue in order, and keep following it for more"
     )
+    _capacity_option(queue_watch)
     queue_watch.set_defaults(handler=_queue_watch)
 
     # The argument is required and nothing defaults to the latest Run: with
@@ -364,6 +375,26 @@ def build_parser() -> argparse.ArgumentParser:
     branch_parser.add_argument("name", help="the branch's name, exactly as you created it")
     branch_parser.set_defaults(handler=_branch)
 
+    spawn_parser = subcommands.add_parser(
+        SPAWN_SUBCOMMAND,
+        help="queue a Child of this run, in a working tree of its own, when the workflow asks",
+    )
+    spawn_parser.add_argument(
+        "task",
+        nargs="?",
+        default=None,
+        help="what the Child's work is (default: this run's task)",
+    )
+    # The same qualifying flags every entrance takes, each beating what the
+    # Child would otherwise take from its Parent. --repo is among them and is
+    # refused with a message when absent, as the other entrances refuse what
+    # they lack.
+    _describe_where_and_how(
+        spawn_parser,
+        repo_help="the Child's own working tree, never this run's (required)",
+    )
+    spawn_parser.set_defaults(handler=_spawn)
+
     stopped = subcommands.add_parser("stopped", help="record that a turn ended (Stop hook)")
     stopped.set_defaults(handler=_stopped)
 
@@ -464,9 +495,22 @@ def _describe_the_work(parser: argparse.ArgumentParser, *, required: bool = True
         default=None,
     )
     _describe_where_and_how(parser)
+    # Here rather than with the options every entrance shares: Spawn's Child
+    # can have no Children, and an Adoption names none.
+    parser.add_argument(
+        "--child-limit",
+        type=_child_limit,
+        default=None,
+        metavar="N",
+        help="how many of this work's Children may run at once (default: no limit)",
+    )
 
 
-def _describe_where_and_how(parser: argparse.ArgumentParser) -> None:
+def _describe_where_and_how(
+    parser: argparse.ArgumentParser,
+    *,
+    repo_help: str = "the target repository (default: the working directory)",
+) -> None:
     """Everything qualifying a piece of work rather than naming it: which
     repository, which branch, what it stands on, where it starts, on what, and
     whether Gates are resolved past.
@@ -480,7 +524,7 @@ def _describe_where_and_how(parser: argparse.ArgumentParser) -> None:
         "--repo",
         type=Path,
         default=None,
-        help="the target repository (default: the working directory)",
+        help=repo_help,
     )
     # Optional: given, it is carried verbatim and never second-guessed; absent,
     # the agent at the head of the Run derives a name from the target
@@ -549,6 +593,59 @@ def _named_setting(argument: str) -> tuple[str, str]:
     return state, value
 
 
+def _capacity_option(parser: argparse.ArgumentParser) -> None:
+    """The ceiling on live Runs, on the commands that may become the
+    Supervisor."""
+    parser.add_argument(
+        "--capacity",
+        type=_capacity,
+        default=None,
+        metavar="N",
+        help=(
+            f"start no Run while N are live; beats {CAPACITY_VARIABLE}, and both "
+            "beat the ceiling sized from this machine's memory"
+        ),
+    )
+
+
+def _capacity(argument: str) -> int:
+    """A ceiling, refused by argparse when it is not one: a typo must not
+    stop everything or mean no ceiling."""
+    number = capacity_given(argument)
+    if number is None:
+        raise argparse.ArgumentTypeError(
+            f"'{argument}' is not a positive whole number; write --capacity N, such as 4"
+        )
+    return number
+
+
+def _ceiling(arguments: argparse.Namespace) -> int | None:
+    """The ceiling the Supervisor will hold to, or None having said why the
+    one given is refused. Resolved at the entrance, before anything is queued,
+    so that fixing a typo and running again does not queue the work twice."""
+    try:
+        return resolve_ceiling(
+            option=arguments.capacity,
+            variable=os.environ.get(CAPACITY_VARIABLE),
+            total_memory=Machine().total_memory,
+        )
+    except CapacityError as error:
+        print(f"naiad: {error}", file=sys.stderr)
+        return None
+
+
+def _child_limit(argument: str) -> int:
+    """A Child limit, refused by argparse when it is not one: a typo must not
+    silently mean no limit. Plain digits only, because `int` would also read
+    `2_0` as twenty."""
+    number = int(argument) if argument.isascii() and argument.isdigit() else 0
+    if number < 1:
+        raise argparse.ArgumentTypeError(
+            f"'{argument}' is not a positive whole number; write --child-limit N, such as 2"
+        )
+    return number
+
+
 def _settings_given(arguments: argparse.Namespace) -> tuple[StateSetting, ...]:
     """Every setting the command line named, whichever flag named it."""
     named: tuple[tuple[Setting, list[tuple[str, str]] | None], ...] = (
@@ -565,7 +662,13 @@ def _settings_given(arguments: argparse.Namespace) -> tuple[StateSetting, ...]:
 def _announce(arguments: argparse.Namespace) -> int:
     try:
         run = _current_run()
-        announcement = announce_state(arguments.name, run=run, subject=arguments.subject)
+        announcement = announce_state(
+            arguments.name,
+            run=run,
+            subject=arguments.subject,
+            runs=RunStore(default_runs_root()),
+            entered=entered_in(Queue(default_queue_root())),
+        )
         reply = announcement_reply(announcement, run=run)
     except FAILURES as error:
         print(f"naiad: {error}", file=sys.stderr)
@@ -643,6 +746,45 @@ def _branch(arguments: argparse.Namespace) -> int:
         return 2
 
     print(f"declared working branch '{arguments.name}'; this run's work belongs on it")
+    return 0
+
+
+def _spawn(arguments: argparse.Namespace) -> int:
+    """Queues a Child and returns, supervising nothing, for the reason
+    `naiad queue add` does not: this is typed inside a Session, and a tool call
+    that became a process blocking for hours is the failure the Queue exists to
+    avoid.
+
+    The Run is resolved first, so that Spawn typed outside any Run is told so
+    whatever else it lacks, as every other verb is."""
+    added = datetime.now(timezone.utc)
+    try:
+        run = _current_run()
+        if arguments.repo is None:
+            raise SpawnError(
+                "a child needs a working tree of its own; "
+                "name it with: naiad spawn --repo <path>"
+            )
+        entry = spawn_child(
+            run=run,
+            task=arguments.task,
+            target_repo=arguments.repo.expanduser().resolve(),
+            working_branch=arguments.branch,
+            pinned_base=arguments.base,
+            start_state=arguments.start_state,
+            subject=arguments.subject,
+            skip_gates=arguments.skip_gates,
+            settings=_settings_given(arguments),
+            queue=Queue(default_queue_root()),
+            runs=RunStore(default_runs_root()),
+            entry_id=_entry_id(added, run.workflow_path),
+            created_at=_timestamp(added),
+        )
+    except FAILURES as error:
+        print(f"naiad: {error}", file=sys.stderr)
+        return 2
+
+    _report(entry)
     return 0
 
 
@@ -898,6 +1040,7 @@ def _drive(run: Run) -> None:
         # command that exists rather than whatever the session's PATH holds.
         naiad=naiad_command(),
         entry_id=_entry_id_of(run),
+        queue=Queue(default_queue_root()),
     )
 
 
@@ -937,6 +1080,7 @@ def _ticker() -> Callable[[Run], None]:
             answerer=answerer,
             naiad=naiad,
             entry_id=_entry_id_of(run),
+            queue=Queue(default_queue_root()),
             report=lambda message: print(f"{run.id}  {message}"),
             lead=len(f"{run.id}  "),
         )
@@ -983,6 +1127,10 @@ def _run(arguments: argparse.Namespace) -> int:
     if _refused_at_the_door():
         return 2
 
+    ceiling = _ceiling(arguments)
+    if ceiling is None:
+        return 2
+
     queued = _queued(arguments, remedy=RUN_COMMAND)
     if queued is None:
         return 2
@@ -994,7 +1142,7 @@ def _run(arguments: argparse.Namespace) -> int:
             # its turn.
             print("a supervisor is already running; it will take this in turn")
             return 0
-        return _supervise(following=False)
+        return _supervise(following=False, ceiling=ceiling)
 
 
 def _queue_add(arguments: argparse.Namespace) -> int:
@@ -1266,6 +1414,7 @@ def _describes_one_entry(arguments: argparse.Namespace) -> bool:
             arguments.start_state,
             arguments.subject,
             arguments.skip_gates,
+            arguments.child_limit,
         )
     )
 
@@ -1339,6 +1488,8 @@ def _queued(
                 skip_gates=arguments.skip_gates,
                 attachment=attachment,
                 settings=_settings_given(arguments),
+                # An Adoption's command offers no Child limit.
+                child_limit=getattr(arguments, "child_limit", None),
             ),
             queue=Queue(default_queue_root()),
             runs=RunStore(default_runs_root()),
@@ -1365,7 +1516,8 @@ def _queue_list(arguments: argparse.Namespace) -> int:
     """The Entries in id order, which is Queue order, each with what became of
     it — asked of its Run rather than read from a status the Queue keeps."""
     try:
-        entries = Queue(default_queue_root()).all()
+        queue = Queue(default_queue_root())
+        entries = queue.all()
     except FAILURES as error:
         # An Entry file the operator has damaged. They can see these files, so
         # they can break one, and a traceback is not something they can act on.
@@ -1377,15 +1529,38 @@ def _queue_list(arguments: argparse.Namespace) -> int:
         return 0
 
     runs = RunStore(default_runs_root())
-    standing = [_standing_shown(entry, runs) for entry in entries]
+    standing = {entry.id: _standing_shown(entry, runs) for entry in entries}
     # Padded to the longest here rather than to a fixed width, because a State
     # is named by the Workflow and Naiad knows no name in advance.
-    width = max(len(name) for name in standing)
-    for entry, state in zip(entries, standing):
-        print(_queue_line(entry, runs, state=f"{state:<{width}}"))
+    width = max(len(name) for name in standing.values())
+    for entry, depth in _families(entries):
+        indent = "  " * depth
+        print(
+            indent
+            + _queue_line(entry, runs, queue, state=f"{standing[entry.id]:<{width}}")
+        )
         for line in _settings_shown(entry):
-            print(f"    {line}")
+            print(f"{indent}    {line}")
     return 0
+
+
+def _families(entries: Sequence[Entry]) -> list[tuple[Entry, int]]:
+    """Each Entry with how deep to indent it: every Child straight beneath the
+    Entry whose Run spawned it, so that a fan-out reads as one piece of work.
+    A Child whose Parent's Entry has left the Queue stands on its own."""
+    parents = {entry.run_id for entry in entries if entry.run_id is not None}
+    children: dict[str, list[Entry]] = {}
+    for entry in entries:
+        if entry.parent in parents:
+            children.setdefault(entry.parent, []).append(entry)
+    families: list[tuple[Entry, int]] = []
+    for entry in entries:
+        if entry.parent in parents:
+            continue
+        families.append((entry, 0))
+        if entry.run_id is not None:
+            families.extend((child, 1) for child in children.get(entry.run_id, []))
+    return families
 
 
 def _settings_shown(entry: Entry) -> list[str]:
@@ -1407,7 +1582,7 @@ def _standing_shown(entry: Entry, runs: RunStore) -> str:
     return (standing_in(run) if run is not None else None) or "-"
 
 
-def _queue_line(entry: Entry, runs: RunStore, *, state: str) -> str:
+def _queue_line(entry: Entry, runs: RunStore, queue: Queue, *, state: str) -> str:
     """One Entry as one line: which, what became of it, the State it stands in,
     where, on what branch, and what the work is.
 
@@ -1415,7 +1590,7 @@ def _queue_line(entry: Entry, runs: RunStore, *, state: str) -> str:
     Queue spans every repository and two checkouts of the same project — a
     worktree, a second clone — share that name and would otherwise read as one.
     """
-    became = status_of(entry, runs)
+    became = status_of(entry, runs, queue)
     line = (
         f"{entry.id}  {became:<7}  {state}  {_shortened(entry.target_repo)}  "
         f"{_branch_shown(entry)}  {entry.task}"
@@ -1451,6 +1626,10 @@ def _queue_watch(arguments: argparse.Namespace) -> int:
     if _refused_at_the_door():
         return 2
 
+    ceiling = _ceiling(arguments)
+    if ceiling is None:
+        return 2
+
     with SupervisorLock(default_lock_path()).taken() as mine:
         if not mine:
             print(
@@ -1459,10 +1638,10 @@ def _queue_watch(arguments: argparse.Namespace) -> int:
                 file=sys.stderr,
             )
             return 2
-        return _supervise(following=True)
+        return _supervise(following=True, ceiling=ceiling)
 
 
-def _supervise(*, following: bool) -> int:
+def _supervise(*, following: bool, ceiling: int) -> int:
     """Drive the Queue, with the lock already in hand.
 
     One loop for both entrances, differing only in what it does with nothing to
@@ -1481,6 +1660,8 @@ def _supervise(*, following: bool) -> int:
             start=_start_entry,
             tick=_ticker(),
             following=following,
+            ceiling=ceiling,
+            machine=Machine(),
         )
     except FAILURES as error:
         print(f"naiad: {error}", file=sys.stderr)
@@ -1583,6 +1764,8 @@ def _queue_rm(arguments: argparse.Namespace) -> int:
     # the operator a session in either case would be a claim, not a report.
     if cancelled.run is not None:
         print(_cancellation_line(cancelled.run))
+    for worktree in cancelled.worktrees:
+        print(f"child working tree left for you to remove: {worktree}")
     return 0
 
 

@@ -37,8 +37,18 @@ from naiad.runtime.answers import AnswerLog
 from naiad.runtime.log import RunLog
 from naiad.runtime.loop import UndrivableRun, tick
 from naiad.domain.entry import Entry
-from naiad.runtime.queue import RUNNING, status_of
-from naiad.runtime.records import Clears, Deliveries, Handled, Holds, Turns, Waits
+from naiad.runtime.queue import RUNNING, Queue, cancel, prune, status_of
+from naiad.runtime.records import (
+    Children,
+    Clears,
+    Deliveries,
+    Handled,
+    Holds,
+    Notices,
+    Turns,
+    Waits,
+    notice_key,
+)
 from naiad.runtime.submitted import judge
 from naiad.runtime.run import RunStore
 
@@ -85,6 +95,9 @@ class RecordingSession:
     def clear(self, pane):
         self.sent.append(("clear", pane, None))
 
+    def close(self, pane):
+        self.sent.append(("close", pane, None))
+
 
 class RecordingNotifier:
     def __init__(self):
@@ -125,7 +138,9 @@ def whole(prompt):
     return prompt
 
 
-def drive(run, workflow, session, *, notifier=None, answerer=None, now=None, submit=whole):
+def drive(
+    run, workflow, session, *, notifier=None, answerer=None, now=None, submit=whole, queue=None
+):
     """Every tick is given its moment, so no test reads the wall clock. The
     default is the instant of the Run's newest record: nothing has been idle.
 
@@ -140,11 +155,17 @@ def drive(run, workflow, session, *, notifier=None, answerer=None, now=None, sub
         notifier=notifier or RecordingNotifier(),
         answerer=answerer or RecordingAnswerer(),
         now=now if now is not None else _later(run, 0),
+        queue=queue,
     )
     if isinstance(action, Deliver) and submit is not None:
         typed = Deliveries(run.root).latest()
-        judge(run.root, submit(session.sent[-1][2]), now=typed.at)
+        judge(run.root, submit(typed_last(session)), now=typed.at)
     return action
+
+
+def typed_last(session):
+    """The latest text typed into the Session, whatever was done to it since."""
+    return [text for kind, _, text in session.sent if kind == "send"][-1]
 
 
 def deliver(run, workflow, session, **kwargs):
@@ -1812,3 +1833,332 @@ def test_a_run_that_started_at_a_reporting_state_is_not_reported(tmp_path, sessi
 
     assert not isinstance(action, Report)
     assert notifier.notified == []
+
+
+# A Join State and the State its Children run, as a fan-out Workflow lays them
+# out. The Join State does not Clear, so a release goes straight to its Prompt.
+JOINING = """
+name = "fan-out"
+
+[[states]]
+name = "implement"
+prompt = "take in:\\n{children}\\nthen announce {next_state}"
+join = true
+next = ["implement", "done"]
+
+[[states]]
+name = "done"
+terminal = true
+
+[[states]]
+name = "build"
+prompt = "build {subject}"
+"""
+
+
+@pytest.fixture
+def joining():
+    return parse_workflow(JOINING)
+
+
+def spawned(parent, name, *, start=True):
+    """A Child of the parent Run, on the parent's Children record as Spawn and
+    the Supervisor leave it. Started unless told otherwise, as a Run in the
+    same store whose working tree is its own."""
+    worktree = parent.target_repo.parent / f"repo-wt--{name}"
+    worktree.mkdir()
+    entry_id = f"entry-{name}"
+    children = Children(parent.root)
+    children.record_spawn(entry_id, subject=f"{name}.md", branch=f"feat--{name}", worktree=worktree)
+    if not start:
+        return None
+    child = RunStore(parent.root.parent).create(
+        run_id=f"run-{name}",
+        workflow_path=parent.workflow_path,
+        task=parent.task,
+        target_repo=worktree,
+        created_at="2026-07-19T12:00:00Z",
+        start_state="build",
+        start_subject=f"{name}.md",
+    )
+    children.record_start(entry_id, run_id=child.id)
+    return child
+
+
+def completes(child):
+    RunLog(child.root).record(Finish(state="done"), seq=1)
+
+
+def is_cancelled(child):
+    RunLog(child.root).record_cancellation(state="build")
+
+
+def named(session):
+    """The Children the latest typed Prompt named, by Subject."""
+    text = typed_last(session)
+    return [line.split(":")[0][2:] for line in text.splitlines() if line.startswith("- ")]
+
+
+def test_a_join_state_is_held_while_its_children_work(run, joining, session):
+    spawned(run, "03")
+    announce(run, "implement")
+
+    for moment in (0, SILENCE_SECONDS + 1, HANG_SECONDS + 1):
+        notifier = RecordingNotifier()
+        action = drive(run, joining, session, notifier=notifier, now=_later(run, moment))
+
+        assert action == NOTHING
+        assert notifier.notified == []
+    assert session.sent == []
+
+
+def test_children_are_rendered_from_the_childrens_record(run, joining, session):
+    child = spawned(run, "03")
+    completes(child)
+    announce(run, "implement")
+
+    action = drive(run, joining, session)
+
+    assert isinstance(action, Deliver)
+    assert session.sent[-1][2] == (
+        "take in:\n"
+        f"- 03.md: completed, branch feat--03, working tree {child.target_repo}\n"
+        "then announce implement or done"
+    )
+
+
+def test_a_declared_branch_is_named_when_none_was_given(run, joining, session):
+    child = spawned(run, "03")
+    Children(run.root).record_spawn("entry-03", subject="03.md", branch=None, worktree=child.target_repo)
+    Children(run.root).record_start("entry-03", run_id=child.id)
+    child.working_branch = "declared-03"
+    child.save()
+    completes(child)
+    announce(run, "implement")
+
+    drive(run, joining, session)
+
+    assert "branch declared-03," in session.sent[-1][2]
+
+
+def test_a_parked_child_does_not_release_the_join(run, joining, session):
+    child = spawned(run, "03")
+    parked_at = Announcements(child.root).announce("build")
+    Notices(child.root).record_notified(parked_at, **notice_key(child.root, parked_at))
+    announce(run, "implement")
+
+    assert drive(run, joining, session) == NOTHING
+    assert session.sent == []
+
+
+def test_a_cancelled_child_releases_the_join_as_cancelled(run, joining, session):
+    is_cancelled(spawned(run, "03"))
+    spawned(run, "04")
+    announce(run, "implement")
+
+    drive(run, joining, session)
+
+    assert "- 03.md: cancelled," in session.sent[-1][2]
+
+
+def test_a_child_whose_entry_is_gone_before_it_started_is_cancelled(
+    run, joining, session, tmp_path
+):
+    spawned(run, "03", start=False)
+    announce(run, "implement")
+
+    drive(run, joining, session, queue=Queue(tmp_path / "queue"))
+
+    assert "- 03.md: cancelled," in session.sent[-1][2]
+
+
+def test_a_child_waiting_in_the_queue_holds_the_join(run, joining, session, tmp_path):
+    spawned(run, "03", start=False)
+    queue = Queue(tmp_path / "queue")
+    queue.add(
+        Entry(
+            id="entry-03",
+            workflow_path=run.workflow_path,
+            task="t",
+            target_repo=run.target_repo.parent / "repo-wt--03",
+            created_at="2026-07-19T12:00:00Z",
+            working_branch="feat--03",
+            parent=run.id,
+        )
+    )
+    announce(run, "implement")
+
+    assert drive(run, joining, session, queue=queue) == NOTHING
+
+
+def test_no_unfinished_child_delivers_at_once_with_an_empty_slot(run, joining, session):
+    announce(run, "implement")
+
+    drive(run, joining, session)
+
+    assert session.sent[-1][2] == "take in:\n\nthen announce implement or done"
+
+
+def test_two_join_deliveries_never_name_the_same_child(run, joining, session):
+    first = spawned(run, "03")
+    second = spawned(run, "04")
+    completes(first)
+    announce(run, "implement")
+    deliver(run, joining, session)
+    assert named(session) == ["03.md"]
+
+    completes(second)
+    announce(run, "implement")
+    deliver(run, joining, session)
+
+    assert named(session) == ["04.md"]
+
+
+def test_a_redelivery_names_the_set_the_first_typing_named(run, joining, session):
+    first = spawned(run, "03")
+    second = spawned(run, "04")
+    completes(first)
+    announce(run, "implement")
+    drive(run, joining, session, submit=lambda text: text[10:])
+
+    completes(second)
+    retyped = drive(run, joining, session)
+
+    assert isinstance(retyped, Deliver) and retyped.attempt == 2
+    assert named(session) == ["03.md"]
+
+
+def test_a_restart_between_recording_and_sending_neither_drops_nor_repeats_a_child(
+    run, joining, session, monkeypatch
+):
+    first = spawned(run, "03")
+    second = spawned(run, "04")
+    completes(first)
+    announce(run, "implement")
+
+    def interrupted(self, *args, **kwargs):
+        raise KeyboardInterrupt
+
+    with monkeypatch.context() as patched:
+        patched.setattr(Deliveries, "record_attempt", interrupted)
+        with pytest.raises(KeyboardInterrupt):
+            drive(run, joining, session)
+    assert session.sent == []
+
+    completes(second)
+    deliver(run, joining, session)
+    assert named(session) == ["03.md"]
+
+    announce(run, "implement")
+    deliver(run, joining, session)
+    assert named(session) == ["04.md"]
+
+
+def test_a_workflow_without_join_ignores_the_children(run, workflow, session):
+    spawned(run, "03")
+    announce(run, "grill")
+
+    drive(run, workflow, session)
+
+    assert session.sent == [
+        ("send", "%42", "/grill-with-docs add dark mode, then announce review")
+    ]
+
+
+def queued_child(run, queue, name, child):
+    """The Entry a started Child became, in the Queue beside its Run."""
+    queue.add(
+        Entry(
+            id=f"entry-{name}",
+            workflow_path=run.workflow_path,
+            task="t",
+            target_repo=child.target_repo,
+            created_at="2026-07-19T12:00:00Z",
+            working_branch=f"feat--{name}",
+            parent=run.id,
+            run_id=child.id,
+        )
+    )
+
+
+def test_a_cancelled_lone_child_reaches_its_parents_next_join_as_cancelled(
+    run, joining, session, tmp_path
+):
+    """Cancelled by name and pruned in between, it is still named: a Prune
+    leaves the Run of a Child its live Parent has not been told of."""
+    queue = Queue(tmp_path / "queue")
+    runs = RunStore(run.root.parent)
+    queued_child(run, queue, "03", spawned(run, "03"))
+    queued_child(run, queue, "04", spawned(run, "04"))
+    announce(run, "implement")
+    assert drive(run, joining, session, queue=queue) == NOTHING
+
+    cancel(queue, runs, "entry-03")
+    prune(queue, runs)
+    drive(run, joining, session, queue=queue)
+
+    assert named(session) == ["03.md"]
+    assert "- 03.md: cancelled," in typed_last(session)
+
+
+def with_session(child, pane):
+    """The Child with the Session the Supervisor opened for it at Start."""
+    child.attach_session(tmux_session=f"naiad-{child.id}", tmux_pane=pane)
+    return child
+
+
+def closings(session):
+    """The panes whose Sessions were closed, in order."""
+    return [pane for kind, pane, _ in session.sent if kind == "close"]
+
+
+def test_a_completed_childs_session_closes_after_the_delivery_that_names_it(
+    run, joining, session
+):
+    child = with_session(spawned(run, "03"), "%3")
+    announce(run, "implement")
+    assert drive(run, joining, session) == NOTHING
+
+    completes(child)
+    assert closings(session) == []
+    drive(run, joining, session)
+
+    assert [kind for kind, _, _ in session.sent] == ["send", "close"]
+    assert closings(session) == ["%3"]
+    assert RunLog(child.root).closed()
+
+
+def test_a_cancelled_childs_session_is_never_closed(run, joining, session):
+    child = with_session(spawned(run, "03"), "%3")
+    is_cancelled(child)
+    announce(run, "implement")
+
+    deliver(run, joining, session)
+
+    assert "- 03.md: cancelled," in typed_last(session)
+    assert closings(session) == []
+    assert not RunLog(child.root).closed()
+
+
+def test_a_childs_session_is_closed_once_however_often_it_is_named(run, joining, session):
+    child = with_session(spawned(run, "03"), "%3")
+    completes(child)
+    announce(run, "implement")
+    drive(run, joining, session, submit=lambda text: text[10:])
+
+    retyped = drive(run, joining, session)
+    drive(run, joining, session)
+
+    assert isinstance(retyped, Deliver) and retyped.attempt == 2
+    assert closings(session) == ["%3"]
+
+
+def test_only_the_children_named_are_closed_and_never_the_parent(run, joining, session):
+    first = with_session(spawned(run, "03"), "%3")
+    with_session(spawned(run, "04"), "%4")
+    completes(first)
+    announce(run, "implement")
+
+    deliver(run, joining, session)
+
+    assert closings(session) == ["%3"]

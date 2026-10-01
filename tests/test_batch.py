@@ -320,3 +320,45 @@ def test_a_default_naiad_does_not_read_is_refused_naming_the_file():
 
     assert "batch.toml" in str(caught.value)
     assert "brnach" in str(caught.value)
+
+
+def test_a_child_limit_is_read_as_a_default_and_overridden_per_entry():
+    first, second = parse(
+        """
+        workflow = "w.toml"
+        child-limit = 2
+
+        [[entries]]
+        task = "one"
+
+        [[entries]]
+        task = "two"
+        child-limit = 1
+        """
+    )
+
+    assert first.child_limit == 2
+    assert second.child_limit == 1
+
+
+def test_an_entry_naming_no_child_limit_has_none():
+    first, _second = parse(BATCH)
+
+    assert first.child_limit is None
+
+
+@pytest.mark.parametrize("limit", ["0", "-3", '"two"', "1.5", "true"])
+def test_a_child_limit_that_is_not_a_positive_whole_number_is_refused(limit):
+    with pytest.raises(BatchError) as caught:
+        parse(
+            f"""
+            workflow = "w.toml"
+
+            [[entries]]
+            task = "one"
+            child-limit = {limit}
+            """
+        )
+
+    assert "entry 1" in str(caught.value)
+    assert "child-limit" in str(caught.value)

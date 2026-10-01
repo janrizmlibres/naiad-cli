@@ -31,6 +31,7 @@ from naiad.domain.protocol import DEFAULT_NAIAD
 from naiad.domain.workflow import Workflow
 from naiad.runtime.log import RunLog
 from naiad.runtime.loop import Answerer, Notifier, Session, tick
+from naiad.runtime.queue import Queue
 from naiad.runtime.run import Run
 
 # Fast enough that a finished turn is picked up promptly, slow enough that a
@@ -47,6 +48,7 @@ def watch(
     answerer: Answerer,
     naiad: str = DEFAULT_NAIAD,
     entry_id: str | None = None,
+    queue: Queue | None = None,
     sleep: Callable[[float], None] = time.sleep,
     report: Callable[[str], None] = print,
 ) -> Finish | None:
@@ -76,6 +78,7 @@ def watch(
             naiad=naiad,
             entry_id=entry_id,
             report=report,
+            queue=queue,
         )
         if isinstance(action, Finish):
             # The Run is over. Anything left ticking here would be ticking
@@ -94,6 +97,7 @@ def tick_once(
     answerer: Answerer,
     naiad: str = DEFAULT_NAIAD,
     entry_id: str | None = None,
+    queue: Queue | None = None,
     report: Callable[[str], None] = print,
     lead: int = 0,
 ) -> Action:
@@ -112,6 +116,7 @@ def tick_once(
         answerer=answerer,
         naiad=naiad,
         entry_id=entry_id,
+        queue=queue,
     )
     narration = _narrate(action, width=max(terminal_width() - lead, 1))
     if narration is not None:

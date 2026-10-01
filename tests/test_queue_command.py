@@ -7,20 +7,25 @@ tests hold it to returning without supervising anything.
 
 import json
 import re
+import time
 
 import pytest
 
 from naiad.adapters.lock import SupervisorLock
+from naiad.cli.hold import declare_hold
 from naiad.cli.main import _drive, _ticker, main
-from naiad.domain.decide import Finish
+from naiad.cli.wait import declare_wait
+from naiad.domain.decide import NUDGE_LIMIT, SILENCE_SECONDS, Finish, Notify
 from naiad.domain.entry import Entry
 from naiad.domain.question import Question
 from naiad.domain.settings import StateSetting
+from naiad.domain.workflow import parse_workflow
 from naiad.runtime.announcements import Announcements
 from naiad.runtime.answers import AnswerLog
 from naiad.runtime.log import RunLog
+from naiad.runtime.loop import tick
 from naiad.runtime.queue import Queue
-from naiad.runtime.records import Notices
+from naiad.runtime.records import Children, Handled, Notices, Turns
 from naiad.runtime.resolve import RunResolver
 from naiad.runtime.run import RunStore
 
@@ -282,13 +287,24 @@ def run_entry(home, repo, name, *, start_state="grill"):
     return run
 
 
-def standing_shown(capsys, entry_id):
-    """The State column of one Entry's line: the third cell, after the id and
-    the status, cells being told apart by two spaces or more."""
+def _cells(capsys, entry_id):
+    """One Entry's line in a listing, split into cells told apart by two
+    spaces or more."""
     capsys.readouterr()
     main(["queue", "list"])
     (line,) = [l for l in capsys.readouterr().out.splitlines() if l.startswith(entry_id)]
-    return re.split(r"\s{2,}", line)[2]
+    return re.split(r"\s{2,}", line)
+
+
+def status_shown(capsys, entry_id):
+    """The status column of one Entry's line: the second cell."""
+    return _cells(capsys, entry_id)[1]
+
+
+def standing_shown(capsys, entry_id):
+    """The State column of one Entry's line: the third cell, after the id and
+    the status."""
+    return _cells(capsys, entry_id)[2]
 
 
 def test_listing_shows_the_settings_an_entry_names_beneath_its_line(home, repo, capsys):
@@ -327,6 +343,153 @@ def test_listing_shows_the_gate_a_parked_run_stands_at(home, repo, capsys):
     Notices(run.root).record_notified(Announcements(run.root).announce("review"))
 
     assert standing_shown(capsys, "parked") == "review"
+
+
+class _Quiet:
+    """Session, Notifier and Answerer at once for a tick that only parks: the
+    loop's records are what these tests read, not what it sent anywhere."""
+
+    def send(self, pane, text): ...
+
+    def clear(self, pane): ...
+
+    def notify(self, title, message, kind): ...
+
+    def consult(self, spec): ...
+
+
+def tick_at(run, seconds_idle):
+    """One tick of the real loop, idle for this long since the Run's newest
+    record, so the park it writes is the loop's own."""
+    newest = max(path.stat().st_mtime for path in run.root.iterdir() if path.is_file())
+    quiet = _Quiet()
+    return tick(
+        run=RunStore(run.root.parent).load(run.id),
+        workflow=parse_workflow(WORKFLOW),
+        session=quiet,
+        notifier=quiet,
+        answerer=quiet,
+        now=newest + seconds_idle,
+    )
+
+
+def announced_and_handled(run):
+    """A Run whose agent was given its Prompt and has since ended a turn."""
+    run.attach_session(tmux_session=f"naiad-{run.id}", tmux_pane="%42")
+    announcement = Announcements(run.root).announce("implement")
+    Handled(run.root).record(announcement.seq)
+    Turns(run.root).record_end(latest_seq=announcement.seq)
+
+
+def held(run):
+    """A Run whose agent relayed the human's 'pause', parked by the loop."""
+    announced_and_handled(run)
+    declare_hold("user typed 'pause'", run=run)
+    assert isinstance(tick_at(run, 1), Notify)
+
+
+def parked_after_a_hold(run):
+    """A Hold, then the usual silence rule: Nudges run out and the loop parks
+    the Run. A Wait stands between them because only a Wait or a new
+    Announcement lifts a Hold, and the Hold count outlives the lifting."""
+    announced_and_handled(run)
+    declare_hold("user typed 'pause'", run=run)
+    tick_at(run, 1)
+    declare_wait("a background agent", run=run, now=time.time(), seconds=1)
+    for _ in range(NUDGE_LIMIT + 1):
+        action = tick_at(run, SILENCE_SECONDS * 2)
+    assert isinstance(action, Notify) and "silent" in action.reason
+
+
+JOINING = """
+name = "fan-out"
+
+[[states]]
+name = "implement"
+prompt = "take in {children}"
+join = true
+
+[[states]]
+name = "done"
+terminal = true
+
+[[states]]
+name = "build"
+prompt = "build {subject}"
+"""
+
+
+def joining_parent(home, repo, *, child_finished, announced=True):
+    """A Parent that has announced its Join State, with one started Child
+    listed beneath it. Answers with the Child's working tree."""
+    (repo / "workflow.toml").write_text(JOINING)
+    parent = run_entry(home, repo, "parent", start_state="implement")
+    worktree = repo.parent / "repo-wt--01"
+    worktree.mkdir()
+    child = RunStore(home / "runs").create(
+        run_id="child-run",
+        workflow_path=repo / "workflow.toml",
+        task="t",
+        target_repo=worktree,
+        created_at="2026-07-22T12:00:00Z",
+        start_state="build",
+    )
+    queue_of(home).add(
+        Entry(
+            id="child",
+            workflow_path=repo / "workflow.toml",
+            task="t",
+            target_repo=worktree,
+            working_branch="feat--01",
+            created_at="2026-07-22T12:00:01Z",
+            parent=parent.id,
+            run_id=child.id,
+        )
+    )
+    Children(parent.root).record_spawn("child", subject="01.md", worktree=worktree)
+    Children(parent.root).record_start("child", run_id=child.id)
+    if child_finished:
+        RunLog(child.root).record(Finish(state="done"), seq=1)
+    if announced:
+        Announcements(parent.root).announce("implement")
+    return worktree
+
+
+def test_a_parent_held_at_a_join_state_reads_joining(home, repo, capsys):
+    joining_parent(home, repo, child_finished=False)
+
+    assert status_shown(capsys, "parent") == "joining"
+
+
+def test_a_parent_adopted_at_a_held_join_state_reads_joining(home, repo, capsys):
+    """Before it announces anything, an adopted Run is owed the Prompt of the
+    State it was adopted at, and the tick holds that one too."""
+    joining_parent(home, repo, child_finished=False, announced=False)
+    parent = RunStore(home / "runs").load("parent-run")
+    parent.adopted = True
+    parent.save()
+
+    assert status_shown(capsys, "parent") == "joining"
+
+
+def test_a_parent_whose_join_is_released_reads_running(home, repo, capsys):
+    joining_parent(home, repo, child_finished=True)
+
+    assert status_shown(capsys, "parent") == "running"
+
+
+def test_a_held_run_reads_parked(home, repo, capsys):
+    """The Hold count keys the park the loop records, so a reading that asks
+    without it finds the record stale and calls a Held Run running."""
+    held(run_entry(home, repo, "held"))
+
+    assert status_shown(capsys, "held") == "parked"
+
+
+def test_a_run_parked_by_silence_after_a_hold_reads_parked(home, repo, capsys):
+    parked_after_a_hold(run_entry(home, repo, "silent"))
+
+    assert status_shown(capsys, "silent") == "parked"
 
 
 def test_listing_shows_the_final_state_of_a_done_run(home, repo, capsys):
@@ -504,6 +667,77 @@ def test_watching_the_queue_starts_a_run_carrying_everything_the_entry_held(
     assert run.start_state == "implement"
     assert run.skip_gates is True
     assert no_tmux.spawned
+
+
+# The ceiling is resolved once, as the Supervisor starts: the option, then the
+# environment variable, then what the machine's memory allows.
+
+
+class SixteenGibibytes:
+    def total_memory(self):
+        return 16 * (1 << 30)
+
+
+def test_the_capacity_option_beats_the_environment_variable(home, monkeypatch):
+    monkeypatch.setenv("NAIAD_CAPACITY", "20")
+    wiring = supervision(monkeypatch)
+
+    assert main(["queue", "watch", "--capacity", "3"]) == 0
+
+    assert wiring["ceiling"] == 3
+
+
+def test_the_environment_variable_beats_the_derived_ceiling(home, monkeypatch):
+    monkeypatch.setenv("NAIAD_CAPACITY", "20")
+    monkeypatch.setattr("naiad.cli.main.Machine", SixteenGibibytes)
+    wiring = supervision(monkeypatch)
+
+    assert main(["queue", "watch"]) == 0
+
+    assert wiring["ceiling"] == 20
+
+
+def test_with_neither_the_ceiling_is_derived_from_the_machines_memory(home, monkeypatch):
+    monkeypatch.setattr("naiad.cli.main.Machine", SixteenGibibytes)
+    wiring = supervision(monkeypatch)
+
+    assert main(["queue", "watch"]) == 0
+
+    assert wiring["ceiling"] == 5
+
+
+def test_the_supervisor_reads_this_machine_for_pressure_and_disk(home, monkeypatch):
+    monkeypatch.setattr("naiad.cli.main.Machine", SixteenGibibytes)
+    wiring = supervision(monkeypatch)
+
+    assert main(["queue", "watch"]) == 0
+
+    assert isinstance(wiring["machine"], SixteenGibibytes)
+
+
+@pytest.mark.parametrize("capacity", ["0", "-1", "two", "2.5"])
+def test_a_capacity_option_that_is_not_a_positive_whole_number_is_refused(
+    home, monkeypatch, capsys, capacity
+):
+    refused = supervision(monkeypatch)
+
+    with pytest.raises(SystemExit):
+        main(["queue", "watch", "--capacity", capacity])
+
+    assert refused == {}
+    assert "positive whole number" in capsys.readouterr().err
+
+
+def test_a_capacity_variable_that_is_not_a_positive_whole_number_is_refused(
+    home, monkeypatch, capsys
+):
+    monkeypatch.setenv("NAIAD_CAPACITY", "twenty")
+    refused = supervision(monkeypatch)
+
+    assert main(["queue", "watch"]) == 2
+
+    assert refused == {}
+    assert "NAIAD_CAPACITY" in capsys.readouterr().err
 
 
 def test_a_second_supervisor_is_refused(home, monkeypatch, capsys):
@@ -1017,6 +1251,25 @@ def test_a_running_orphan_is_left_and_named_without_failing(home, repo, capsys):
     assert str(run.root) in capsys.readouterr().out
 
 
+def test_pruning_takes_an_orphan_parked_after_a_hold(home, repo):
+    """Parked is finished history to a Prune, Held or not."""
+    run = orphan(home, repo)
+    parked_after_a_hold(run)
+
+    assert main(["queue", "prune"]) == 0
+
+    assert not run.root.exists()
+
+
+def test_pruning_takes_a_held_orphan(home, repo):
+    run = orphan(home, repo)
+    held(run)
+
+    assert main(["queue", "prune"]) == 0
+
+    assert not run.root.exists()
+
+
 def test_pruning_a_queue_holding_a_damaged_entry_reports_it_and_takes_nothing(
     home, repo, capsys
 ):
@@ -1287,3 +1540,148 @@ def test_a_watched_run_that_was_never_queued_names_no_entry(home, repo, monkeypa
     _drive(run)
 
     assert watched["entry_id"] is None
+
+
+def test_listing_shows_each_child_indented_beneath_its_parent(home, repo, tmp_path, capsys):
+    """A fan-out reads as one piece of work: each Child under the Entry whose
+    Run spawned it, with its own status, whatever Queue order says."""
+    worktree = tmp_path / "repo-wt-01"
+    worktree.mkdir()
+    parent = run_entry(home, repo, "a-parent")
+    add(repo, "--branch", "TASK-8547")
+    (unrelated,) = [entry for entry in queue_of(home).all() if entry.id != "a-parent"]
+    queue_of(home).add(
+        Entry(
+            id="0-child",
+            workflow_path=repo / "workflow.toml",
+            task="build ticket one",
+            target_repo=worktree,
+            working_branch="TASK-8546--01",
+            created_at="2026-07-22T12:00:00Z",
+            parent=parent.id,
+        )
+    )
+
+    capsys.readouterr()
+    assert main(["queue", "list"]) == 0
+
+    lines = capsys.readouterr().out.splitlines()
+    at = {line.split()[0]: index for index, line in enumerate(lines)}
+    assert at["0-child"] == at["a-parent"] + 1
+    child_line = lines[at["0-child"]]
+    assert child_line.startswith("  0-child") and "waiting" in child_line
+    assert not lines[at[unrelated.id]].startswith(" ")
+
+
+# A Child limit, given at the entrance that queues the Parent.
+
+
+def test_adding_an_entry_records_its_child_limit(home, repo):
+    assert add(repo, "--branch", "TASK-8546", "--child-limit", "2") == 0
+
+    (queued,) = queue_of(home).all()
+    assert queued.child_limit == 2
+
+
+def test_adding_an_entry_with_no_child_limit_records_none(home, repo):
+    add(repo, "--branch", "TASK-8546")
+
+    (queued,) = queue_of(home).all()
+    assert queued.child_limit is None
+
+
+@pytest.mark.parametrize("limit", ["0", "-1", "two", "1.5", "2_0", "+3", " 3"])
+def test_a_child_limit_that_is_not_a_positive_whole_number_is_refused(
+    home, repo, capsys, limit
+):
+    """A typo must not silently mean no limit."""
+    with pytest.raises(SystemExit) as refused:
+        add(repo, "--branch", "TASK-8546", f"--child-limit={limit}")
+
+    assert refused.value.code == 2
+    assert "--child-limit" in capsys.readouterr().err
+    assert queue_of(home).all() == []
+
+
+def test_a_batch_file_carries_a_child_limit_as_a_default_and_per_entry(home, repo):
+    path = batch_file(repo, "child-limit = 1\n" + BATCH.replace(
+        'skip-gates = true', 'skip-gates = true\nchild-limit = 3'
+    ))
+
+    assert main(["queue", "add", "--file", str(path)]) == 0
+
+    first, second = queue_of(home).all()
+    assert first.child_limit == 1
+    assert second.child_limit == 3
+
+
+def test_a_child_limit_beside_a_batch_file_is_refused(home, repo, capsys):
+    """The option describes one Entry, and the file has its own key for it."""
+    assert main(
+        ["queue", "add", "--file", str(batch_file(repo)), "--child-limit", "2"]
+    ) == 2
+
+    assert queue_of(home).all() == []
+
+
+def test_a_child_held_by_its_parents_limit_reads_waiting(home, repo, tmp_path, capsys):
+    parent = RunStore(home / "runs").create(
+        run_id="a-parent-run",
+        workflow_path=repo / "workflow.toml",
+        task="task of a-parent",
+        target_repo=repo,
+        created_at="2026-07-22T12:00:00Z",
+        start_state="grill",
+    )
+    queue_of(home).add(
+        Entry(
+            id="a-parent",
+            workflow_path=repo / "workflow.toml",
+            task="task of a-parent",
+            target_repo=repo,
+            working_branch=None,
+            created_at="2026-07-22T12:00:00Z",
+            child_limit=1,
+            run_id=parent.id,
+        )
+    )
+    for name, run_id in (("0-live", "live-run"), ("1-held", None)):
+        worktree = tmp_path / f"repo-wt-{name}"
+        worktree.mkdir()
+        if run_id is not None:
+            RunStore(home / "runs").create(
+                run_id=run_id,
+                workflow_path=repo / "workflow.toml",
+                task="build",
+                target_repo=worktree,
+                created_at="2026-07-22T12:00:00Z",
+                start_state="grill",
+            )
+        queue_of(home).add(
+            Entry(
+                id=name,
+                workflow_path=repo / "workflow.toml",
+                task="build",
+                target_repo=worktree,
+                working_branch=f"TASK-8546--{name}",
+                created_at="2026-07-22T12:00:00Z",
+                parent=parent.id,
+                run_id=run_id,
+            )
+        )
+
+    assert _cells(capsys, "  1-held")[1:3] == ["1-held", "waiting"]
+
+
+def test_cancelling_a_parent_prints_an_untold_childs_working_tree_as_left_to_remove(
+    home, repo, capsys
+):
+    """Which Children are reached is held in tests/test_queue_store.py; here,
+    that the command hands the operator their working trees."""
+    worktree = joining_parent(home, repo, child_finished=False)
+    capsys.readouterr()
+
+    assert main(["queue", "rm", "parent"]) == 0
+
+    printed = capsys.readouterr().out
+    assert f"left for you to remove: {worktree}" in printed

@@ -66,3 +66,9 @@ def ready_machine(monkeypatch, tmp_path_factory):
     install_healthy(directory)
     monkeypatch.setenv("PATH", f"{directory}:{os.environ['PATH']}")
     monkeypatch.setattr("naiad.cli.main.entrance_refusal", lambda: None)
+
+
+@pytest.fixture(autouse=True)
+def no_capacity_set(monkeypatch):
+    """A ceiling the operator's shell sets is not one any test asked for."""
+    monkeypatch.delenv("NAIAD_CAPACITY", raising=False)

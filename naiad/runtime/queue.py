@@ -26,21 +26,24 @@ from typing import Any, Literal
 from naiad.domain.entry import Attachment, Entry
 from naiad.runtime.announcements import Announcements
 from naiad.runtime.atomic import write_atomically
+from naiad.runtime.family import Entered, every_entry, joining, untold_children
 from naiad.runtime.home import StorageError, refuse_inside_repository
 from naiad.runtime.log import RunLog
-from naiad.runtime.records import EntryTurns, Notices, Waits
+from naiad.runtime.records import Child, Children, EntryTurns, Notices, notice_key
 from naiad.runtime.run import Run, RunStore, settings_document, settings_from
 
 ENTRY_SUFFIX = ".json"
 
 # What became of an Entry, derived from its Run and never stored.
-# The four states an Entry can be in and no fifth: a word the Queue invented
+# The five states an Entry can be in and no sixth: a word the Queue invented
 # would be a claim about a Run that the Run had not made — which is why the
-# type is closed rather than a bare string.
-Status = Literal["waiting", "running", "parked", "done"]
+# type is closed rather than a bare string. Joining is a live Run held at a
+# Join State while its Children work.
+Status = Literal["waiting", "running", "joining", "parked", "done"]
 
 WAITING: Status = "waiting"
 RUNNING: Status = "running"
+JOINING: Status = "joining"
 PARKED: Status = "parked"
 DONE: Status = "done"
 
@@ -174,24 +177,35 @@ class Queue:
             skip_gates=document.get("skip_gates", False),
             attachment=Queue._attachment_from(document.get("attachment")),
             settings=settings_from(document.get("settings", [])),
+            # Read with a default: an Entry written before Children existed
+            # was spawned by nobody.
+            parent=document.get("parent"),
+            # Read with a default: an Entry written before Child limits existed
+            # has no limit of its own.
+            child_limit=document.get("child_limit"),
             run_id=document.get("run_id"),
         )
 
 
-def status_of(entry: Entry, runs: RunStore) -> Status:
+def status_of(entry: Entry, runs: RunStore, queue: Queue | None = None) -> Status:
     """What became of an Entry, asked of its Run.
 
-    Read rather than stored, and in the order the four answers
+    Read rather than stored, and in the order the five answers
     exclude one another: no Run at all is waiting; a Run whose log records an
-    ending is done however loudly it asked for a human on the way; a Run
-    notified about the Announcement it is still standing in is parked, since a
+    ending is done however loudly it asked for a human on the way; a Run whose
+    latest Announcement names a Join State still holding its Prompt is
+    joining; a Run notified about the Announcement it is still standing in is parked, since a
     notice against an Announcement the agent has left was re-armed by the
     announcing; anything else is running.
 
     A Run whose directory somebody has deleted therefore reads as running, and
     that is the honest answer rather than a gap: the Entry started it and
-    nothing in what remains says it ended. Inventing a fifth word for it would
+    nothing in what remains says it ended. Inventing a word for it would
     have the Queue claiming something no Run ever recorded.
+
+    The queue is what a Parent's unstarted Children are looked up in, to tell
+    one waiting from one whose Entry was removed. Without it every unstarted
+    Child reads as waiting, which never shows a held Parent as released.
     """
     if entry.run_id is None:
         return WAITING
@@ -200,19 +214,40 @@ def status_of(entry: Entry, runs: RunStore) -> Status:
     # Run's files live is the Run store's to know. Its directory rather than its
     # metadata, because every fact below is a file in it and none of them needs
     # the Run object to answer.
-    return _run_status(runs.root_for(entry.run_id))
+    return _run_status(runs.root_for(entry.run_id), runs=runs, entered=entered_in(queue))
 
 
-def _run_status(root: Path) -> Status:
+def entered_in(queue: Queue | None) -> Entered:
+    """Whether an Entry is still in this Queue. Read once and only when first
+    asked, which is only for a Child that never started: most Runs have none.
+
+    Without a Queue every Entry is taken to be there, so an unstarted Child
+    reads as unfinished, the reading that never releases a Join early."""
+    if queue is None:
+        return every_entry
+    present: set[str] | None = None
+
+    def entered(entry_id: str) -> bool:
+        nonlocal present
+        if present is None:
+            present = {entry.id for entry in queue.all()}
+        return entry_id in present
+
+    return entered
+
+
+def _run_status(root: Path, *, runs: RunStore, entered: Entered) -> Status:
     """What a Run's directory records, never waiting: a directory exists, so the
     Run does too. One reading shared by an Entry's status and a Prune's judgment
     of an orphan, so the two cannot come apart."""
     if RunLog(root).ended():
         return DONE
-    # Read with the same Wait key the loop wrote it under, or a Run
-    # parked after its Waits ran out would show as running.
+    if joining(root, runs=runs, entered=entered):
+        return JOINING
+    # Read with the same key the loop wrote it under, or a Run parked after
+    # its Waits ran out, or Held, would show as running.
     latest = Announcements(root).latest()
-    notified, _nudges = Notices(root).of(latest, wait_count=Waits(root).count(latest))
+    notified, _nudges = Notices(root).of(latest, **notice_key(root, latest))
     return PARKED if notified else RUNNING
 
 
@@ -229,10 +264,15 @@ class Cancelled:
     The Run comes back rather than only its id, because the one thing the
     operator needs afterwards is which Session is now theirs, and the pane is
     on the Run.
+
+    The working trees are those of the Entry's Children its Run was never told
+    of, left for the operator to remove: Naiad knows their paths, not what they
+    are. A Child the Parent was told of was handed to its Workflow.
     """
 
     entry: Entry
     run: Run | None
+    worktrees: tuple[str, ...] = ()
 
 
 def cancel(queue: Queue, runs: RunStore, entry_id: str) -> Cancelled | None:
@@ -263,12 +303,38 @@ def cancel(queue: Queue, runs: RunStore, entry_id: str) -> Cancelled | None:
 
     found = None if entry.run_id is None else runs.load(entry.run_id)
     cancelled = _cancel_run(found) if found is not None else None
+    # After the Parent's own ending, so that it can spawn no further Child
+    # while its Children are being reached. A Parent whose Run was already
+    # over is reached too: a retry after a Child refused its ending must
+    # cascade again.
+    worktrees = _cancel_children(queue, runs, found) if found is not None else ()
 
     # The answer is not read: the Entry was there a moment ago, and one somebody
     # else removed in between is gone either way, which is what was asked for.
     # A Prune has to read it because a deletion follows; nothing follows here.
     queue.remove(entry.id)
-    return Cancelled(entry=entry, run=cancelled)
+    return Cancelled(entry=entry, run=cancelled, worktrees=worktrees)
+
+
+def _cancel_children(queue: Queue, runs: RunStore, parent: Run) -> tuple[str, ...]:
+    """Cancel each Child of the Parent, and answer with the working trees of
+    those it was never told of.
+
+    A started Child gets the same Cancellation written onto its Run, which
+    releases its Session. One not yet started has its Entry removed, which
+    its Parent reads as cancelled."""
+    untold = {child.entry_id for child in untold_children(parent.root)}
+    worktrees: list[str] = []
+    for child in Children(parent.root).all():
+        started = None if child.run_id is None else runs.load(child.run_id)
+        if started is not None:
+            _cancel_run(started)
+        elif child.run_id is None:
+            queue.remove(child.entry_id)
+        worktree = child.worktree or (None if started is None else str(started.target_repo))
+        if child.entry_id in untold and worktree is not None:
+            worktrees.append(worktree)
+    return tuple(worktrees)
 
 
 def _cancel_run(run: Run) -> Run | None:
@@ -341,18 +407,27 @@ def prune(queue: Queue, runs: RunStore) -> Pruned:
     After the Entries, the Orphaned Runs: every Run directory no
     Entry names is judged by the same reading and taken when it is done or
     parked, left and named when it reads as running.
+
+    A done Child is left, Entry and Run, while its Parent's Run is live and
+    has not been told of it: the Join reads its outcome from that Run. Once
+    told, or once the Parent has ended, it is taken like any other.
     """
     removed: list[Entry] = []
     failures: list[str] = []
 
     entries = queue.all()
+    awaited = _awaited(runs)
+    awaited_entries = {child.entry_id for child in awaited}
     # Every Run this pass leaves a claim on: one an Entry still names must not
-    # be judged an orphan, and one whose removal was already attempted must not
-    # be attempted twice in the same pass.
-    tended = {entry.run_id for entry in entries if entry.run_id is not None}
+    # be judged an orphan, one a live Parent still awaits must not be taken,
+    # and one whose removal was already attempted must not be attempted twice
+    # in the same pass.
+    tended = {entry.run_id for entry in entries if entry.run_id is not None} | {
+        child.run_id for child in awaited if child.run_id is not None
+    }
 
     for entry in entries:
-        if status_of(entry, runs) != DONE:
+        if entry.id in awaited_entries or status_of(entry, runs) != DONE:
             continue
 
         # Believed rather than assumed: an Entry somebody removed by name
@@ -374,6 +449,20 @@ def prune(queue: Queue, runs: RunStore) -> Pruned:
 
     orphans, skipped = _take_orphans(runs, tended, failures)
     return Pruned(removed=removed, failures=failures, orphans=orphans, skipped=skipped)
+
+
+def _awaited(runs: RunStore) -> list[Child]:
+    """Every Child a live Parent has not been told of. Read before anything is
+    deleted, so a Parent that cannot be read stops the Prune rather than
+    costing it a Child its Join awaits."""
+    if not runs.root.is_dir():
+        return []
+    return [
+        child
+        for directory in runs.root.iterdir()
+        if directory.is_dir() and not RunLog(directory).ended()
+        for child in untold_children(directory)
+    ]
 
 
 def _take_orphans(
@@ -400,7 +489,7 @@ def _take_orphans(
         if directory.name in tended:
             continue
         try:
-            status = _run_status(directory)
+            status = _run_status(directory, runs=runs, entered=entered_in(None))
         except (OSError, ValueError, KeyError, TypeError, StorageError) as error:
             failures.append(f"orphaned run directory {directory} cannot be read ({error})")
             continue
@@ -449,6 +538,8 @@ def _document(entry: Entry) -> dict[str, Any]:
         "skip_gates": entry.skip_gates,
         "attachment": _attachment_document(entry.attachment),
         "settings": settings_document(entry.settings),
+        "parent": entry.parent,
+        "child_limit": entry.child_limit,
         "run_id": entry.run_id,
     }
 
@@ -464,6 +555,7 @@ def _attachment_document(attachment: Attachment | None) -> dict[str, Any] | None
 
 __all__ = [
     "DONE",
+    "JOINING",
     "PARKED",
     "RUNNING",
     "WAITING",
@@ -472,6 +564,7 @@ __all__ = [
     "Queue",
     "branch_of",
     "cancel",
+    "entered_in",
     "prune",
     "status_of",
 ]

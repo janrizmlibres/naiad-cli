@@ -6,7 +6,9 @@ bracketed paste arrives as `[Pasted text #1]` and is submitted as prose. So
 every Prompt is typed, and the newlines inside it are typed too.
 """
 
-from naiad.adapters.tmux import TYPED_PIECE_BYTES, keystrokes_for
+import pytest
+
+from naiad.adapters.tmux import TYPED_PIECE_BYTES, TmuxError, TmuxSessions, keystrokes_for
 
 
 def test_a_single_line_is_typed_literally():
@@ -97,3 +99,45 @@ def test_a_prompt_ending_in_a_newline_does_not_type_a_trailing_empty_segment():
         ["tmux", "send-keys", "-t", "%1", "M-Enter"],
         ["tmux", "send-keys", "-t", "%1", "Enter"],
     ]
+
+
+def fake_tmux(directory, monkeypatch, *, says, status):
+    """A tmux on PATH that records its arguments and answers as told."""
+    directory.mkdir()
+    script = directory / "tmux"
+    script.write_text(
+        f'#!/bin/sh\necho "$@" >> "{directory}/argv"\necho "{says}" >&2\nexit {status}\n'
+    )
+    script.chmod(0o755)
+    monkeypatch.setenv("PATH", f"{directory}:/usr/bin:/bin")
+    return directory / "argv"
+
+
+def test_closing_a_session_kills_the_session_holding_the_pane(tmp_path, monkeypatch):
+    argv = fake_tmux(tmp_path / "bin", monkeypatch, says="", status=0)
+
+    TmuxSessions().close("%3")
+
+    assert argv.read_text() == "kill-session -t %3\n"
+
+
+@pytest.mark.parametrize(
+    "says",
+    [
+        "can't find pane: %3",
+        "can't find session: naiad-run-03",
+        "no server running on /tmp/tmux-501/default",
+        "error connecting to /tmp/tmux-501/default (No such file or directory)",
+    ],
+)
+def test_closing_a_session_already_gone_is_ignored(tmp_path, monkeypatch, says):
+    fake_tmux(tmp_path / "bin", monkeypatch, says=says, status=1)
+
+    TmuxSessions().close("%3")
+
+
+def test_closing_fails_loudly_for_any_other_reason(tmp_path, monkeypatch):
+    fake_tmux(tmp_path / "bin", monkeypatch, says="server exited unexpectedly", status=1)
+
+    with pytest.raises(TmuxError):
+        TmuxSessions().close("%3")

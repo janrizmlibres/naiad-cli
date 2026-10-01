@@ -14,6 +14,7 @@ from typing import Literal
 
 from naiad.domain.announcement import Announcement
 from naiad.domain.answerer import Consultation, Escalated
+from naiad.domain.join import FinishedChild, Join
 from naiad.domain.question import Question
 from naiad.domain.prompt import render_candidates
 from naiad.domain.settings import SETTINGS, Setting, StateSetting, setting_of
@@ -195,6 +196,12 @@ class Signals:
     because the human already met each of those. It is a fact about the Run,
     carried to the two notifications the operator reviews an unattended Run
     from, and nothing re-arms it.
+
+    join is what a Join State is decided from: how many of the Run's Children
+    are unfinished, and which finished ones the owed Prompt would name. A fact
+    about the current Announcement like nudges, since what was told against an
+    earlier one is not told again. Ignored at every State that is not a Join
+    State.
     """
 
     announcement: Announcement | None
@@ -220,6 +227,7 @@ class Signals:
     hold_reason: str | None = None
     reported: bool = False
     answered: int = 0
+    join: Join = field(default_factory=Join)
 
 
 @dataclass(frozen=True)
@@ -300,13 +308,18 @@ class Deliver:
     Typing it is not delivering it. The Session can take the typing with
     keystrokes missing, so the Prompt is confirmed by the UserPromptSubmit hook
     and a Confirm settles the Announcement once it has. attempt is
-    carried like a Clear's, so a retry reads apart from the first try."""
+    carried like a Clear's, so a retry reads apart from the first try.
+
+    children is the finished Children a Join State's Prompt names, and None at
+    every other State. It is what the loop records against the Announcement
+    before typing, so that a retry names the same Children."""
 
     state: str
     prompt: str
     next_states: tuple[str, ...]
     subject: str | None = None
     attempt: int = 1
+    children: tuple[FinishedChild, ...] | None = None
 
 
 @dataclass(frozen=True)
@@ -521,6 +534,13 @@ def decide(
         if entered is not None and entered.report:
             return Report(state=entered.name, subject=announcement.subject)
 
+    owed = _owed_state(signals, announcement)
+    if owed is not None and held(workflow, owed, signals.join):
+        # A Join State waiting on its Children. Holding is waiting, not
+        # silence: nothing is sent, so neither the Clear nor the silence rules
+        # below are reached until a Child finishes or none is left unfinished.
+        return NOTHING
+
     if signals.announcement is None and signals.opening is not None and signals.stopped:
         # An Adoption. The Run has joined a session and has said nothing in
         # it, so what it is owed is the Prompt of the State it was adopted at
@@ -677,8 +697,32 @@ def _owed(
             prompt=state.prompt,
             next_states=resolve_next_states(workflow, state.name, skip_gates=skip_gates),
             subject=subject,
+            children=signals.join.named if state.join else None,
         ),
     )
+
+
+def held(workflow: Workflow, state_name: str, join: Join) -> bool:
+    """Whether the Prompt owed at this State is held for the Run's Children.
+
+    Public because the status reading asks it too: a Run held here reads
+    joining in the listing, and a second copy of the rule could disagree with
+    the one that holds it.
+    """
+    state = workflow.state(state_name)
+    return state is not None and state.join and not join.released
+
+
+def _owed_state(signals: Signals, announcement: Announcement | None) -> str | None:
+    """The State whose Prompt the Run is owed, if one is: the one an
+    unhandled Announcement names, or the one an Adoption was adopted at before
+    it has announced anything. A Question is asked from a State it already
+    stands in, so it is owed none."""
+    if announcement is not None:
+        return announcement.state if announcement.question is None else None
+    if signals.announcement is None and signals.opening is not None:
+        return signals.opening.state
+    return None
 
 
 def terminal_state(workflow: Workflow, announcement: Announcement | None) -> State | None:
@@ -865,5 +909,6 @@ __all__ = [
     "Submission",
     "Switch",
     "decide",
+    "held",
     "terminal_state",
 ]

@@ -46,8 +46,9 @@ BASE = "base"
 AT = "at"
 SUBJECT = "subject"
 SKIP_GATES = "skip-gates"
+CHILD_LIMIT = "child-limit"
 
-KEYS = (WORKFLOW, TASK, REPO, BRANCH, BASE, AT, SUBJECT, SKIP_GATES)
+KEYS = (WORKFLOW, TASK, REPO, BRANCH, BASE, AT, SUBJECT, SKIP_GATES, CHILD_LIMIT)
 
 
 class BatchError(Exception):
@@ -168,6 +169,13 @@ def _work(
     if not isinstance(skip_gates, bool):
         raise bad(f"`{SKIP_GATES}` must be true or false")
 
+    # A boolean is an int to Python, and `true` is no number of Children.
+    child_limit = fields.get(CHILD_LIMIT)
+    if child_limit is not None and (
+        isinstance(child_limit, bool) or not isinstance(child_limit, int) or child_limit < 1
+    ):
+        raise bad(f"`{CHILD_LIMIT}` must be a positive whole number, such as 2")
+
     named_repo = _text(fields, REPO, bad)
     return Work(
         workflow_path=_workflow(_required(fields, WORKFLOW, bad), library=library, bad=bad),
@@ -184,6 +192,7 @@ def _work(
         start_state=_text(fields, AT, bad),
         subject=_text(fields, SUBJECT, bad),
         skip_gates=skip_gates,
+        child_limit=child_limit,
     )
 
 

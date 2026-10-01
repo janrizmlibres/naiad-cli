@@ -21,6 +21,7 @@ import json
 from collections.abc import Sequence
 from dataclasses import dataclass, replace
 from pathlib import Path
+from typing import Literal
 
 from naiad.domain.announcement import Announcement
 from naiad.domain.decide import (
@@ -147,6 +148,18 @@ class RunLog:
         ended must find nothing to do, however much the agent says afterwards.
         """
         return any(entry.kind in ENDING_KINDS for entry in self.entries())
+
+    def ending(self) -> Literal["finished", "cancelled"] | None:
+        """Which of the endings this Run's log records first, `finished` or
+        `cancelled`, or None while it has not ended. Asked where the two must
+        be told apart: a Parent is told whether its Child completed or was
+        called off."""
+        for entry in self.entries():
+            if entry.kind == "finished":
+                return "finished"
+            if entry.kind == "cancelled":
+                return "cancelled"
+        return None
 
     def previous_state(self, announcement: Announcement | None) -> str | None:
         """Where the agent stood before this Announcement, which is what a
@@ -390,6 +403,18 @@ class RunLog:
                 detail="its entry was removed from the queue",
             )
         )
+
+    def record_closing(self) -> None:
+        """That Naiad closed this Child's Session once its Parent was told it
+        completed. The transcript and the logs stay; only the live process went.
+
+        Written here rather than as an Action, like `record_cancellation`: the
+        Parent's tick closed it, and no decision about this Run made it."""
+        self._append(LogLine(kind="closed", detail="its parent was told it completed"))
+
+    def closed(self) -> bool:
+        """Whether this Run's Session has been closed, so it is closed once."""
+        return any(entry.kind == "closed" for entry in self.entries())
 
     def record(self, action: Action, *, seq: int | None = None) -> None:
         """What Naiad did about it. Nothing is not written down."""

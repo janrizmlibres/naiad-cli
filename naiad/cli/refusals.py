@@ -82,6 +82,15 @@ ADOPT_COMMAND = Remedy(
     # never a field holding nothing and a later relaxation cannot find one.
     task="try: naiad adopt <workflow> --at <state> --task <task>",
 )
+# Spelled out rather than made like the operator commands' remedies, because
+# Spawn's task is optional without a Subject standing in: it defaults to the
+# Parent's, and the working tree is the one thing it always needs.
+SPAWN_COMMAND = Remedy(
+    subject="try: naiad spawn --repo <path> --at {state} --subject <value>",
+    # Unreachable, the task defaulting to the Parent's — worded anyway, so that
+    # a Remedy is never a field holding nothing.
+    task="try: naiad spawn <task> --repo <path>",
+)
 # Work described in a batch file. The refusal names the file and the Entry's
 # position, so what is left to say is which key that Entry is missing.
 BATCH_ENTRY = Remedy(
@@ -151,6 +160,7 @@ __all__ = [
     "ADOPT_COMMAND",
     "BATCH_ENTRY",
     "RUN_COMMAND",
+    "SPAWN_COMMAND",
     "MissingSubject",
     "MissingTask",
     "Remedy",

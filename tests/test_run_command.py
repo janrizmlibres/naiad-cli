@@ -360,3 +360,47 @@ def test_running_while_a_supervisor_holds_the_lock_returns_immediately(
     (queued,) = queue_of(home).all()
     assert queued.id in capsys.readouterr().out
     assert queued.run_id is None
+
+
+def test_running_records_the_child_limit_it_was_given(home, repo, monkeypatch):
+    supervision(monkeypatch)
+
+    run(repo, "--branch", "TASK-8546", "--child-limit", "1")
+
+    (queued,) = queue_of(home).all()
+    assert queued.child_limit == 1
+
+
+def test_running_refuses_a_child_limit_of_zero(home, repo, monkeypatch, capsys):
+    supervision(monkeypatch)
+
+    with pytest.raises(SystemExit) as refused:
+        run(repo, "--branch", "TASK-8546", "--child-limit", "0")
+
+    assert refused.value.code == 2
+    assert "--child-limit" in capsys.readouterr().err
+    assert queue_of(home).all() == []
+
+
+# The ceiling, resolved as the Supervisor starts and refused before anything
+# is queued, so that fixing a typo and running again does not queue twice.
+
+
+def test_running_hands_the_supervisor_the_capacity_it_was_given(home, repo, monkeypatch):
+    wiring = supervision(monkeypatch)
+
+    assert run(repo, "--capacity", "3") == 0
+
+    assert wiring["ceiling"] == 3
+
+
+def test_running_with_a_capacity_variable_that_is_not_one_queues_nothing(
+    home, repo, monkeypatch, capsys
+):
+    monkeypatch.setenv("NAIAD_CAPACITY", "0")
+    refuse_supervising(monkeypatch)
+
+    assert run(repo) == 2
+
+    assert queue_of(home).all() == []
+    assert "NAIAD_CAPACITY" in capsys.readouterr().err

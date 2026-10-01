@@ -6,10 +6,22 @@ lane, and crash recovery — with no special case for any of them. Each is
 asserted separately here because each would be a different bug.
 """
 
+from dataclasses import replace
 from pathlib import Path
 
 from naiad.domain.entry import Entry
-from naiad.domain.supervise import DRAINED, IDLE, Resume, Signals, Start, supervise
+from naiad.domain.supervise import (
+    CEILING,
+    DISK,
+    DRAINED,
+    IDLE,
+    MEMORY,
+    AtCapacity,
+    Resume,
+    Signals,
+    Start,
+    supervise,
+)
 
 REPO = Path("/repos/naiad")
 ANOTHER_REPO = Path("/repos/acme")
@@ -115,13 +127,15 @@ def test_a_finished_entry_is_scanned_past_to_the_next_unfinished_run():
 # exclusion unit is the working tree, named by the target path.
 
 
-def test_entries_for_two_repositories_are_both_started():
+def test_entries_for_two_repositories_both_run():
     """The collision one-at-a-time exists to prevent cannot happen between two
-    working trees, so neither waits for the other."""
+    working trees, so neither waits for the other to finish — only for the
+    next scan, since a scan starts one Run."""
     ours, theirs = entry("one"), entry("two", target_repo=ANOTHER_REPO)
 
-    assert supervise(draining(ours, theirs)) == [
-        Start(entry=ours, predecessor=None),
+    assert supervise(draining(ours, theirs)) == [Start(entry=ours, predecessor=None)]
+    assert supervise(draining(replace(ours, run_id="a-run"), theirs)) == [
+        Resume(entry=replace(ours, run_id="a-run")),
         Start(entry=theirs, predecessor=None),
     ]
 
@@ -152,23 +166,23 @@ def test_a_lane_that_yielded_its_action_yields_nothing_more():
 
 
 def test_lanes_come_out_in_the_order_their_first_unfinished_entries_were_queued():
-    theirs = entry("one", target_repo=ANOTHER_REPO)
-    ours = entry("two")
+    theirs = entry("one", target_repo=ANOTHER_REPO, run_id="a-run")
+    ours = entry("two", run_id="another-run")
 
-    started = supervise(draining(theirs, ours))
+    resumed = supervise(draining(theirs, ours))
 
-    assert [action.entry for action in started] == [theirs, ours]
+    assert [action.entry for action in resumed] == [theirs, ours]
 
 
 def test_two_worktrees_of_one_repository_are_two_lanes():
     """Not a loophole but the rule meaning what it says: the
     exclusion unit is the working tree, named by the target path, and two
     worktrees of one repository are two working trees."""
-    main_tree = entry("one", target_repo=Path("/repos/acme"))
+    main_tree = entry("one", target_repo=Path("/repos/acme"), run_id="a-run")
     worktree = entry("two", target_repo=Path("/repos/acme-orion"))
 
     assert supervise(draining(main_tree, worktree)) == [
-        Start(entry=main_tree, predecessor=None),
+        Resume(entry=main_tree),
         Start(entry=worktree, predecessor=None),
     ]
 
@@ -178,12 +192,12 @@ def test_a_queue_parked_in_one_lane_still_works_in_the_others():
     parked at review in one repository is still a night of work in the other
     two."""
     parked = entry("one", run_id="a-run")
-    other_repo = entry("two", target_repo=ANOTHER_REPO)
+    other_repo = entry("two", target_repo=ANOTHER_REPO, run_id="another-run")
     third_repo = entry("three", target_repo=Path("/repos/third"))
 
     assert supervise(draining(parked, other_repo, third_repo)) == [
         Resume(entry=parked),
-        Start(entry=other_repo, predecessor=None),
+        Resume(entry=other_repo),
         Start(entry=third_repo, predecessor=None),
     ]
 
@@ -333,3 +347,278 @@ def test_a_preceding_entry_for_the_same_repository_is_never_skipped():
     assert supervise(
         draining(landed, stacked, third, finished={"a-run", "another-run"})
     ) == [Start(entry=third, predecessor="TASK-two")]
+
+
+# A Child limit: a Parent with as many live Children as its limit holds back the
+# rest, each in its own Lane, until one finishes.
+
+PARENT_RUN = "parent-run"
+
+
+def parent(**overrides):
+    return entry("parent", run_id=PARENT_RUN, **overrides)
+
+
+def child(identifier, **overrides):
+    return entry(
+        identifier,
+        target_repo=Path(f"/repos/naiad-wt--{identifier}"),
+        parent=PARENT_RUN,
+        pinned_base="feature",
+        **overrides,
+    )
+
+
+def started(scan):
+    return [action.entry.id for action in scan if isinstance(action, Start)]
+
+
+def test_a_child_limit_of_two_holds_the_third_child():
+    scan = supervise(
+        draining(
+            parent(child_limit=2),
+            child("c1", run_id="c1-run"),
+            child("c2", run_id="c2-run"),
+            child("c3"),
+        )
+    )
+
+    assert started(scan) == []
+
+
+def test_a_held_child_starts_once_a_live_one_finishes():
+    first = child("c1", run_id="c1-run")
+    second = child("c2", run_id="c2-run")
+
+    scan = supervise(
+        draining(parent(child_limit=2), first, second, child("c3"), finished={"c1-run"})
+    )
+
+    assert started(scan) == ["c3"]
+
+
+def test_a_child_limit_of_one_takes_the_children_one_at_a_time_in_id_order():
+    """The old serial behaviour without a mode: id order is spawn order."""
+    limited = parent(child_limit=1)
+
+    assert started(supervise(draining(limited, child("c1"), child("c2")))) == ["c1"]
+    assert (
+        started(
+            supervise(
+                draining(
+                    limited,
+                    child("c1", run_id="c1-run"),
+                    child("c2"),
+                    finished={"c1-run"},
+                )
+            )
+        )
+        == ["c2"]
+    )
+
+
+def test_no_child_limit_holds_no_child_back():
+    scan = supervise(
+        draining(
+            parent(), child("c1", run_id="c1-run"), child("c2", run_id="c2-run"), child("c3")
+        )
+    )
+
+    assert started(scan) == ["c3"]
+
+
+def test_a_parked_child_counts_toward_the_limit():
+    """Parked is not finished: its Session is live, so it holds a place."""
+    parked = child("c1", run_id="c1-run")
+
+    scan = supervise(draining(parent(child_limit=1), parked, child("c2")))
+
+    assert scan == [Resume(entry=parent(child_limit=1)), Resume(entry=parked)]
+
+
+def test_a_held_child_keeps_its_lane_waiting_behind_it():
+    """Held, it is still that working tree's first Entry not done, so a later
+    Entry for the same tree does not jump ahead of it."""
+    held = child("c2")
+    behind = entry("later", target_repo=held.target_repo)
+
+    scan = supervise(
+        draining(parent(child_limit=1), child("c1", run_id="c1-run"), held, behind)
+    )
+
+    assert started(scan) == []
+
+
+# Capacity: a ceiling on live Runs, counted across every lane. It bounds
+# starting only — whatever Capacity says, a live Run is always ticked.
+
+
+def capped(
+    *entries, ceiling=None, finished=(), joining=(), strained=False, low_disk=()
+):
+    return Signals(
+        entries=entries,
+        finished=finished,
+        following=False,
+        ceiling=ceiling,
+        joining=joining,
+        strained=strained,
+        low_disk=low_disk,
+    )
+
+
+def test_at_the_ceiling_nothing_starts_but_every_live_run_is_resumed():
+    first = entry("one", run_id="a-run")
+    second = entry("two", target_repo=ANOTHER_REPO, run_id="another-run")
+    waiting = entry("three", target_repo=Path("/repos/third"))
+
+    scan = supervise(capped(first, second, waiting, ceiling=2))
+
+    assert started(scan) == []
+    assert [action for action in scan if isinstance(action, Resume)] == [
+        Resume(entry=first),
+        Resume(entry=second),
+    ]
+
+
+def test_below_the_ceiling_a_waiting_entry_starts():
+    running = entry("one", run_id="a-run")
+    waiting = entry("two", target_repo=ANOTHER_REPO)
+
+    assert supervise(capped(running, waiting, ceiling=2)) == [
+        Resume(entry=running),
+        Start(entry=waiting, predecessor=None),
+    ]
+
+
+def test_finished_runs_are_not_counted():
+    done = entry("one", run_id="a-run")
+    waiting = entry("two", target_repo=ANOTHER_REPO)
+
+    assert started(supervise(capped(done, waiting, ceiling=1, finished={"a-run"}))) == ["two"]
+
+
+def test_one_start_per_scan_however_much_room_there_is():
+    """So that what the machine reads after one start can catch up before the
+    next. The first waiting lane head in id order is the one."""
+    first = entry("one")
+    second = entry("two", target_repo=ANOTHER_REPO)
+
+    assert supervise(capped(first, second, ceiling=10)) == [Start(entry=first, predecessor=None)]
+
+
+def test_a_parked_run_is_counted():
+    """Parked is not finished: its Session is live, so it holds a place."""
+    parked = entry("one", run_id="a-run")
+    waiting = entry("two", target_repo=ANOTHER_REPO)
+
+    assert started(supervise(capped(parked, waiting, ceiling=1))) == []
+
+
+def test_a_joining_parent_is_not_counted_so_a_ceiling_of_one_starts_its_child():
+    """Counted, a Parent held at its Join and its only Child would wait on each
+    other for ever."""
+    joining_parent = parent()
+
+    scan = supervise(capped(joining_parent, child("c1"), ceiling=1, joining={PARENT_RUN}))
+
+    assert scan == [
+        Resume(entry=joining_parent),
+        Start(entry=child("c1"), predecessor="feature"),
+    ]
+
+
+def test_the_ceiling_is_given_as_the_reason_nothing_started():
+    running = entry("one", run_id="a-run")
+    waiting = entry("two", target_repo=ANOTHER_REPO)
+
+    scan = supervise(capped(running, waiting, ceiling=1))
+
+    assert scan == [Resume(entry=running), AtCapacity(reason=CEILING)]
+
+
+def test_no_reason_is_given_when_nothing_is_waiting():
+    running = entry("one", run_id="a-run")
+
+    assert supervise(capped(running, ceiling=1)) == [Resume(entry=running)]
+
+
+def test_no_reason_is_given_when_something_started():
+    """The one-start rule holding the rest back is not Capacity."""
+    first = entry("one")
+    second = entry("two", target_repo=ANOTHER_REPO)
+
+    scan = supervise(capped(first, second, ceiling=2))
+
+    assert not any(isinstance(action, AtCapacity) for action in scan)
+
+
+def test_a_child_held_by_its_limit_is_not_a_capacity_reason():
+    held = child("c2")
+
+    scan = supervise(
+        capped(parent(child_limit=1), child("c1", run_id="c1-run"), held, ceiling=1)
+    )
+
+    assert not any(isinstance(action, AtCapacity) for action in scan)
+
+
+# Below the ceiling, the machine must be unstrained: memory pressure stops every
+# start, and a working tree short of free disk is passed over.
+
+
+def test_strained_memory_starts_nothing_but_every_live_run_is_resumed():
+    running = entry("one", run_id="a-run")
+    waiting = entry("two", target_repo=ANOTHER_REPO)
+
+    scan = supervise(capped(running, waiting, ceiling=10, strained=True))
+
+    assert scan == [Resume(entry=running), AtCapacity(reason=MEMORY)]
+
+
+def test_strained_memory_holds_back_a_start_with_no_ceiling_set():
+    waiting = entry("one")
+
+    assert supervise(capped(waiting, strained=True)) == [AtCapacity(reason=MEMORY)]
+
+
+def test_the_ceiling_is_the_reason_when_both_hold_a_start_back():
+    running = entry("one", run_id="a-run")
+    waiting = entry("two", target_repo=ANOTHER_REPO)
+
+    scan = supervise(capped(running, waiting, ceiling=1, strained=True))
+
+    assert scan == [Resume(entry=running), AtCapacity(reason=CEILING)]
+
+
+def test_a_working_tree_low_on_disk_is_passed_over_and_a_later_lane_starts():
+    low = entry("one")
+    later = entry("two", target_repo=ANOTHER_REPO)
+
+    scan = supervise(capped(low, later, ceiling=10, low_disk={REPO}))
+
+    assert scan == [Start(entry=later, predecessor=None)]
+
+
+def test_an_entry_behind_one_low_on_disk_in_its_own_lane_waits_too():
+    low = entry("one")
+    behind = entry("two")
+
+    scan = supervise(capped(low, behind, low_disk={REPO}))
+
+    assert started(scan) == []
+
+
+def test_disk_is_the_reason_when_every_waiting_tree_is_low():
+    running = entry("one", run_id="a-run")
+    low = entry("two", target_repo=ANOTHER_REPO)
+
+    scan = supervise(capped(running, low, ceiling=10, low_disk={ANOTHER_REPO}))
+
+    assert scan == [Resume(entry=running), AtCapacity(reason=DISK)]
+
+
+def test_a_live_run_on_a_low_disk_is_still_resumed():
+    running = entry("one", run_id="a-run")
+
+    assert supervise(capped(running, low_disk={REPO})) == [Resume(entry=running)]

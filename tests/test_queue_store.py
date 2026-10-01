@@ -27,7 +27,8 @@ from naiad.runtime.queue import (
     prune,
     status_of,
 )
-from naiad.runtime.records import EntryTurns, Notices, Waits
+from naiad.domain.join import FinishedChild
+from naiad.runtime.records import Children, EntryTurns, Joins, Notices, Waits
 from naiad.runtime.run import RunStore
 
 
@@ -702,3 +703,182 @@ def test_a_run_no_entry_became_has_no_entry(tmp_path, repo):
     queue.add(entry(repo, id="waiting"))
 
     assert queue.entry_of("orphaned-run") is None
+
+
+def test_an_entry_keeps_its_child_limit(queue, repo):
+    queue.add(entry(repo, child_limit=2))
+
+    assert queue.all()[0].child_limit == 2
+
+
+def test_an_entry_written_before_child_limits_reads_as_having_none(queue, repo):
+    """No limit of the Run's own: parallel is the default."""
+    added = queue.add(entry(repo))
+    path = next(queue.root.glob(f"{added.id}*"))
+    document = json.loads(path.read_text())
+    del document["child_limit"]
+    path.write_text(json.dumps(document))
+
+    assert queue.all()[0].child_limit is None
+
+
+# A family. Cancelling a Parent reaches each of its Children, and a Prune
+# leaves a done Child its Parent has yet to be told of.
+
+
+def parent_run(queue, runs, repo):
+    """A Parent: a started Run, standing in a State, with its Entry queued."""
+    run = started(runs, repo, run_id="parent-run")
+    Announcements(run.root).announce("implement")
+    queue.add(entry(repo, id="parent", working_branch="feat", run_id=run.id))
+    return run
+
+
+def child_of(parent, queue, runs, repo, name, *, start=True):
+    """A Child spawned by the Parent into a working tree of its own, started
+    into a Run unless start is False."""
+    worktree = repo.parent / f"repo-wt--{name}"
+    worktree.mkdir()
+    run = None
+    if start:
+        run = runs.create(
+            run_id=f"{name}-run",
+            workflow_path=repo / "workflow.toml",
+            task="t",
+            target_repo=worktree,
+            created_at="2026-07-22T12:00:00Z",
+        )
+        Announcements(run.root).announce("build")
+    queue.add(
+        entry(
+            repo,
+            id=name,
+            target_repo=worktree,
+            working_branch=f"feat--{name}",
+            parent=parent.id,
+            run_id=None if run is None else run.id,
+        )
+    )
+    Children(parent.root).record_spawn(name, subject=f"{name}.md", worktree=worktree)
+    if run is not None:
+        Children(parent.root).record_start(name, run_id=run.id)
+    return run, worktree
+
+
+def told(parent, name, worktree):
+    """The Parent told of a completed Child at its latest Announcement."""
+    Joins(parent.root).record(
+        Announcements(parent.root).latest(),
+        (
+            FinishedChild(
+                entry_id=name,
+                subject=f"{name}.md",
+                branch=None,
+                worktree=str(worktree),
+                outcome="completed",
+            ),
+        ),
+    )
+
+
+def test_cancelling_a_parent_cancels_its_started_children_and_removes_the_unstarted(
+    queue, runs, repo
+):
+    parent = parent_run(queue, runs, repo)
+    running, running_tree = child_of(parent, queue, runs, repo, "01")
+    parked, parked_tree = child_of(parent, queue, runs, repo, "02")
+    Notices(parked.root).record_notified(Announcements(parked.root).latest())
+    _, unstarted_tree = child_of(parent, queue, runs, repo, "03", start=False)
+
+    cancelled = cancel(queue, runs, "parent")
+
+    assert RunLog(parent.root).ending() == "cancelled"
+    assert RunLog(running.root).ending() == "cancelled"
+    assert RunLog(parked.root).ending() == "cancelled"
+    assert queue.find("03") is None
+    assert cancelled.worktrees == (str(running_tree), str(parked_tree), str(unstarted_tree))
+
+
+def test_cancelling_a_parent_writes_no_second_ending_onto_a_finished_child(queue, runs, repo):
+    parent = parent_run(queue, runs, repo)
+    child, _ = child_of(parent, queue, runs, repo, "01")
+    RunLog(child.root).record(Finish(state="done"), seq=1)
+
+    cancel(queue, runs, "parent")
+
+    assert RunLog(child.root).ending() == "finished"
+    assert "cancelled" not in [line.kind for line in RunLog(child.root).entries()]
+
+
+def test_cancelling_a_parent_leaves_out_the_working_trees_of_children_it_was_told_of(
+    queue, runs, repo
+):
+    """A Child the Parent was told of was handed to its Workflow, which
+    cleans up after it; only the rest are left for the operator."""
+    parent = parent_run(queue, runs, repo)
+    child, tree = child_of(parent, queue, runs, repo, "01")
+    RunLog(child.root).record(Finish(state="done"), seq=1)
+    told(parent, "01", tree)
+    _, untold_tree = child_of(parent, queue, runs, repo, "02")
+
+    cancelled = cancel(queue, runs, "parent")
+
+    assert cancelled.worktrees == (str(untold_tree),)
+
+
+def test_cancelling_an_entry_with_no_children_lists_no_working_trees(queue, runs, repo):
+    run = started(runs, repo)
+    queue.add(entry(repo, id="an-entry", run_id=run.id))
+
+    assert cancel(queue, runs, "an-entry").worktrees == ()
+
+
+def test_pruning_leaves_a_done_child_its_live_parent_has_not_been_told_of(queue, runs, repo):
+    parent = parent_run(queue, runs, repo)
+    child, _ = child_of(parent, queue, runs, repo, "01")
+    RunLog(child.root).record(Finish(state="done"), seq=1)
+
+    pruned = prune(queue, runs)
+
+    assert pruned.removed == []
+    assert queue.find("01") is not None
+    assert child.root.is_dir()
+
+
+def test_pruning_leaves_the_run_of_a_cancelled_child_its_live_parent_has_not_been_told_of(
+    queue, runs, repo
+):
+    """Cancelling the Child took its Entry, so its Run is an orphan; the
+    Parent still reads its outcome from that Run at its next Join."""
+    parent = parent_run(queue, runs, repo)
+    child, _ = child_of(parent, queue, runs, repo, "01")
+    cancel(queue, runs, "01")
+
+    pruned = prune(queue, runs)
+
+    assert pruned.orphans == []
+    assert child.root.is_dir()
+
+
+def test_pruning_takes_a_done_child_once_its_parent_has_been_told_of_it(queue, runs, repo):
+    parent = parent_run(queue, runs, repo)
+    child, tree = child_of(parent, queue, runs, repo, "01")
+    RunLog(child.root).record(Finish(state="done"), seq=1)
+    told(parent, "01", tree)
+
+    pruned = prune(queue, runs)
+
+    assert [taken.id for taken in pruned.removed] == ["01"]
+    assert not child.root.exists()
+
+
+def test_pruning_takes_a_done_child_once_its_parent_has_ended(queue, runs, repo):
+    parent = parent_run(queue, runs, repo)
+    child, _ = child_of(parent, queue, runs, repo, "01")
+    RunLog(child.root).record(Finish(state="done"), seq=1)
+    RunLog(parent.root).record(Finish(state="done"), seq=1)
+
+    pruned = prune(queue, runs)
+
+    assert {taken.id for taken in pruned.removed} == {"parent", "01"}
+    assert not child.root.exists()

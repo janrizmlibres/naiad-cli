@@ -20,6 +20,7 @@ ASK_SUBCOMMAND = "ask"
 WAIT_SUBCOMMAND = "wait"
 HOLD_SUBCOMMAND = "hold"
 BRANCH_SUBCOMMAND = "branch"
+SPAWN_SUBCOMMAND = "spawn"
 # Two words rather than one, because what an unsupervised Adoption is waiting
 # for is a Supervisor and `naiad queue watch` is how a human starts one.
 SUPERVISE_SUBCOMMAND = "queue watch"
@@ -33,7 +34,7 @@ _PREAMBLE = """\
 # Naiad protocol
 
 You are being driven through a workflow by Naiad. It cannot see your work and
-never decides that a phase is finished — you do, and you say so. Four rules:
+never decides that a phase is finished — you do, and you say so. Five rules:
 
 1. **Announce, do not assume.** When you have finished the phase you are in and
    are satisfied with the result, run `{announce} <name>` to announce the
@@ -62,6 +63,14 @@ never decides that a phase is finished — you do, and you say so. Four rules:
    run is parked — no reminders, no time limit — until they type into this
    session and send you back to work. Do not spend waits on a pause: a wait
    expires and a pause does not.
+
+5. **Spawn only when asked.** Only when a phase's instructions ask you to start
+   a Child — a run of its own, beside this one — run
+   `{spawn} --repo <path> --branch <name> --at <state> --subject <value>`.
+   The Child takes this run's workflow and task unless you name others, and
+   it is queued at once: the command returns without waiting for it. Its
+   `--repo` must be a working tree of its own, never this run's: in this one
+   it would wait behind you forever.
 
 Announcing the same State twice is legitimate — that is how a loop phase works,
 once per iteration. Announcing is not a report of progress: announce when the
@@ -228,6 +237,7 @@ def render_protocol(*, next_states: Sequence[str], naiad: str = DEFAULT_NAIAD) -
         ask=f"{naiad} {ASK_SUBCOMMAND}",
         wait=f"{naiad} {WAIT_SUBCOMMAND}",
         hold=f"{naiad} {HOLD_SUBCOMMAND}",
+        spawn=f"{naiad} {SPAWN_SUBCOMMAND}",
     )
     expectation = render_expectation(next_states)
     return f"{preamble}\n\n{expectation}\n"
@@ -336,6 +346,7 @@ __all__ = [
     "ANNOUNCE_SUBCOMMAND",
     "DEFAULT_NAIAD",
     "HOLD_SUBCOMMAND",
+    "SPAWN_SUBCOMMAND",
     "WAIT_SUBCOMMAND",
     "render_adoption",
     "render_answer",

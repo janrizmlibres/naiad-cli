@@ -40,7 +40,9 @@ from naiad.domain.transitions import UnknownState, deviation, start_state
 from naiad.domain.workflow import Workflow
 from naiad.runtime.announcements import Announcements
 from naiad.runtime.answers import AnswerLog
+from naiad.runtime.family import read_join, sessions_to_close
 from naiad.runtime.log import RunLog
+from naiad.runtime.queue import Queue, entered_in
 from naiad.runtime.records import (
     ClearAttempts,
     Clears,
@@ -48,6 +50,7 @@ from naiad.runtime.records import (
     Deliveries,
     Handled,
     Holds,
+    Joins,
     Notices,
     Reports,
     Submissions,
@@ -55,8 +58,9 @@ from naiad.runtime.records import (
     Turns,
     Waits,
     idle_seconds,
+    notice_key,
 )
-from naiad.runtime.run import Run
+from naiad.runtime.run import Run, RunStore
 
 
 class UndrivableRun(Exception):
@@ -66,6 +70,7 @@ class UndrivableRun(Exception):
 class Session(Protocol):
     def send(self, pane: str, text: str) -> None: ...
     def clear(self, pane: str) -> None: ...
+    def close(self, pane: str) -> None: ...
 
 
 class Notifier(Protocol):
@@ -95,6 +100,8 @@ def tick(
     now: float | None = None,
     naiad: str = DEFAULT_NAIAD,
     entry_id: str | None = None,
+    runs: RunStore | None = None,
+    queue: Queue | None = None,
 ) -> Action:
     """now is a parameter so the rules that depend on elapsed time can be
     driven from data rather than from a test that waits. Every other caller
@@ -102,7 +109,12 @@ def tick(
 
     entry_id is the Entry this Run became, which is what `naiad queue answers`
     is best pointed at. The Run knows no Entry, so whoever drives it says; a
-    Run with none is pointed at by its own id."""
+    Run with none is pointed at by its own id.
+
+    runs and queue are where this Run's Children are read from. runs defaults
+    to the store this Run is kept in. Without a queue no Entry is asked
+    after, so a Child that never started reads as unfinished however it was
+    called off."""
     announcement = Announcements(run.root).latest()
     log = RunLog(run.root)
     turns = Turns(run.root)
@@ -118,7 +130,10 @@ def tick(
     answers = AnswerLog(run.root)
     waits = Waits(run.root)
     holds = Holds(run.root)
+    joins = Joins(run.root)
+    store = runs if runs is not None else RunStore(run.root.parent)
     moment = now if now is not None else time.time()
+    closing: list[Run] = []
     reference = entry_id or run.id
     # Read out of the log rather than out of a record of its own, for the reason
     # `finished` is: every Switch and every Notify is already written there, and
@@ -129,9 +144,8 @@ def tick(
     # the nudge allowance the way a fresh Announcement does, and a
     # fresh Hold re-arms the notification an earlier alarm would otherwise
     # swallow.
-    wait_count = waits.count(announcement)
-    hold_count = holds.count(announcement)
-    notified, nudges = notices.of(announcement, wait_count=wait_count, hold_count=hold_count)
+    key = notice_key(run.root, announcement)
+    notified, nudges = notices.of(announcement, **key)
     typed = deliveries.attempts(announcement)
 
     # Written before the decision rather than after it, because where the agent
@@ -168,6 +182,12 @@ def tick(
             holding=holds.holding(announcement),
             hold_reason=holds.reason(announcement),
             answered=answers.answered(),
+            join=read_join(
+                run.root,
+                announcement,
+                runs=store,
+                entered=entered_in(queue),
+            ),
         ),
         skip_gates=run.skip_gates,
         settings=run.settings,
@@ -207,13 +227,22 @@ def tick(
             # Subject is.
             branch=run.working_branch,
             predecessor=run.predecessor,
+            children=action.children or (),
         )
+        if action.children is not None:
+            # Told-once: the Children named are recorded against the
+            # Announcement before the Prompt is typed, so that a retry or a
+            # tick after a restart names this same set, and no later
+            # Announcement names any of them again.
+            joins.record(announcement, action.children)
         # Recorded before it is typed, because the UserPromptSubmit hook fires
         # while it is being typed and judges the submission against this. The
         # Announcement is not handled yet: a Confirm does that once the hook has
         # seen the Prompt land whole.
         deliveries.record_attempt(announcement, prompt=prompt, turns=turns.count(), at=moment)
         session.send(_pane(run), prompt)
+        if action.children is not None:
+            closing = sessions_to_close(run.root, action.children, runs=store)
     elif isinstance(action, Confirm):
         # An adopted Run's first delivery answers no Announcement, so there is
         # no seq to record against it — only the turn baseline, which is what
@@ -239,7 +268,7 @@ def tick(
             _pane(run),
             render_nudge(attempt=action.attempt, naiad=naiad, expired_wait=action.expired_wait),
         )
-        notices.record_nudge(announcement, wait_count=wait_count, hold_count=hold_count)
+        notices.record_nudge(announcement, **key)
     elif isinstance(action, Finish):
         # The session is deliberately not touched: nothing is sent into it and
         # it is not killed, because it holds the evidence of what the Run did.
@@ -267,7 +296,7 @@ def tick(
             message=_with_answered(action.reason, action.answered, reference),
             kind=Notification.NOTIFY,
         )
-        notices.record_notified(announcement, wait_count=wait_count, hold_count=hold_count)
+        notices.record_notified(announcement, **key)
         if action.question is not None and announcement is not None:
             # A Question the human is answering: one the Answerer escalated,
             # or one the Workflow gave the human. Recorded here rather
@@ -282,6 +311,14 @@ def tick(
             )
 
     log.record(action, seq=announcement.seq if announcement is not None else None)
+    # The completed Children a Join delivery just named have been taken in, so
+    # their Sessions go. Closed only once the delivery is in the Parent's own
+    # log, so a Session that will not close leaves no hole there. Each closing
+    # is written on the Child's own Run, so a retyping of the Prompt does not
+    # close the same one again.
+    for child in closing:
+        session.close(_pane(child))
+        RunLog(child.root).record_closing()
     return action
 
 

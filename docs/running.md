@@ -24,6 +24,31 @@ Entries in the same working tree go one after another, and entries in different
 working trees go side by side. A parked Run holds its own tree's place and
 nobody else's.
 
+How many Runs go side by side is capped. The Supervisor starts no Run while the
+live ones are at its ceiling, and starts at most one each time round. A Run
+counts from the moment it starts until it finishes, parked or not, except while
+it stands at a Join State waiting on its Children. Nothing already working is
+ever stopped. The ceiling is sized from the machine's memory, one Run for each
+1.5 GiB above 8 GiB and never fewer than one. Set it yourself with `--capacity`
+on `queue watch` or `run`, or with `NAIAD_CAPACITY`; the flag wins over the
+variable:
+
+```
+naiad queue watch --capacity 6
+```
+
+Below the ceiling, the machine must also be unstrained. No Run starts while the
+operating system reports memory under pressure: on macOS,
+`kern.memorystatus_vm_pressure_level` above normal; on Linux, `some avg10` above
+10 in `/proc/pressure/memory`, or less than a tenth of memory available where
+that file is missing. No Run starts into a working tree whose volume has less
+free disk than the larger of 10% and 10 GB; a waiting entry there is passed over
+and another tree may start instead. Where the machine gives no reading, the
+ceiling alone applies.
+
+While nothing can start for one of these reasons (the ceiling, memory or
+disk), the Supervisor says so once.
+
 `queue list` prints one line per entry, in queue order:
 
 ```text
@@ -32,22 +57,35 @@ nobody else's.
 
 That is the entry's id, what became of it, the State it stands in, the repository,
 the branch (`-` until the agent has derived one) and the task. The Run's id is in
-brackets once it has one. What became of an entry is one of four words:
+brackets once it has one. What became of an entry is one of five words:
 
-- `waiting`: no Run yet. It is queued behind another entry for its tree, or no
-  Supervisor has reached it.
+- `waiting`: no Run yet. It is queued behind another entry for its tree, it is
+  a Child held by its Parent's Child limit, the Supervisor is at its ceiling,
+  memory is strained or its tree is low on disk, or no Supervisor has reached
+  it.
 - `running`: the agent is working.
+- `joining`: the Run stands at a Join State and is waiting on its Children.
+  Nothing is wrong: its Prompt goes out as soon as a Child finishes.
 - `parked`: Naiad has stopped and told you it needs you. The State column says
   where.
 - `done`: the Run reached its last State, or you removed it.
 
 To take an entry out, `naiad queue rm <entry>` removes it and cancels its Run.
-The Run's tmux session is left alone, and the command names its pane. `naiad queue
-prune` removes every done entry together with the Run it became.
+The Run's tmux session is left alone, and the command names its pane. Removing
+a Parent cancels its Children too: a started Child's Run is cancelled, a Child
+not yet started leaves the queue, and the command prints the working tree of
+each Child the Parent was not yet told of, for you to remove. `naiad queue
+prune` removes every done entry together with the Run it became, except a done
+Child its Parent is still waiting to be told of.
 
 `queue add --file <batch-file>` queues every entry a batch file declares.
 `naiad queue add --help` lists every option, including `--branch`, `--base`,
 `--at` and `--subject`.
+
+`--child-limit N` on `queue add` and `run` caps how many of the Run's Children
+work at once; a batch file says `child-limit = N`, at the top or per entry. With
+none, every Child starts as soon as it is queued. A limit of 1 takes them one at
+a time, in the order they were spawned. A parked Child still counts.
 
 An entry can run some States on a different model or effort from the one the
 Workflow names, without editing the Workflow. Name each State with `--model` or

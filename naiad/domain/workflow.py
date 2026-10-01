@@ -13,6 +13,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Literal
 
+from naiad.domain.prompt import CHILDREN_PLACEHOLDER
+
 DEFAULT_SOURCE = "<workflow>"
 
 # Whose a State's Questions are. The file decides the default: the Answerer's
@@ -37,6 +39,7 @@ STATE_KEYS = (
     "effort",
     "questions",
     "report",
+    "join",
 )
 ANSWERER_KEYS = ("model", "effort", "fallback")
 
@@ -76,6 +79,11 @@ class State:
     # the Run entered it and nothing is handed over. Never set on a
     # Gate State or a Terminal State, which already tell on entry.
     report: bool = False
+    # Whether this is a Join State: its Prompt is held while the Run's Children
+    # are working, and goes out once one has finished that the Run has not been
+    # told of, or at once when none is unfinished. Only a Join State's Prompt
+    # may carry the `{children}` slot that names them.
+    join: bool = False
 
     @property
     def is_gate_state(self) -> bool:
@@ -273,6 +281,21 @@ def _parse_state(
     if report and prompt is None:
         raise bad("report is refused on a Gate State, which already tells on entry")
 
+    join = raw.get("join", False)
+    if not isinstance(join, bool):
+        raise bad("join must be a boolean")
+    # A Join State holds its Prompt, so it must have one to hold, and it waits
+    # for the Run to go on, which a Terminal State never does.
+    if join and terminal:
+        raise bad("join is refused on a Terminal State, which ends the Run instead of waiting")
+    if join and prompt is None:
+        raise bad("join is refused on a State with no Prompt, since a Join State holds its Prompt")
+    if not join and prompt is not None and CHILDREN_PLACEHOLDER in prompt:
+        raise bad(
+            f"the {CHILDREN_PLACEHOLDER} slot is filled only at a Join State; "
+            f"declare join = true or take the slot out"
+        )
+
     questions = raw.get("questions", default_questions)
     if questions not in QUESTIONS_TO:
         raise bad('questions must be "answerer" or "human"')
@@ -288,4 +311,5 @@ def _parse_state(
         questions=questions,
         questions_explicit="questions" in raw,
         report=report,
+        join=join,
     )

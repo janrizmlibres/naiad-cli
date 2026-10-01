@@ -9,6 +9,12 @@ tree that is not done is that lane's Action — Resume if it has a Run, Start
 otherwise — and later Entries for the same tree wait behind it. If every Entry
 is done, Drained or Idle by mode.
 
+Capacity bounds starting and nothing else. Every live Run is Resumed whatever
+it says, a Start is made only while the live Runs are below the ceiling and
+memory is not strained, never into a working tree low on disk, and a scan makes
+at most one, so that what the machine reads after a start can catch up before
+the next.
+
 The exclusion unit is the working tree, named by the Entry's target path:
 sequential within a path, concurrent across paths. That single scan produces the
 behaviours with no special case for any of them. Sequential ordering per lane,
@@ -27,9 +33,11 @@ be added or removed in between.
 
 from __future__ import annotations
 
+from collections import Counter
 from collections.abc import Collection, Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Final, Literal
 
 from naiad.domain.entry import Entry
 
@@ -58,12 +66,27 @@ class Signals:
     here would keep the rules from being data in, Action out. An Entry absent
     from the mapping has no declared branch — its Run never reached a head, or
     never existed.
+
+    ceiling is how many Runs may be live at once, resolved once when the
+    Supervisor started. None sets no ceiling.
+
+    joining holds the ids of the Runs held at a Join State. Such a Run is live
+    but not counted toward the ceiling, so that a ceiling of one cannot leave a
+    Parent and its only Child waiting on each other.
+
+    strained says memory is under pressure, read each pass; unknown is handed
+    in as not strained, so that a machine with no reading has the ceiling
+    alone. low_disk holds the working trees whose volume is short of free disk.
     """
 
     entries: Sequence[Entry]
     finished: Collection[str] = ()
     following: bool = False
     declared: Mapping[str, str] = field(default_factory=dict)
+    ceiling: int | None = None
+    joining: Collection[str] = ()
+    strained: bool = False
+    low_disk: Collection[Path] = ()
 
 
 @dataclass(frozen=True)
@@ -103,13 +126,31 @@ class Idle:
     """Nothing to do; come round again. The Queue may yet be added to."""
 
 
+# Why nothing started although an Entry was waiting to.
+Reason = Literal["ceiling", "memory", "disk"]
+
+CEILING: Final = "ceiling"
+MEMORY: Final = "memory"
+DISK: Final = "disk"
+
+
+@dataclass(frozen=True)
+class AtCapacity:
+    """An Entry was waiting to start and Capacity held it back, for this
+    reason. Said on the scan so that the operator can tell a full machine from
+    a stuck Queue, and so that a Queue with work held back is never read as
+    drained."""
+
+    reason: Reason
+
+
 DRAINED = Drained()
 IDLE = Idle()
 
-Action = Start | Resume
+Action = Start | Resume | AtCapacity
 
-# What one scan of the Queue says: an Action per Lane with something live, or
-# the two nothing-to-do answers. Not called an Answer, a word reserved
+# What one scan of the Queue says: an Action per Lane with something live, plus
+# why Capacity held a start back when it did, or the two nothing-to-do answers. Not called an Answer, a word reserved
 # for what the Answerer settles a Question with.
 Scan = list[Action] | Drained | Idle
 
@@ -121,18 +162,51 @@ def supervise(signals: Signals) -> Scan:
     Run has not been started, so it is Started, and one with a Run the
     finished ids do not name has not ended, so it is Resumed — whether that
     Run is working or parked is not asked, because both want ticking and the
-    difference is the Run's to keep rather than the Queue's. A lane
+    difference is the Run's to keep rather than the Queue's. A Child its
+    Parent's Child limit holds back answers nothing, and keeps its lane. A lane
     that has answered is not asked again, which is one Run per working tree. No
     lane answering means every Entry is done, which is the empty Queue again and
     answers the same way.
+
+    A lane whose first Entry may start but cannot — another started this scan,
+    the live Runs are at the ceiling, memory is strained, or its working tree
+    is low on disk — keeps its lane and waits for a later scan, while a later
+    lane may start in its place. Capacity's reasons are worth giving, the
+    ceiling before memory before disk; the one-start rule clears on the next
+    pass by itself.
     """
     actions: list[Action] = []
     answered: set[Path] = set()
+    live = _live_children(signals)
+    running = _counted(signals)
+    starting = False
+    withheld: Reason | None = None
+    limits = {
+        entry.run_id: entry.child_limit
+        for entry in signals.entries
+        if entry.run_id is not None and entry.child_limit is not None
+    }
     for position, entry in enumerate(signals.entries):
         if entry.target_repo in answered:
             continue
         if entry.run_id is None:
             answered.add(entry.target_repo)
+            if _held(entry, live=live, limits=limits):
+                continue
+            if starting:
+                continue
+            if signals.ceiling is not None and running >= signals.ceiling:
+                withheld = CEILING
+                continue
+            if signals.strained:
+                withheld = MEMORY
+                continue
+            if entry.target_repo in signals.low_disk:
+                withheld = DISK
+                continue
+            starting = True
+            if entry.parent is not None:
+                live[entry.parent] += 1
             actions.append(
                 Start(
                     entry=entry,
@@ -147,9 +221,50 @@ def supervise(signals: Signals) -> Scan:
             answered.add(entry.target_repo)
             actions.append(Resume(entry=entry))
 
+    if withheld is not None and not starting:
+        actions.append(AtCapacity(reason=withheld))
     if actions:
         return actions
     return IDLE if signals.following else DRAINED
+
+
+def _live_children(signals: Signals) -> Counter[str]:
+    """How many Children each Parent Run has started and not finished. A parked
+    Child counts, because its Session is live."""
+    return Counter(
+        entry.parent
+        for entry in signals.entries
+        if entry.parent is not None
+        and entry.run_id is not None
+        and entry.run_id not in signals.finished
+    )
+
+
+def _counted(signals: Signals) -> int:
+    """How many Runs count toward the ceiling: every one started and not
+    finished, Children included. A parked Run counts, because its Session is
+    live; one held at a Join State does not, because it is waiting on the very
+    Runs the ceiling would keep from starting."""
+    return sum(
+        1
+        for entry in signals.entries
+        if entry.run_id is not None
+        and entry.run_id not in signals.finished
+        and entry.run_id not in signals.joining
+    )
+
+
+def _held(entry: Entry, *, live: Counter[str], limits: Mapping[str, int]) -> bool:
+    """Whether a Child is held back by its Parent's Child limit.
+
+    It keeps its Lane while held — it is still that working tree's first Entry
+    not done — and the Children are taken in id order, so a limit of one runs
+    them one at a time in the order they were spawned. A Parent whose Entry is
+    gone from the Queue, or that names no limit, holds nothing back.
+    """
+    if entry.parent is None or entry.parent not in limits:
+        return False
+    return live[entry.parent] >= limits[entry.parent]
 
 
 def _predecessor(
@@ -201,12 +316,17 @@ def _predecessor(
 
 
 __all__ = [
+    "CEILING",
+    "DISK",
     "DRAINED",
     "IDLE",
+    "MEMORY",
     "Action",
+    "AtCapacity",
     "Scan",
     "Drained",
     "Idle",
+    "Reason",
     "Resume",
     "Signals",
     "Start",

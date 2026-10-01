@@ -126,3 +126,30 @@ def test_leaves_a_placeholder_naiad_does_not_define_untouched():
     )
 
     assert rendered == "{base} then B"
+
+
+def test_interpolates_one_line_per_child():
+    from naiad.domain.join import FinishedChild
+
+    rendered = render_prompt(
+        "take in:\n{children}\nthen announce {next_state}",
+        task="t",
+        next_states=("implement",),
+        children=(
+            FinishedChild("e-1", "03.md", "feat--03", "/work/repo-wt--03", "completed"),
+            FinishedChild("e-2", None, None, "/work/repo-wt--04", "cancelled"),
+        ),
+    )
+
+    assert rendered == (
+        "take in:\n"
+        "- 03.md: completed, branch feat--03, working tree /work/repo-wt--03\n"
+        "- -: cancelled, branch -, working tree /work/repo-wt--04\n"
+        "then announce implement"
+    )
+
+
+def test_no_children_named_renders_the_slot_as_nothing():
+    rendered = render_prompt("take in [{children}]", task="t", next_states=(), children=())
+
+    assert rendered == "take in []"
