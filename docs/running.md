@@ -37,7 +37,17 @@ variable:
 naiad queue watch --capacity 6
 ```
 
-While nothing can start for that reason, the Supervisor says so once.
+Below the ceiling, the machine must also be unstrained. No Run starts while the
+operating system reports memory under pressure: on macOS,
+`kern.memorystatus_vm_pressure_level` above normal; on Linux, `some avg10` above
+10 in `/proc/pressure/memory`, or less than a tenth of memory available where
+that file is missing. No Run starts into a working tree whose volume has less
+free disk than the larger of 10% and 10 GB; a waiting entry there is passed over
+and another tree may start instead. Where the machine gives no reading, the
+ceiling alone applies.
+
+While nothing can start for one of these reasons (the ceiling, memory or
+disk), the Supervisor says so once.
 
 `queue list` prints one line per entry, in queue order:
 
@@ -51,7 +61,8 @@ brackets once it has one. What became of an entry is one of five words:
 
 - `waiting`: no Run yet. It is queued behind another entry for its tree, it is
   a Child held by its Parent's Child limit, the Supervisor is at its ceiling,
-  or no Supervisor has reached it.
+  memory is strained or its tree is low on disk, or no Supervisor has reached
+  it.
 - `running`: the agent is working.
 - `joining`: the Run stands at a Join State and is waiting on its Children.
   Nothing is wrong: its Prompt goes out as soon as a Child finishes.

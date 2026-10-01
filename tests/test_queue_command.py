@@ -706,6 +706,15 @@ def test_with_neither_the_ceiling_is_derived_from_the_machines_memory(home, monk
     assert wiring["ceiling"] == 5
 
 
+def test_the_supervisor_reads_this_machine_for_pressure_and_disk(home, monkeypatch):
+    monkeypatch.setattr("naiad.cli.main.Machine", SixteenGibibytes)
+    wiring = supervision(monkeypatch)
+
+    assert main(["queue", "watch"]) == 0
+
+    assert isinstance(wiring["machine"], SixteenGibibytes)
+
+
 @pytest.mark.parametrize("capacity", ["0", "-1", "two", "2.5"])
 def test_a_capacity_option_that_is_not_a_positive_whole_number_is_refused(
     home, monkeypatch, capsys, capacity

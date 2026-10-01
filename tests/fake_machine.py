@@ -43,10 +43,18 @@ def install_healthy(directory: Path) -> None:
     install_claude(directory)
 
 
-def install_sysctl(directory: Path, *, memsize: int | None) -> Path:
-    """A sysctl answering `-n hw.memsize` with `memsize` bytes, or failing to
-    when None."""
-    answer = "exit 1" if memsize is None else f"echo {memsize}; exit 0"
+def install_sysctl(
+    directory: Path, *, memsize: int | None = None, pressure_level: int | None = None
+) -> Path:
+    """A sysctl answering `-n hw.memsize` with `memsize` bytes and
+    `-n kern.memorystatus_vm_pressure_level` with `pressure_level`, failing
+    either it is given None for."""
+    memory = "exit 1" if memsize is None else f"echo {memsize}; exit 0"
+    pressure = "exit 1" if pressure_level is None else f"echo {pressure_level}; exit 0"
     return _script(
-        directory, "sysctl", f'if [ "$2" = "hw.memsize" ]; then {answer}; fi\nexit 1'
+        directory,
+        "sysctl",
+        f'if [ "$2" = "hw.memsize" ]; then {memory}; fi\n'
+        f'if [ "$2" = "kern.memorystatus_vm_pressure_level" ]; then {pressure}; fi\n'
+        "exit 1",
     )

@@ -16,6 +16,7 @@ from pathlib import Path
 import pytest
 
 from naiad.cli.supervisor import supervise_queue
+from naiad.domain.capacity import GB, Disk
 from naiad.domain.decide import Finish
 from naiad.domain.entry import Attachment, Entry
 from naiad.runtime.announcements import Announcements
@@ -133,6 +134,7 @@ def supervising(
     waking=None,
     ceiling=None,
     reports=None,
+    machine=None,
 ):
     """Run the Supervisor with the operator's Ctrl-C standing by. A loop that is
     supposed to end on its own never reaches it.
@@ -159,6 +161,7 @@ def supervising(
         sleep=sleep,
         report=(lambda _message: None) if reports is None else reports.append,
         ceiling=ceiling,
+        machine=machine,
     )
     return slept
 
@@ -572,3 +575,87 @@ def _interrupting_after(naps):
             raise Interrupted
 
     return sleep
+
+
+# The machine read each pass: unknown pressure is not strained and an
+# unreadable disk is not low, so a machine with no reading has the ceiling alone.
+
+
+class FakeMachine:
+    """A machine whose memory pressure and free disk the test sets."""
+
+    def __init__(self, *, strained=False, low=()):
+        self.pressure = strained
+        self.low = {Path(path) for path in low}
+
+    def strained(self):
+        return self.pressure
+
+    def free_disk(self, path):
+        if Path(path) in self.low:
+            return Disk(free=1 * GB, total=100 * GB)
+        return Disk(free=50 * GB, total=100 * GB)
+
+
+def test_strained_memory_starts_nothing_and_says_so_once(queue, runs, repo):
+    queued(queue, repo, "one")
+    supervision = Supervision(runs)
+    reports = []
+
+    with pytest.raises(Interrupted):
+        supervising(
+            queue,
+            runs,
+            supervision,
+            reports=reports,
+            machine=FakeMachine(strained=True),
+            naps_allowed=3,
+        )
+
+    assert supervision.started == []
+    assert len([report for report in reports if "memory" in report]) == 1
+
+
+def test_a_start_waits_for_memory_to_ease(queue, runs, repo):
+    queued(queue, repo, "one")
+    supervision = Supervision(runs)
+    machine = FakeMachine(strained=True)
+
+    def easing():
+        machine.pressure = False
+
+    supervising(queue, runs, supervision, machine=machine, waking=easing)
+
+    assert supervision.started == [("one", None)]
+
+
+def test_unknown_memory_pressure_leaves_the_ceiling_alone(queue, runs, repo, other_repo):
+    queued(queue, repo, "one")
+    queued(queue, other_repo, "two")
+    supervision = Supervision(runs)
+
+    supervising(queue, runs, supervision, ceiling=2, machine=FakeMachine(strained=None))
+
+    assert [started for started, _ in supervision.started] == ["one", "two"]
+
+
+def test_a_working_tree_low_on_disk_is_passed_over_for_a_later_one(
+    queue, runs, repo, other_repo
+):
+    queued(queue, repo, "one")
+    queued(queue, other_repo, "two")
+    supervision = Supervision(runs)
+    reports = []
+
+    with pytest.raises(Interrupted):
+        supervising(
+            queue,
+            runs,
+            supervision,
+            reports=reports,
+            machine=FakeMachine(low={repo}),
+            naps_allowed=3,
+        )
+
+    assert supervision.started == [("two", None)]
+    assert len([report for report in reports if "disk" in report]) == 1

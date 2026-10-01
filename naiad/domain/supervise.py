@@ -10,9 +10,10 @@ otherwise — and later Entries for the same tree wait behind it. If every Entry
 is done, Drained or Idle by mode.
 
 Capacity bounds starting and nothing else. Every live Run is Resumed whatever
-it says, a Start is made only while the live Runs are below the ceiling, and a
-scan makes at most one, so that what the machine reads after a start can catch
-up before the next.
+it says, a Start is made only while the live Runs are below the ceiling and
+memory is not strained, never into a working tree low on disk, and a scan makes
+at most one, so that what the machine reads after a start can catch up before
+the next.
 
 The exclusion unit is the working tree, named by the Entry's target path:
 sequential within a path, concurrent across paths. That single scan produces the
@@ -36,7 +37,7 @@ from collections import Counter
 from collections.abc import Collection, Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Literal
+from typing import Final, Literal
 
 from naiad.domain.entry import Entry
 
@@ -72,6 +73,10 @@ class Signals:
     joining holds the ids of the Runs held at a Join State. Such a Run is live
     but not counted toward the ceiling, so that a ceiling of one cannot leave a
     Parent and its only Child waiting on each other.
+
+    strained says memory is under pressure, read each pass; unknown is handed
+    in as not strained, so that a machine with no reading has the ceiling
+    alone. low_disk holds the working trees whose volume is short of free disk.
     """
 
     entries: Sequence[Entry]
@@ -80,6 +85,8 @@ class Signals:
     declared: Mapping[str, str] = field(default_factory=dict)
     ceiling: int | None = None
     joining: Collection[str] = ()
+    strained: bool = False
+    low_disk: Collection[Path] = ()
 
 
 @dataclass(frozen=True)
@@ -120,9 +127,11 @@ class Idle:
 
 
 # Why nothing started although an Entry was waiting to.
-Reason = Literal["ceiling"]
+Reason = Literal["ceiling", "memory", "disk"]
 
-CEILING: Reason = "ceiling"
+CEILING: Final = "ceiling"
+MEMORY: Final = "memory"
+DISK: Final = "disk"
 
 
 @dataclass(frozen=True)
@@ -160,9 +169,11 @@ def supervise(signals: Signals) -> Scan:
     answers the same way.
 
     A lane whose first Entry may start but cannot — another started this scan,
-    or the live Runs are at the ceiling — keeps its lane and waits for a later
-    scan. Only the ceiling is a reason worth giving: the one-start rule clears
-    on the next pass by itself.
+    the live Runs are at the ceiling, memory is strained, or its working tree
+    is low on disk — keeps its lane and waits for a later scan, while a later
+    lane may start in its place. Capacity's reasons are worth giving, the
+    ceiling before memory before disk; the one-start rule clears on the next
+    pass by itself.
     """
     actions: list[Action] = []
     answered: set[Path] = set()
@@ -186,6 +197,12 @@ def supervise(signals: Signals) -> Scan:
                 continue
             if signals.ceiling is not None and running >= signals.ceiling:
                 withheld = CEILING
+                continue
+            if signals.strained:
+                withheld = MEMORY
+                continue
+            if entry.target_repo in signals.low_disk:
+                withheld = DISK
                 continue
             starting = True
             if entry.parent is not None:
@@ -300,8 +317,10 @@ def _predecessor(
 
 __all__ = [
     "CEILING",
+    "DISK",
     "DRAINED",
     "IDLE",
+    "MEMORY",
     "Action",
     "AtCapacity",
     "Scan",

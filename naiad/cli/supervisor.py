@@ -25,11 +25,15 @@ from __future__ import annotations
 
 import time
 from collections.abc import Callable, Sequence
-from typing import assert_never
+from pathlib import Path
+from typing import Protocol, assert_never
 
+from naiad.domain.capacity import DISK_FLOOR, DISK_SHARE, GB, Disk, low_on_disk
 from naiad.domain.entry import Entry
 from naiad.domain.supervise import (
     CEILING,
+    DISK,
+    MEMORY,
     AtCapacity,
     Drained,
     Idle,
@@ -55,6 +59,14 @@ POLL_SECONDS = 5.0
 TICK_SECONDS = 2.0
 
 
+class MachineReading(Protocol):
+    """What the Supervisor asks of the machine each pass."""
+
+    def strained(self) -> bool | None: ...
+
+    def free_disk(self, path: Path) -> Disk | None: ...
+
+
 def supervise_queue(
     *,
     queue: Queue,
@@ -65,12 +77,15 @@ def supervise_queue(
     sleep: Callable[[float], None] = time.sleep,
     report: Callable[[str], None] = print,
     ceiling: int | None = None,
+    machine: MachineReading | None = None,
 ) -> None:
     """Take the Queue lane by lane until it is drained, or forever when
     following.
 
     ceiling is how many Runs may be live at once, resolved by the caller when
-    the Supervisor started; None sets none.
+    the Supervisor started; None sets none. machine is read each pass for
+    memory pressure and free disk; None reads nothing, as a machine that
+    answers neither.
 
     sleep and report are handed in so that a test can drive the loop without
     waiting on a clock or printing to the operator's terminal; the loop is the
@@ -95,6 +110,8 @@ def supervise_queue(
                 declared=_declared(entries, runs),
                 ceiling=ceiling,
                 joining={run_id for run_id, status in statuses.items() if status == JOINING},
+                strained=machine is not None and machine.strained() is True,
+                low_disk=_low_disk(entries, machine),
             )
         )
 
@@ -174,10 +191,29 @@ def _statuses(entries: Sequence[Entry], runs: RunStore, queue: Queue) -> dict[st
     }
 
 
+def _low_disk(entries: Sequence[Entry], machine: MachineReading | None) -> set[Path]:
+    """The working trees waiting to start whose volume is short of free disk.
+    Only those not started are asked, because a live Run is never held back."""
+    if machine is None:
+        return set()
+    return {
+        entry.target_repo
+        for entry in entries
+        if entry.run_id is None and low_on_disk(machine.free_disk(entry.target_repo))
+    }
+
+
 def _held_back(reason: Reason, *, ceiling: int | None) -> str:
     """The operator's line for why nothing is starting."""
     if reason == CEILING:
         return f"not starting anything: the ceiling of {ceiling} live runs is reached"
+    if reason == MEMORY:
+        return "not starting anything: the machine reports memory under pressure"
+    if reason == DISK:
+        return (
+            "not starting anything: free disk where the waiting runs would work is "
+            f"below the larger of {DISK_SHARE:.0%} and {DISK_FLOOR // GB} GB"
+        )
     assert_never(reason)
 
 

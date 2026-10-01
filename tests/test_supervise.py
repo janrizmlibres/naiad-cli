@@ -12,8 +12,10 @@ from pathlib import Path
 from naiad.domain.entry import Entry
 from naiad.domain.supervise import (
     CEILING,
+    DISK,
     DRAINED,
     IDLE,
+    MEMORY,
     AtCapacity,
     Resume,
     Signals,
@@ -451,9 +453,17 @@ def test_a_held_child_keeps_its_lane_waiting_behind_it():
 # starting only — whatever Capacity says, a live Run is always ticked.
 
 
-def capped(*entries, ceiling, finished=(), joining=()):
+def capped(
+    *entries, ceiling=None, finished=(), joining=(), strained=False, low_disk=()
+):
     return Signals(
-        entries=entries, finished=finished, following=False, ceiling=ceiling, joining=joining
+        entries=entries,
+        finished=finished,
+        following=False,
+        ceiling=ceiling,
+        joining=joining,
+        strained=strained,
+        low_disk=low_disk,
     )
 
 
@@ -551,3 +561,64 @@ def test_a_child_held_by_its_limit_is_not_a_capacity_reason():
     )
 
     assert not any(isinstance(action, AtCapacity) for action in scan)
+
+
+# Below the ceiling, the machine must be unstrained: memory pressure stops every
+# start, and a working tree short of free disk is passed over.
+
+
+def test_strained_memory_starts_nothing_but_every_live_run_is_resumed():
+    running = entry("one", run_id="a-run")
+    waiting = entry("two", target_repo=ANOTHER_REPO)
+
+    scan = supervise(capped(running, waiting, ceiling=10, strained=True))
+
+    assert scan == [Resume(entry=running), AtCapacity(reason=MEMORY)]
+
+
+def test_strained_memory_holds_back_a_start_with_no_ceiling_set():
+    waiting = entry("one")
+
+    assert supervise(capped(waiting, strained=True)) == [AtCapacity(reason=MEMORY)]
+
+
+def test_the_ceiling_is_the_reason_when_both_hold_a_start_back():
+    running = entry("one", run_id="a-run")
+    waiting = entry("two", target_repo=ANOTHER_REPO)
+
+    scan = supervise(capped(running, waiting, ceiling=1, strained=True))
+
+    assert scan == [Resume(entry=running), AtCapacity(reason=CEILING)]
+
+
+def test_a_working_tree_low_on_disk_is_passed_over_and_a_later_lane_starts():
+    low = entry("one")
+    later = entry("two", target_repo=ANOTHER_REPO)
+
+    scan = supervise(capped(low, later, ceiling=10, low_disk={REPO}))
+
+    assert scan == [Start(entry=later, predecessor=None)]
+
+
+def test_an_entry_behind_one_low_on_disk_in_its_own_lane_waits_too():
+    low = entry("one")
+    behind = entry("two")
+
+    scan = supervise(capped(low, behind, low_disk={REPO}))
+
+    assert started(scan) == []
+
+
+def test_disk_is_the_reason_when_every_waiting_tree_is_low():
+    running = entry("one", run_id="a-run")
+    low = entry("two", target_repo=ANOTHER_REPO)
+
+    scan = supervise(capped(running, low, ceiling=10, low_disk={ANOTHER_REPO}))
+
+    assert scan == [Resume(entry=running), AtCapacity(reason=DISK)]
+
+
+def test_a_live_run_on_a_low_disk_is_still_resumed():
+    running = entry("one", run_id="a-run")
+
+    assert supervise(capped(running, low_disk={REPO})) == [Resume(entry=running)]

@@ -6,7 +6,14 @@ import pytest
 from fake_machine import install_sysctl
 
 from naiad.adapters.machine import Machine
-from naiad.domain.capacity import CapacityError, ceiling_for, resolve_ceiling
+from naiad.domain.capacity import (
+    GB,
+    CapacityError,
+    Disk,
+    ceiling_for,
+    low_on_disk,
+    resolve_ceiling,
+)
 
 GIB = 1 << 30
 
@@ -56,3 +63,23 @@ def test_an_environment_variable_that_is_not_a_positive_whole_number_is_refused(
         resolve_ceiling(option=None, variable=variable, total_memory=never_read)
 
     assert "NAIAD_CAPACITY" in str(refused.value)
+
+
+# The free-disk floor: the larger of a tenth of the volume and 10 GB.
+
+
+@pytest.mark.parametrize(
+    ("total", "free", "low"),
+    [
+        (50 * GB, 10 * GB, False),
+        (50 * GB, 10 * GB - 1, True),
+        (1000 * GB, 100 * GB, False),
+        (1000 * GB, 100 * GB - 1, True),
+    ],
+)
+def test_disk_is_low_below_the_larger_of_a_tenth_and_ten_gigabytes(total, free, low):
+    assert low_on_disk(Disk(free=free, total=total)) is low
+
+
+def test_an_unreadable_disk_is_not_low():
+    assert low_on_disk(None) is False

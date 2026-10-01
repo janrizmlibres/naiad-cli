@@ -1661,6 +1661,7 @@ def _supervise(*, following: bool, ceiling: int) -> int:
             tick=_ticker(),
             following=following,
             ceiling=ceiling,
+            machine=Machine(),
         )
     except FAILURES as error:
         print(f"naiad: {error}", file=sys.stderr)
