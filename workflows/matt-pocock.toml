@@ -95,11 +95,11 @@ After writing the spec, announce {next_state}.
 
 [[states]]
 name = "tickets"
-next = ["implement", "handover"]
+next = ["implement"]
 prompt = """
 /to-tickets
 
-After writing the tickets, announce {next_state}, passing the lowest-numbered ticket that is ready-for-agent and blocked by nothing as the subject. If no ticket qualifies, announce handover instead, and say which status you found.
+After writing the tickets, announce {next_state}, with no subject.
 """
 
 [[states]]
@@ -107,25 +107,43 @@ name = "implement"
 model = "opus"
 effort = "medium"
 clear = true
+join = true
 next = ["implement", "triage", "handover", "pull-request"]
 prompt = """
-/implement {subject}
-
 Working branch: {branch}
 Predecessor: {predecessor}
 
-Do this ticket on the Working branch, wherever it is checked out, and not on whatever this checkout stands on now: a person or another Run may have switched it since this Run's last ticket. Run `git worktree list` before you change anything. If a worktree of this repository has the Working branch checked out, work and commit in that worktree. Otherwise, if the branch exists, check it out here. If the line names a branch that exists nowhere, do not create it from what is checked out — say so in the session and announce handover.
+Coordinate this feature's tickets and build none of them yourself: each ready ticket is built by a Child of this Run, in a worktree of its own. The tickets are the set this Run's task was split into, kept where this repository's issue tracker keeps them. A ticket or ticket set the task names is that set.
+
+{task}
+
+Work on the Working branch wherever it is checked out, and not on whatever this checkout stands on now: a person or another Run may have switched it. Run `git worktree list` before you change anything. If a worktree of this repository has the Working branch checked out, work and commit in that worktree. Otherwise, if the branch exists, check it out here. If the line names a branch that exists nowhere, do not create it from what is checked out — say so in the session and announce handover.
 
 If the Working branch line above is empty, this Run was started here without one. Derive a name from this repository's conventions — its recent branch names, its pull requests, the team's prefixes — create it from the Predecessor when one is named above and `git merge-base --is-ancestor <predecessor> <base branch>` exits non-zero, and from the repository's base branch otherwise, never from what is checked out. Declare it to Naiad in the same turn with `naiad branch <name>`.
 
-When it is done, set that ticket's Status line to resolved.
+A ticket is closed when its Status line reads resolved or wontfix, and open otherwise, claimed included. A ticket's branch is `<working-branch>--<NN>`, where `<NN>` is its number, and its worktree is the sibling of this repository's checkout named `<repo>-wt-<working-branch-slug>--<NN>`: the checkout's directory name, `-wt-`, the Working branch with every `/` made `-`, then `--` and the number. A ticket's Child is in flight while the ticket reads claimed, its worktree exists, and `naiad queue list` shows a Child of this Run working in that worktree. Where git does not track the ticket set, its files live only in the checkout that holds them, whichever branch it stands on: make every Status change and comment below there, with nothing of it to commit.
 
-Then choose what comes next. A ticket is closed when its Status line reads resolved or wontfix, and open otherwise. Scan for the next lowest-numbered ticket in the set that is open and whose blocking edges are all satisfied and read its Status line:
+Do these three things, in order.
 
-- ready-for-agent — announce implement, passing that ticket's file as the subject.
-- needs-triage — announce triage, passing that ticket's file as the subject.
-- any other status, including ready-for-human, needs-info, one this repository does not define, or no Status line at all — announce handover, and say in the session which status you found and why you are stopping.
-- no open tickets remain — announce pull-request.
+1. Take in each Child named below. A pass may name none.
+
+{children}
+
+   A completed Child: merge its branch into the Working branch and run the tests. Where git does not track the ticket set, set its ticket's Status line to resolved. Where the ticket reached a companion repository — one the `companions` key of a .matt-pocock.toml at this repository's root names — merge the companion's branch of the same name into the companion's feature branch, which carries the Working branch's name, in whichever worktree of the companion has it checked out, creating it from the companion's base branch on first need. Then remove the Child's worktrees, here and in companions, and delete its branches with `git branch -d`. Resolve a merge conflict yourself and run the tests. If you cannot get them passing, abort the merge, say so in the session, and announce handover.
+
+   A cancelled Child: remove its worktree, keep its branch, and add a line under its ticket's `## Comments` heading saying its Child was cancelled and its branch is kept, and commit that on the Working branch. Its ticket stays claimed with no Child in flight.
+
+2. Scan. For every open ticket whose Status line reads ready-for-agent and whose blocking edges are all satisfied, lowest-numbered first, stopping once as many Children are in flight as the `children` key of a .matt-pocock.toml at this repository's root allows (no key, no limit):
+   - set its Status line to claimed and commit that on the Working branch;
+   - `git worktree add -b <working-branch>--<NN> <its worktree> <working-branch>`;
+   - copy into that worktree the untracked setup the repository needs to build and test: its `.env` files, whatever its README names as a setup step, and the ticket set where git does not track it;
+   - `naiad spawn --repo <its worktree> --branch <working-branch>--<NN> --base <working-branch> --at build --subject <the ticket's path from the repository root>`. If the spawn is refused, remove that worktree and its branch, add a line under the ticket's `## Comments` heading giving the refusal, commit that on the Working branch, and leave the ticket claimed with no Child in flight.
+
+3. Route, by the first line that applies:
+   - an open ticket whose blocking edges are all satisfied reads needs-triage — announce triage, passing that ticket's file as the subject;
+   - a Child is in flight — announce implement, with no subject;
+   - an open ticket remains, whatever its status, including claimed with no Child in flight — announce handover, and say in the session which tickets and statuses you found and why you are stopping, naming every ticket whose Child was cancelled;
+   - no open ticket remains — announce pull-request.
 """
 
 [[states]]
@@ -133,7 +151,7 @@ name = "triage"
 model = "opus"
 effort = "medium"
 clear = true
-next = ["implement", "triage", "handover", "pull-request"]
+next = ["implement", "triage"]
 prompt = """
 /triage {subject}
 
@@ -141,12 +159,7 @@ Only set that ticket's Status line to needs-info if there are questions that tur
 
 End the pass with the ticket's Status line reading ready-for-agent, ready-for-human, needs-info or wontfix.
 
-Then choose what comes next. A ticket is closed when its Status line reads resolved or wontfix, and open otherwise. Scan for the next lowest-numbered ticket in the set that is open and whose blocking edges are all satisfied and read its Status line:
-
-- ready-for-agent — announce implement, passing that ticket's file as the subject.
-- needs-triage — announce triage, passing that ticket's file as the subject.
-- any other status, including ready-for-human, needs-info, one this repository does not define, or no Status line at all — announce handover, and say in the session which status you found and why you are stopping.
-- no open tickets remain — announce pull-request.
+Then choose what comes next. A ticket is closed when its Status line reads resolved or wontfix, and open otherwise, claimed included. If an open ticket in the set whose blocking edges are all satisfied reads needs-triage, announce triage, passing the lowest-numbered such ticket's file as the subject. Otherwise announce implement, with no subject.
 """
 
 [[states]]
@@ -161,7 +174,9 @@ clear = true
 prompt = """
 Working branch: {branch}
 
-Before anything else, work out which repositories this Run's work reached. This one, always, and in this one the Run's work is the Working branch above — not whatever this checkout stands on now, which a person or another Run may have switched while this Run worked. Run `git worktree list`: push and open from the worktree that has the Working branch checked out, or from this checkout if it stands on it. Ask the human before opening anything if the line above is empty, if no local branch has that name, or if the branch has commits ahead of its base that do not answer this Run's task.
+Before anything else, sweep what the Children of the implement loop left behind, in this repository and in each companion repository described below: run `git worktree prune`, then delete with `git branch -d` every `{branch}--<NN>` branch already merged into `{branch}`.
+
+Then work out which repositories this Run's work reached. This one, always, and in this one the Run's work is the Working branch above — not whatever this checkout stands on now, which a person or another Run may have switched while this Run worked. Run `git worktree list`: push and open from the worktree that has the Working branch checked out, or from this checkout if it stands on it. Ask the human before opening anything if the line above is empty, if no local branch has that name, or if the branch has commits ahead of its base that do not answer this Run's task.
 
 A .matt-pocock.toml at this repository's root may also name companion repositories — a frontend to this backend, a client to this service — under a `companions` key, whose value is a list of paths to their checkouts relative to this repository's root. A feature that spans them leaves half its work in another checkout, so look at each one that key names — and not only at what that path has checked out. A path names a repository, and the work may sit in another worktree of it or on a branch nothing has checked out, while the path itself stands on something unrelated. So list every worktree (`git -C <path> worktree list`) and every local branch (`git -C <path> branch`) of that repository, and weigh each branch: it carries this Run's work if it is not the repository's base branch and has commits ahead of that base whose contents answer this Run's task. Push and open from the worktree that has that branch checked out. A companion none of whose branches carries such work — no such branch, or commits that are somebody else's unfinished work — is left untouched, and you say in the session which it was, which branches you weighed and why.
 
@@ -181,6 +196,30 @@ Once every one of them is settled, opened or deliberately not, announce {next_st
 [[states]]
 name = "done"
 terminal = true
+
+# Entered only by name: each Child of `implement` starts here.
+
+[[states]]
+name = "build"
+model = "opus"
+effort = "medium"
+next = ["done"]
+prompt = """
+/implement {subject}
+
+Working branch: {branch}
+Base: {predecessor}
+
+Build that one ticket in this worktree, on the Working branch above, which was cut from the base branch. Leave the other tickets, the base branch and every other worktree alone, and push nothing.
+
+Before you start the ticket, make this worktree buildable. Find the checkout that has the base branch checked out with `git worktree list`. Clone each dependency directory the repository's install creates and git does not track, such as `node_modules` or `.venv`, from that checkout into this one copy-on-write — `cp -c -R` on macOS, `cp -R --reflink=auto` on Linux — then run the repository's install. Where a clone still resolves the repository's own code from that checkout rather than this one, remove it and install fresh.
+
+If the ticket reaches a companion repository — one the `companions` key of a .matt-pocock.toml at this repository's root names — do that part in a sibling worktree of the companion, named as this one is but after the companion's directory, on a branch named the same as the Working branch above. Cut that branch from the companion's branch named after the base branch, or from the companion's base branch when that branch does not exist yet.
+
+Leave no watcher or dev server running. Run no test that needs a service the other tickets' worktrees share, such as a database, a port or a queue, unless this repository says they may share it.
+
+When the ticket is done, set its Status line to resolved, commit on the Working branch and on any companion branch, and announce done.
+"""
 
 # The Wayfinder loop. Entered only by name — `--at wayfind --subject <ticket>`
 # or an Adoption — so it sits after the Terminal State, out of the declared

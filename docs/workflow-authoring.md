@@ -200,6 +200,41 @@ asked from the State. It goes on a Prompt State only. On a Gate or a Terminal
 State the loader refuses it, because each already tells you on entry. Take it off
 again with `naiad state unset mine ship report`.
 
+### Children
+
+A Prompt can have its Run work on several items at once by asking the agent to
+**Spawn** one **Child** per item. A Child is a Run of its own, queued by the
+agent from inside its Session, and the command returns at once:
+
+```
+naiad spawn --repo ../app-wt-feat-export--03 --branch feat/export--03 --base feat/export --at build --subject tickets/03.md
+```
+
+The Child takes its Parent's Workflow, task, settings and `--skip-gates`
+unless the command names its own. `--branch`, `--base`, `--at` and `--subject`
+mean what they mean on `naiad queue add`, so the Child's Prompts read its
+branch, its base and its item in `{branch}`, `{predecessor}` and `{subject}`.
+`--repo` is required and must be a working tree of the Child's own, never the
+Parent's: a Child in the Parent's working tree would wait behind it forever.
+Naiad knows no git, so the Prompt that spawns says how to make that working
+tree, usually a `git worktree add` beside the repository, and what to copy
+into it before the Child can build there.
+
+A Child usually starts at a State placed after the Terminal State, entered
+only by name, which does one item and announces the Terminal State. Its Parent
+takes it in at a Join State, which is also where it spawns. The Parent's
+Prompt carries what Naiad does not: which items exist, which are ready, how a
+finished Child's work is merged, and what is cleaned up afterwards. Write down
+which items are in flight somewhere the Parent can read after a Clear, such
+as a Status line on each item. Otherwise a Join State that Clears spawns
+the same item twice.
+
+Only one level is allowed: a Child cannot spawn. How many Children work at
+once is bounded by the Entry's Child limit (`queue add --child-limit`) and by
+the machine (see [Running Naiad](running.md)). A Workflow that wants a limit
+of its own, such as one a repository sets because its tests share a database,
+says so in its Prompt and counts what it has in flight before it spawns.
+
 ## 4. The slots
 
 A Prompt is prose, and six slots in it are filled in when it is typed. Only

@@ -24,7 +24,12 @@ import pytest
 
 from naiad.cli.kickoff import start_run
 from naiad.cli.refusals import MissingSubject
-from naiad.domain.prompt import SUBJECT_PLACEHOLDER, render_prompt
+from naiad.domain.prompt import (
+    BRANCH_PLACEHOLDER,
+    CHILDREN_PLACEHOLDER,
+    SUBJECT_PLACEHOLDER,
+    render_prompt,
+)
 from naiad.domain.transitions import deviation, next_states
 from naiad.domain.workflow import load_workflow
 from naiad.runtime.run import RunStore
@@ -43,11 +48,18 @@ PREDECESSOR = "TASK-8500"
 
 # The renderer's closed set (naiad.domain.prompt): a slot spelled any other
 # way is delivered to the agent verbatim.
-PLACEHOLDERS = ("{task}", "{next_state}", "{subject}", "{branch}", "{predecessor}")
+PLACEHOLDERS = (
+    "{task}",
+    "{next_state}",
+    SUBJECT_PLACEHOLDER,
+    BRANCH_PLACEHOLDER,
+    "{predecessor}",
+    CHILDREN_PLACEHOLDER,
+)
 
 # What a slot looks like when an author writes one. Deliberately narrow — a
 # Prompt may carry code, and code's braces are not slots — but wide enough to
-# catch the misspellings of the five names above.
+# catch the misspellings of the names above.
 PLACEHOLDER_SHAPED = re.compile(r"\{[a-z_]+\}")
 
 # Loaded at module level because the parametrised lists below are read at
