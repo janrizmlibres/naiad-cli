@@ -31,6 +31,7 @@ from naiad.domain.entry import Entry
 from naiad.domain.supervise import Drained, Idle, Resume, Signals, Start, supervise
 from naiad.runtime.home import StorageError
 from naiad.runtime.queue import DONE, Queue, branch_of, status_of
+from naiad.runtime.records import Children
 from naiad.runtime.run import Run, RunStore
 
 # How long a following Supervisor waits before looking at the Queue again.
@@ -92,6 +93,17 @@ def supervise_queue(
                 entry = action.entry
                 report(f"starting {entry.id}: {entry.task}")
                 run = start(entry, action.predecessor)
+                # A Child needs no rule of its own to start, its working tree
+                # being a Lane of its own; what is owed is the Run it became,
+                # on its Parent's record. Written before the Entry learns it,
+                # so that the narrow window below leaves the record naming the
+                # Run a restarted Supervisor would start in its place rather
+                # than none.
+                # A Parent whose Run directory has gone is given no stub of one.
+                if entry.parent is not None and runs.load(entry.parent) is not None:
+                    Children(runs.root_for(entry.parent)).record_start(
+                        entry.id, run_id=run.id
+                    )
                 # Recorded before the Run is ticked rather than after it,
                 # because this is what a Supervisor restarted mid-Run reads to
                 # find the same Entry again — and recorded afterwards it would

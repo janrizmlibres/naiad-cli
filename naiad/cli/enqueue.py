@@ -62,6 +62,9 @@ class Work:
     # The Model and Effort named for States of the Workflow, checked against it
     # with the start State.
     settings: tuple[StateSetting, ...] = ()
+    # The Run spawning this work as its Child, given by Spawn alone: the
+    # operator's entrances queue work nobody spawned.
+    parent: str | None = None
 
 
 class BranchAlreadyClaimed(Exception):
@@ -184,6 +187,7 @@ def prepare(
         skip_gates=work.skip_gates,
         attachment=work.attachment,
         settings=work.settings,
+        parent=work.parent,
     )
 
 

@@ -1392,3 +1392,34 @@ def test_a_watched_run_that_was_never_queued_names_no_entry(home, repo, monkeypa
     _drive(run)
 
     assert watched["entry_id"] is None
+
+
+def test_listing_shows_each_child_indented_beneath_its_parent(home, repo, tmp_path, capsys):
+    """A fan-out reads as one piece of work: each Child under the Entry whose
+    Run spawned it, with its own status, whatever Queue order says."""
+    worktree = tmp_path / "repo-wt-01"
+    worktree.mkdir()
+    parent = run_entry(home, repo, "a-parent")
+    add(repo, "--branch", "TASK-8547")
+    (unrelated,) = [entry for entry in queue_of(home).all() if entry.id != "a-parent"]
+    queue_of(home).add(
+        Entry(
+            id="0-child",
+            workflow_path=repo / "workflow.toml",
+            task="build ticket one",
+            target_repo=worktree,
+            working_branch="TASK-8546--01",
+            created_at="2026-07-22T12:00:00Z",
+            parent=parent.id,
+        )
+    )
+
+    capsys.readouterr()
+    assert main(["queue", "list"]) == 0
+
+    lines = capsys.readouterr().out.splitlines()
+    at = {line.split()[0]: index for index, line in enumerate(lines)}
+    assert at["0-child"] == at["a-parent"] + 1
+    child_line = lines[at["0-child"]]
+    assert child_line.startswith("  0-child") and "waiting" in child_line
+    assert not lines[at[unrelated.id]].startswith(" ")

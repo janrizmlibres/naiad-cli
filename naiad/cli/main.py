@@ -53,6 +53,7 @@ from naiad.cli.library import (
 from naiad.cli.kickoff import start_entry
 from naiad.cli.protocol import injection_for, standing_in
 from naiad.cli.refusals import ADD_COMMAND, ADOPT_COMMAND, RUN_COMMAND, Remedy
+from naiad.cli.spawn import SpawnError, spawn_child
 from naiad.cli.supervisor import supervise_queue
 from naiad.cli.terminal import terminal_width
 from naiad.cli.wait import WaitError, declare_wait
@@ -60,7 +61,7 @@ from naiad.cli.watch import tick_once, watch
 from naiad.domain.entry import Attachment, Entry
 from naiad.domain.key_table import file_key_help, file_row, file_value
 from naiad.domain.listing import render_states, render_workflow
-from naiad.domain.protocol import ANNOUNCE_SUBCOMMAND
+from naiad.domain.protocol import ANNOUNCE_SUBCOMMAND, SPAWN_SUBCOMMAND
 from naiad.domain.settings import Setting, StateSetting
 from naiad.domain.workflow import Workflow, WorkflowError, load_workflow
 from naiad.hooks.install import install_hooks
@@ -96,6 +97,7 @@ FAILURES = (
     LibraryError,
     NoRunError,
     NotInTmux,
+    SpawnError,
     StorageError,
     TmuxError,
     # Everything describing a piece of work can be refused for, taken from the
@@ -364,6 +366,26 @@ def build_parser() -> argparse.ArgumentParser:
     branch_parser.add_argument("name", help="the branch's name, exactly as you created it")
     branch_parser.set_defaults(handler=_branch)
 
+    spawn_parser = subcommands.add_parser(
+        SPAWN_SUBCOMMAND,
+        help="queue a Child of this run, in a working tree of its own, when the workflow asks",
+    )
+    spawn_parser.add_argument(
+        "task",
+        nargs="?",
+        default=None,
+        help="what the Child's work is (default: this run's task)",
+    )
+    # The same qualifying flags every entrance takes, each beating what the
+    # Child would otherwise take from its Parent. --repo is among them and is
+    # refused with a message when absent, as the other entrances refuse what
+    # they lack.
+    _describe_where_and_how(
+        spawn_parser,
+        repo_help="the Child's own working tree, never this run's (required)",
+    )
+    spawn_parser.set_defaults(handler=_spawn)
+
     stopped = subcommands.add_parser("stopped", help="record that a turn ended (Stop hook)")
     stopped.set_defaults(handler=_stopped)
 
@@ -466,7 +488,11 @@ def _describe_the_work(parser: argparse.ArgumentParser, *, required: bool = True
     _describe_where_and_how(parser)
 
 
-def _describe_where_and_how(parser: argparse.ArgumentParser) -> None:
+def _describe_where_and_how(
+    parser: argparse.ArgumentParser,
+    *,
+    repo_help: str = "the target repository (default: the working directory)",
+) -> None:
     """Everything qualifying a piece of work rather than naming it: which
     repository, which branch, what it stands on, where it starts, on what, and
     whether Gates are resolved past.
@@ -480,7 +506,7 @@ def _describe_where_and_how(parser: argparse.ArgumentParser) -> None:
         "--repo",
         type=Path,
         default=None,
-        help="the target repository (default: the working directory)",
+        help=repo_help,
     )
     # Optional: given, it is carried verbatim and never second-guessed; absent,
     # the agent at the head of the Run derives a name from the target
@@ -643,6 +669,45 @@ def _branch(arguments: argparse.Namespace) -> int:
         return 2
 
     print(f"declared working branch '{arguments.name}'; this run's work belongs on it")
+    return 0
+
+
+def _spawn(arguments: argparse.Namespace) -> int:
+    """Queues a Child and returns, supervising nothing, for the reason
+    `naiad queue add` does not: this is typed inside a Session, and a tool call
+    that became a process blocking for hours is the failure the Queue exists to
+    avoid.
+
+    The Run is resolved first, so that Spawn typed outside any Run is told so
+    whatever else it lacks, as every other verb is."""
+    added = datetime.now(timezone.utc)
+    try:
+        run = _current_run()
+        if arguments.repo is None:
+            raise SpawnError(
+                "a child needs a working tree of its own; "
+                "name it with: naiad spawn --repo <path>"
+            )
+        entry = spawn_child(
+            run=run,
+            task=arguments.task,
+            target_repo=arguments.repo.expanduser().resolve(),
+            working_branch=arguments.branch,
+            pinned_base=arguments.base,
+            start_state=arguments.start_state,
+            subject=arguments.subject,
+            skip_gates=arguments.skip_gates,
+            settings=_settings_given(arguments),
+            queue=Queue(default_queue_root()),
+            runs=RunStore(default_runs_root()),
+            entry_id=_entry_id(added, run.workflow_path),
+            created_at=_timestamp(added),
+        )
+    except FAILURES as error:
+        print(f"naiad: {error}", file=sys.stderr)
+        return 2
+
+    _report(entry)
     return 0
 
 
@@ -1377,15 +1442,35 @@ def _queue_list(arguments: argparse.Namespace) -> int:
         return 0
 
     runs = RunStore(default_runs_root())
-    standing = [_standing_shown(entry, runs) for entry in entries]
+    standing = {entry.id: _standing_shown(entry, runs) for entry in entries}
     # Padded to the longest here rather than to a fixed width, because a State
     # is named by the Workflow and Naiad knows no name in advance.
-    width = max(len(name) for name in standing)
-    for entry, state in zip(entries, standing):
-        print(_queue_line(entry, runs, state=f"{state:<{width}}"))
+    width = max(len(name) for name in standing.values())
+    for entry, depth in _families(entries):
+        indent = "  " * depth
+        print(indent + _queue_line(entry, runs, state=f"{standing[entry.id]:<{width}}"))
         for line in _settings_shown(entry):
-            print(f"    {line}")
+            print(f"{indent}    {line}")
     return 0
+
+
+def _families(entries: Sequence[Entry]) -> list[tuple[Entry, int]]:
+    """Each Entry with how deep to indent it: every Child straight beneath the
+    Entry whose Run spawned it, so that a fan-out reads as one piece of work.
+    A Child whose Parent's Entry has left the Queue stands on its own."""
+    parents = {entry.run_id for entry in entries if entry.run_id is not None}
+    children: dict[str, list[Entry]] = {}
+    for entry in entries:
+        if entry.parent in parents:
+            children.setdefault(entry.parent, []).append(entry)
+    families: list[tuple[Entry, int]] = []
+    for entry in entries:
+        if entry.parent in parents:
+            continue
+        families.append((entry, 0))
+        if entry.run_id is not None:
+            families.extend((child, 1) for child in children.get(entry.run_id, []))
+    return families
 
 
 def _settings_shown(entry: Entry) -> list[str]:

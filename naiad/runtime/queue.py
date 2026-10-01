@@ -174,6 +174,9 @@ class Queue:
             skip_gates=document.get("skip_gates", False),
             attachment=Queue._attachment_from(document.get("attachment")),
             settings=settings_from(document.get("settings", [])),
+            # Read with a default: an Entry written before Children existed
+            # was spawned by nobody.
+            parent=document.get("parent"),
             run_id=document.get("run_id"),
         )
 
@@ -449,6 +452,7 @@ def _document(entry: Entry) -> dict[str, Any]:
         "skip_gates": entry.skip_gates,
         "attachment": _attachment_document(entry.attachment),
         "settings": settings_document(entry.settings),
+        "parent": entry.parent,
         "run_id": entry.run_id,
     }
 

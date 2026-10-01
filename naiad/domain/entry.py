@@ -69,6 +69,11 @@ class Entry:
     # what the Workflow file declares for that State. Empty for work that
     # leaves every setting to the Workflow.
     settings: tuple[StateSetting, ...] = ()
+    # The Run that spawned it, when it is a Child, and absent otherwise. Nothing
+    # about where it runs changes for having one: its working tree is its own,
+    # so it is a Lane of its own and is claim-checked, listed and removed like
+    # any other Entry.
+    parent: str | None = None
     # What became of it: absent until the Entry starts, and the only field that
     # says anything about the Run. Everything else is asked of the Run itself.
     run_id: str | None = None

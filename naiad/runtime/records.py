@@ -38,6 +38,10 @@ DELIVERIES_FILENAME = "deliveries.json"
 SUBMISSIONS_FILENAME = "submissions.json"
 WAITS_FILENAME = "waits.json"
 HOLDS_FILENAME = "holds.json"
+# A directory rather than a file, one file per Child, and not among the signal
+# files: Spawn writes it from the agent's process and the Supervisor from its
+# own, and neither writing is a sign of the Run's life.
+CHILDREN_DIRNAME = "children"
 
 # Beside the Entry in the queue directory, under the Entry's id. Not `.json`,
 # which the Queue reads as an Entry file.
@@ -667,6 +671,65 @@ class Holds:
         _write(self.path, {**document, "held": False})
 
 
+@dataclass(frozen=True)
+class Child:
+    """One Child of a Run: the Entry it was spawned as, and once the Supervisor
+    has started it, the Run it became."""
+
+    entry_id: str
+    run_id: str | None = None
+
+
+class Children:
+    """The Children a Run has spawned, kept on the Parent's Run.
+
+    Kept here rather than read from the Queue, because a Child must stay
+    findable from its Parent after a Cancellation or a Prune removes its Entry.
+
+    Two writers, in two processes: Spawn records the Entry from inside the
+    Parent's Session, and the Supervisor records the Run when it starts the
+    Child. One file per Child, so that the Supervisor starting one Child while
+    the agent spawns the next cannot write over the other's record.
+    """
+
+    def __init__(self, run_root: Path) -> None:
+        self.path = Path(run_root) / CHILDREN_DIRNAME
+
+    def all(self) -> list[Child]:
+        """Every Child, in the order they were spawned: an Entry id is a
+        sortable timestamp."""
+        if not self.path.is_dir():
+            return []
+        found = []
+        for path in sorted(self.path.glob("*.json")):
+            document = _read(path)
+            run_id = document.get("run_id")
+            found.append(
+                Child(
+                    entry_id=str(document["entry_id"]),
+                    run_id=run_id if isinstance(run_id, str) else None,
+                )
+            )
+        return found
+
+    def record_spawn(self, entry_id: str) -> None:
+        self._write(Child(entry_id=entry_id))
+
+    def record_start(self, entry_id: str, *, run_id: str) -> None:
+        self._write(Child(entry_id=entry_id, run_id=run_id))
+
+    def forget(self, entry_id: str) -> None:
+        """Take back a Child whose Entry never reached the Queue."""
+        self._file(entry_id).unlink(missing_ok=True)
+
+    def _file(self, entry_id: str) -> Path:
+        return self.path / f"{entry_id}.json"
+
+    def _write(self, child: Child) -> None:
+        self.path.mkdir(parents=True, exist_ok=True)
+        _write(self._file(child.entry_id), {"entry_id": child.entry_id, "run_id": child.run_id})
+
+
 class Consultations:
     """What the Answerer has said about the Question currently announced.
 
@@ -707,6 +770,8 @@ class Consultations:
 
 
 __all__ = [
+    "Child",
+    "Children",
     "ClearAttempts",
     "Clears",
     "Consultations",

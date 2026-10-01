@@ -41,6 +41,9 @@ In paraphrase, the Protocol says:
 4. **Relay a pause.** When the human says to pause or stop for now, run
    `naiad hold` with their words and end the turn. The Run is parked, with no
    reminders and no time limit, until they type into the session again.
+5. **Spawn only when asked.** Only when a Prompt asks for it, run `naiad spawn`
+   to queue a Child: a Run of its own, beside this one. Its working tree must
+   be its own, because in the Parent's it would wait behind the Parent forever.
 
 It ends with the State or States the agent may announce next, taken from the
 Workflow file. A State with one successor says "announce X". A fork says
@@ -56,7 +59,7 @@ that is driving the Run:
 # Naiad protocol
 
 You are being driven through a workflow by Naiad. It cannot see your work and
-never decides that a phase is finished — you do, and you say so. Four rules:
+never decides that a phase is finished — you do, and you say so. Five rules:
 
 1. Announce, do not assume. When you have finished the phase you are in and
    are satisfied with the result, run `/path/to/naiad announce <name>` to
@@ -67,6 +70,8 @@ never decides that a phase is finished — you do, and you say so. Four rules:
 3. Declare your waits. ...
 
 4. Relay a pause. ...
+
+5. Spawn only when asked. ...
 
 When this phase is done, announce: review
 ```
@@ -90,6 +95,18 @@ When this phase is done, announce: review
 - **`branch <name>`** declares the working branch the agent created, when the
   entry was queued without one. Naiad invents no branch name. The agent derives
   one from the repository's conventions and tells Naiad.
+- **`spawn [<task>] --repo <path>`** queues a **Child** of this Run and returns
+  at once, printing `queued <id>`. The Child takes the Parent's Workflow,
+  settings, `--skip-gates` and task, unless the command names its own with the
+  task, `--model`, `--effort` or `--skip-gates`. `--branch`, `--base`, `--at`
+  and `--subject` mean what they mean on `naiad queue add`. `--repo` is
+  required and must be a working tree of the Child's own, such as a
+  `git worktree add` beside the repository: a different working tree is a Lane
+  of its own, so the Child runs beside its Parent. Spawn is refused outside a
+  Run, from a Run that has ended, from inside a Child (only one level), into
+  the Parent's own working tree, and wherever `naiad queue add` would refuse
+  the same Entry. `naiad queue list` shows each Child indented under its
+  Parent.
 
 ### Rejections
 

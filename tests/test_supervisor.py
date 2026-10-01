@@ -21,6 +21,7 @@ from naiad.domain.entry import Attachment, Entry
 from naiad.runtime.home import StorageError
 from naiad.runtime.log import RunLog
 from naiad.runtime.queue import Queue
+from naiad.runtime.records import Children
 from naiad.runtime.run import RunStore
 
 
@@ -442,3 +443,36 @@ def test_an_entry_whose_run_has_gone_missing_is_reported(queue, runs, repo):
         supervising(queue, runs, Supervision(runs))
 
     assert "a-run-that-was-deleted" in str(caught.value)
+
+
+# A Child is an Entry like any other, in a working tree of its own: a Lane of
+# its own, started beside its live Parent.
+
+
+def test_a_child_starts_in_its_own_lane_beside_its_live_parent(queue, runs, repo, other_repo):
+    queued(queue, repo, "1-parent")
+    queued(queue, other_repo, "2-child", parent="run-1")
+    supervision = Supervision(runs, never_finishes={"run-1"})
+
+    with pytest.raises(Interrupted):
+        supervising(queue, runs, supervision)
+
+    assert [started for started, _ in supervision.started] == ["1-parent", "2-child"]
+    assert "run-1" in supervision.ticked[supervision.ticked.index("run-2"):]
+
+
+def test_starting_a_child_records_its_run_on_its_parents_children_record(
+    queue, runs, repo, other_repo
+):
+    queued(queue, repo, "parent")
+    supervision = Supervision(runs, never_finishes={"run-1"})
+    with pytest.raises(Interrupted):
+        supervising(queue, runs, supervision, naps_allowed=1)
+    Children(runs.root_for("run-1")).record_spawn("child")
+    queued(queue, other_repo, "child", parent="run-1")
+
+    with pytest.raises(Interrupted):
+        supervising(queue, runs, supervision, naps_allowed=1)
+
+    (child,) = Children(runs.root_for("run-1")).all()
+    assert (child.entry_id, child.run_id) == ("child", "run-2")
