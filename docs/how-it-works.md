@@ -108,6 +108,10 @@ When this phase is done, announce: review
   the same Entry. `naiad queue list` shows each Child indented under its
   Parent. A Parent takes its Children in at a Join State (see
   [Writing Workflows](workflow-authoring.md#3-state-kinds-and-marks)).
+  Once a Join delivery has named a Child that completed, Naiad closes that
+  Child's Session and writes the closing in its Run log. The transcript, the Run
+  log and the Answer log stay on disk. A cancelled Child keeps its Session, and
+  a top-level Run's Session is never closed.
 
 ### Rejections
 

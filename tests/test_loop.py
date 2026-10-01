@@ -95,6 +95,9 @@ class RecordingSession:
     def clear(self, pane):
         self.sent.append(("clear", pane, None))
 
+    def close(self, pane):
+        self.sent.append(("close", pane, None))
+
 
 class RecordingNotifier:
     def __init__(self):
@@ -156,8 +159,13 @@ def drive(
     )
     if isinstance(action, Deliver) and submit is not None:
         typed = Deliveries(run.root).latest()
-        judge(run.root, submit(session.sent[-1][2]), now=typed.at)
+        judge(run.root, submit(typed_last(session)), now=typed.at)
     return action
+
+
+def typed_last(session):
+    """The latest text typed into the Session, whatever was done to it since."""
+    return [text for kind, _, text in session.sent if kind == "send"][-1]
 
 
 def deliver(run, workflow, session, **kwargs):
@@ -1887,7 +1895,7 @@ def is_cancelled(child):
 
 def named(session):
     """The Children the latest typed Prompt named, by Subject."""
-    text = session.sent[-1][2]
+    text = typed_last(session)
     return [line.split(":")[0][2:] for line in text.splitlines() if line.startswith("- ")]
 
 
@@ -2090,4 +2098,67 @@ def test_a_cancelled_lone_child_reaches_its_parents_next_join_as_cancelled(
     drive(run, joining, session, queue=queue)
 
     assert named(session) == ["03.md"]
-    assert "- 03.md: cancelled," in session.sent[-1][2]
+    assert "- 03.md: cancelled," in typed_last(session)
+
+
+def with_session(child, pane):
+    """The Child with the Session the Supervisor opened for it at Start."""
+    child.attach_session(tmux_session=f"naiad-{child.id}", tmux_pane=pane)
+    return child
+
+
+def closings(session):
+    """The panes whose Sessions were closed, in order."""
+    return [pane for kind, pane, _ in session.sent if kind == "close"]
+
+
+def test_a_completed_childs_session_closes_after_the_delivery_that_names_it(
+    run, joining, session
+):
+    child = with_session(spawned(run, "03"), "%3")
+    announce(run, "implement")
+    assert drive(run, joining, session) == NOTHING
+
+    completes(child)
+    assert closings(session) == []
+    drive(run, joining, session)
+
+    assert [kind for kind, _, _ in session.sent] == ["send", "close"]
+    assert closings(session) == ["%3"]
+    assert RunLog(child.root).closed()
+
+
+def test_a_cancelled_childs_session_is_never_closed(run, joining, session):
+    child = with_session(spawned(run, "03"), "%3")
+    is_cancelled(child)
+    announce(run, "implement")
+
+    deliver(run, joining, session)
+
+    assert "- 03.md: cancelled," in typed_last(session)
+    assert closings(session) == []
+    assert not RunLog(child.root).closed()
+
+
+def test_a_childs_session_is_closed_once_however_often_it_is_named(run, joining, session):
+    child = with_session(spawned(run, "03"), "%3")
+    completes(child)
+    announce(run, "implement")
+    drive(run, joining, session, submit=lambda text: text[10:])
+
+    retyped = drive(run, joining, session)
+    drive(run, joining, session)
+
+    assert isinstance(retyped, Deliver) and retyped.attempt == 2
+    assert closings(session) == ["%3"]
+
+
+def test_only_the_children_named_are_closed_and_never_the_parent(run, joining, session):
+    first = with_session(spawned(run, "03"), "%3")
+    with_session(spawned(run, "04"), "%4")
+    completes(first)
+    announce(run, "implement")
+
+    deliver(run, joining, session)
+
+    assert closings(session) == ["%3"]

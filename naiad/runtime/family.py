@@ -20,7 +20,7 @@ from naiad.domain.workflow import WorkflowError, load_workflow
 from naiad.runtime.announcements import Announcements
 from naiad.runtime.log import RunLog
 from naiad.runtime.records import Child, Children, Handled, Joins
-from naiad.runtime.run import RunStore
+from naiad.runtime.run import Run, RunStore
 
 # Whether an Entry is still in the Queue, by its id.
 Entered = Callable[[str], bool]
@@ -114,6 +114,24 @@ def joining(root: Path, *, runs: RunStore, entered: Entered = every_entry) -> bo
     return held(workflow, owed, read_join(root, latest, runs=runs, entered=entered))
 
 
+def sessions_to_close(
+    parent_root: Path, named: tuple[FinishedChild, ...], *, runs: RunStore
+) -> list[Run]:
+    """The Runs of the Children named whose Sessions are to close: those that
+    completed and are not closed already. A cancelled Child keeps its Session
+    for the person who stepped in, and a Child whose Run is gone, or that
+    records no pane, has none to close."""
+    completed = {child.entry_id for child in named if child.outcome == "completed"}
+    closing = []
+    for child in Children(parent_root).all():
+        if child.entry_id not in completed or child.run_id is None:
+            continue
+        run = runs.load(child.run_id)
+        if run is not None and run.tmux_pane and not RunLog(run.root).closed():
+            closing.append(run)
+    return closing
+
+
 def _finished(child: Child, *, runs: RunStore, entered: Entered) -> FinishedChild | None:
     """The Child as its Parent is told of it, or None while it is unfinished.
 
@@ -144,4 +162,4 @@ def _finished(child: Child, *, runs: RunStore, entered: Entered) -> FinishedChil
     )
 
 
-__all__ = ["Entered", "every_entry", "joining", "read_join", "unfinished_children", "untold_children"]
+__all__ = ["Entered", "every_entry", "joining", "read_join", "sessions_to_close", "unfinished_children", "untold_children"]

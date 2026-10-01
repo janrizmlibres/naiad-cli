@@ -31,6 +31,10 @@ NEWLINE = "M-Enter"
 # do not.
 TYPED_PIECE_BYTES = 256
 
+# What tmux says when the session asked after no longer exists: its pane is
+# gone, or the whole server is.
+ALREADY_GONE = ("can't find pane", "can't find session", "no server running", "error connecting")
+
 
 class TmuxError(Exception):
     pass
@@ -81,6 +85,19 @@ class TmuxSessions:
         and the Prompt held back until it has, rather than hoping a
         fixed pause outlasts a terminal that might drop the keystroke anyway."""
         self.send(pane, "/clear")
+
+    def close(self, pane: str) -> None:
+        """End the session holding the pane, and the Claude Code process in it.
+
+        A session that is already gone has nothing left to close, so that is
+        not a failure: the person may have closed it first, or the machine
+        restarted between the Parent being told and this. Any other refusal
+        is raised."""
+        try:
+            self._run([TMUX, "kill-session", "-t", pane])
+        except TmuxError as error:
+            if not any(reason in str(error) for reason in ALREADY_GONE):
+                raise
 
     def _run(self, argv: list[str]) -> str:
         finished = subprocess.run(argv, capture_output=True, text=True)

@@ -40,7 +40,7 @@ from naiad.domain.transitions import UnknownState, deviation, start_state
 from naiad.domain.workflow import Workflow
 from naiad.runtime.announcements import Announcements
 from naiad.runtime.answers import AnswerLog
-from naiad.runtime.family import read_join
+from naiad.runtime.family import read_join, sessions_to_close
 from naiad.runtime.log import RunLog
 from naiad.runtime.queue import Queue, entered_in
 from naiad.runtime.records import (
@@ -70,6 +70,7 @@ class UndrivableRun(Exception):
 class Session(Protocol):
     def send(self, pane: str, text: str) -> None: ...
     def clear(self, pane: str) -> None: ...
+    def close(self, pane: str) -> None: ...
 
 
 class Notifier(Protocol):
@@ -130,7 +131,9 @@ def tick(
     waits = Waits(run.root)
     holds = Holds(run.root)
     joins = Joins(run.root)
+    store = runs if runs is not None else RunStore(run.root.parent)
     moment = now if now is not None else time.time()
+    closing: list[Run] = []
     reference = entry_id or run.id
     # Read out of the log rather than out of a record of its own, for the reason
     # `finished` is: every Switch and every Notify is already written there, and
@@ -182,7 +185,7 @@ def tick(
             join=read_join(
                 run.root,
                 announcement,
-                runs=runs if runs is not None else RunStore(run.root.parent),
+                runs=store,
                 entered=entered_in(queue),
             ),
         ),
@@ -238,6 +241,8 @@ def tick(
         # seen the Prompt land whole.
         deliveries.record_attempt(announcement, prompt=prompt, turns=turns.count(), at=moment)
         session.send(_pane(run), prompt)
+        if action.children is not None:
+            closing = sessions_to_close(run.root, action.children, runs=store)
     elif isinstance(action, Confirm):
         # An adopted Run's first delivery answers no Announcement, so there is
         # no seq to record against it — only the turn baseline, which is what
@@ -306,6 +311,14 @@ def tick(
             )
 
     log.record(action, seq=announcement.seq if announcement is not None else None)
+    # The completed Children a Join delivery just named have been taken in, so
+    # their Sessions go. Closed only once the delivery is in the Parent's own
+    # log, so a Session that will not close leaves no hole there. Each closing
+    # is written on the Child's own Run, so a retyping of the Prompt does not
+    # close the same one again.
+    for child in closing:
+        session.close(_pane(child))
+        RunLog(child.root).record_closing()
     return action
 
 

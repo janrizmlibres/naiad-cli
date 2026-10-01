@@ -404,6 +404,18 @@ class RunLog:
             )
         )
 
+    def record_closing(self) -> None:
+        """That Naiad closed this Child's Session once its Parent was told it
+        completed. The transcript and the logs stay; only the live process went.
+
+        Written here rather than as an Action, like `record_cancellation`: the
+        Parent's tick closed it, and no decision about this Run made it."""
+        self._append(LogLine(kind="closed", detail="its parent was told it completed"))
+
+    def closed(self) -> bool:
+        """Whether this Run's Session has been closed, so it is closed once."""
+        return any(entry.kind == "closed" for entry in self.entries())
+
     def record(self, action: Action, *, seq: int | None = None) -> None:
         """What Naiad did about it. Nothing is not written down."""
         entry = _entry_for(action)
