@@ -157,7 +157,14 @@ Add, where they apply: `--branch <name>` (above), `--model` and `--effort`
 (above), `--repo <path>` if the target
 repository is not the working directory, `--base <branch>` for what this work
 stands on, `--subject <value>` where the start state's prompt names a subject,
-`--skip-gates` for an unattended run of a supervised workflow.
+`--skip-gates` for an unattended run of a supervised workflow,
+`--child-limit <n>` when the human asked for this work's children to run a few
+at a time (below).
+
+Children run in parallel unless the human said otherwise. Pass `--child-limit 1`
+only when they asked for one at a time — "one ticket at a time", "serially",
+"don't run them in parallel" — or the number they named for "two at a time".
+Omit it when they said nothing about it.
 
 The command validates, queues one entry, prints, and returns at once. It starts
 nothing: Naiad's supervisor attaches the run to this session on its own pass,

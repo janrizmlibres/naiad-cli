@@ -162,6 +162,29 @@ def test_adopting_records_the_settings_named_for_the_states_that_remain(home, re
     )
 
 
+def test_adopting_records_the_child_limit_it_was_given(home, repo):
+    """The operator who says "one ticket at a time" while adopting is asking for
+    the same limit `naiad run --child-limit 1` sets."""
+    adopt(repo, "--child-limit", "1")
+
+    assert queue_of(home).all()[0].child_limit == 1
+
+
+def test_adopting_without_a_child_limit_queues_none(home, repo):
+    adopt(repo)
+
+    assert queue_of(home).all()[0].child_limit is None
+
+
+def test_adopting_with_a_child_limit_of_zero_is_refused(home, repo, capsys):
+    with pytest.raises(SystemExit) as refused:
+        adopt(repo, "--child-limit", "0")
+
+    assert refused.value.code == 2
+    assert "--child-limit" in capsys.readouterr().err
+    assert queue_of(home).all() == []
+
+
 def test_adopting_with_a_setting_for_a_terminal_state_is_refused(home, repo, capsys):
     assert adopt(repo, "--model", "done=sonnet") == 2
 

@@ -237,6 +237,7 @@ def build_parser() -> argparse.ArgumentParser:
         help="what the work is, distilled from the conversation in this session",
     )
     _describe_where_and_how(adopt)
+    _offer_child_limit(adopt)
     adopt.set_defaults(handler=_adopt)
 
     # Read before adopting, and by nothing else: the operator names a phase in
@@ -495,8 +496,12 @@ def _describe_the_work(parser: argparse.ArgumentParser, *, required: bool = True
         default=None,
     )
     _describe_where_and_how(parser)
-    # Here rather than with the options every entrance shares: Spawn's Child
-    # can have no Children, and an Adoption names none.
+    _offer_child_limit(parser)
+
+
+def _offer_child_limit(parser: argparse.ArgumentParser) -> None:
+    """The Child limit, offered by every entrance but Spawn: a Child can have
+    no Children."""
     parser.add_argument(
         "--child-limit",
         type=_child_limit,
@@ -1488,8 +1493,7 @@ def _queued(
                 skip_gates=arguments.skip_gates,
                 attachment=attachment,
                 settings=_settings_given(arguments),
-                # An Adoption's command offers no Child limit.
-                child_limit=getattr(arguments, "child_limit", None),
+                child_limit=arguments.child_limit,
             ),
             queue=Queue(default_queue_root()),
             runs=RunStore(default_runs_root()),

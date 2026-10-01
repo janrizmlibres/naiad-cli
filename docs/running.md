@@ -82,7 +82,7 @@ Child its Parent is still waiting to be told of.
 `naiad queue add --help` lists every option, including `--branch`, `--base`,
 `--at` and `--subject`.
 
-`--child-limit N` on `queue add` and `run` caps how many of the Run's Children
+`--child-limit N` on `queue add`, `run` and `adopt` caps how many of the Run's Children
 work at once; a batch file says `child-limit = N`, at the top or per entry. With
 none, every Child starts as soon as it is queued. A limit of 1 takes them one at
 a time, in the order they were spawned. A parked Child still counts.

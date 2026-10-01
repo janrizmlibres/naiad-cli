@@ -128,6 +128,14 @@ def test_it_passes_a_model_or_effort_the_human_named_for_named_states(skill):
     assert "reachable" in skill.lower()
 
 
+def test_it_passes_a_child_limit_only_when_the_human_asked_for_one(skill):
+    """Children run in parallel unless the Entry carries a limit, and an
+    adoption is the only place the human's "one at a time" can reach it."""
+    assert "--child-limit" in skill
+    assert "one at a time" in skill.lower()
+    assert "parallel" in skill.lower()
+
+
 def test_it_says_the_task_is_distilled_from_the_conversation(skill):
     """The agent is the one party holding that conversation, and `--task` is
     required."""
