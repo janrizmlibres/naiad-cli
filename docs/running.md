@@ -44,8 +44,12 @@ brackets once it has one. What became of an entry is one of five words:
 - `done`: the Run reached its last State, or you removed it.
 
 To take an entry out, `naiad queue rm <entry>` removes it and cancels its Run.
-The Run's tmux session is left alone, and the command names its pane. `naiad queue
-prune` removes every done entry together with the Run it became.
+The Run's tmux session is left alone, and the command names its pane. Removing
+a Parent cancels its Children too: a started Child's Run is cancelled, a Child
+not yet started leaves the queue, and the command prints the working tree of
+each Child the Parent was not yet told of, for you to remove. `naiad queue
+prune` removes every done entry together with the Run it became, except a done
+Child its Parent is still waiting to be told of.
 
 `queue add --file <batch-file>` queues every entry a batch file declares.
 `naiad queue add --help` lists every option, including `--branch`, `--base`,

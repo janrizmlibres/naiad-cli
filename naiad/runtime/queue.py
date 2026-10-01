@@ -26,10 +26,10 @@ from typing import Any, Literal
 from naiad.domain.entry import Attachment, Entry
 from naiad.runtime.announcements import Announcements
 from naiad.runtime.atomic import write_atomically
-from naiad.runtime.family import Entered, every_entry, joining
+from naiad.runtime.family import Entered, every_entry, joining, untold_children
 from naiad.runtime.home import StorageError, refuse_inside_repository
 from naiad.runtime.log import RunLog
-from naiad.runtime.records import EntryTurns, Notices, notice_key
+from naiad.runtime.records import Child, Children, EntryTurns, Notices, notice_key
 from naiad.runtime.run import Run, RunStore, settings_document, settings_from
 
 ENTRY_SUFFIX = ".json"
@@ -264,10 +264,15 @@ class Cancelled:
     The Run comes back rather than only its id, because the one thing the
     operator needs afterwards is which Session is now theirs, and the pane is
     on the Run.
+
+    The working trees are those of the Entry's Children its Run was never told
+    of, left for the operator to remove: Naiad knows their paths, not what they
+    are. A Child the Parent was told of was handed to its Workflow.
     """
 
     entry: Entry
     run: Run | None
+    worktrees: tuple[str, ...] = ()
 
 
 def cancel(queue: Queue, runs: RunStore, entry_id: str) -> Cancelled | None:
@@ -298,12 +303,38 @@ def cancel(queue: Queue, runs: RunStore, entry_id: str) -> Cancelled | None:
 
     found = None if entry.run_id is None else runs.load(entry.run_id)
     cancelled = _cancel_run(found) if found is not None else None
+    # After the Parent's own ending, so that it can spawn no further Child
+    # while its Children are being reached. A Parent whose Run was already
+    # over is reached too: a retry after a Child refused its ending must
+    # cascade again.
+    worktrees = _cancel_children(queue, runs, found) if found is not None else ()
 
     # The answer is not read: the Entry was there a moment ago, and one somebody
     # else removed in between is gone either way, which is what was asked for.
     # A Prune has to read it because a deletion follows; nothing follows here.
     queue.remove(entry.id)
-    return Cancelled(entry=entry, run=cancelled)
+    return Cancelled(entry=entry, run=cancelled, worktrees=worktrees)
+
+
+def _cancel_children(queue: Queue, runs: RunStore, parent: Run) -> tuple[str, ...]:
+    """Cancel each Child of the Parent, and answer with the working trees of
+    those it was never told of.
+
+    A started Child gets the same Cancellation written onto its Run, which
+    releases its Session. One not yet started has its Entry removed, which
+    its Parent reads as cancelled."""
+    untold = {child.entry_id for child in untold_children(parent.root)}
+    worktrees: list[str] = []
+    for child in Children(parent.root).all():
+        started = None if child.run_id is None else runs.load(child.run_id)
+        if started is not None:
+            _cancel_run(started)
+        elif child.run_id is None:
+            queue.remove(child.entry_id)
+        worktree = child.worktree or (None if started is None else str(started.target_repo))
+        if child.entry_id in untold and worktree is not None:
+            worktrees.append(worktree)
+    return tuple(worktrees)
 
 
 def _cancel_run(run: Run) -> Run | None:
@@ -376,18 +407,27 @@ def prune(queue: Queue, runs: RunStore) -> Pruned:
     After the Entries, the Orphaned Runs: every Run directory no
     Entry names is judged by the same reading and taken when it is done or
     parked, left and named when it reads as running.
+
+    A done Child is left, Entry and Run, while its Parent's Run is live and
+    has not been told of it: the Join reads its outcome from that Run. Once
+    told, or once the Parent has ended, it is taken like any other.
     """
     removed: list[Entry] = []
     failures: list[str] = []
 
     entries = queue.all()
+    awaited = _awaited(runs)
+    awaited_entries = {child.entry_id for child in awaited}
     # Every Run this pass leaves a claim on: one an Entry still names must not
-    # be judged an orphan, and one whose removal was already attempted must not
-    # be attempted twice in the same pass.
-    tended = {entry.run_id for entry in entries if entry.run_id is not None}
+    # be judged an orphan, one a live Parent still awaits must not be taken,
+    # and one whose removal was already attempted must not be attempted twice
+    # in the same pass.
+    tended = {entry.run_id for entry in entries if entry.run_id is not None} | {
+        child.run_id for child in awaited if child.run_id is not None
+    }
 
     for entry in entries:
-        if status_of(entry, runs) != DONE:
+        if entry.id in awaited_entries or status_of(entry, runs) != DONE:
             continue
 
         # Believed rather than assumed: an Entry somebody removed by name
@@ -409,6 +449,20 @@ def prune(queue: Queue, runs: RunStore) -> Pruned:
 
     orphans, skipped = _take_orphans(runs, tended, failures)
     return Pruned(removed=removed, failures=failures, orphans=orphans, skipped=skipped)
+
+
+def _awaited(runs: RunStore) -> list[Child]:
+    """Every Child a live Parent has not been told of. Read before anything is
+    deleted, so a Parent that cannot be read stops the Prune rather than
+    costing it a Child its Join awaits."""
+    if not runs.root.is_dir():
+        return []
+    return [
+        child
+        for directory in runs.root.iterdir()
+        if directory.is_dir() and not RunLog(directory).ended()
+        for child in untold_children(directory)
+    ]
 
 
 def _take_orphans(

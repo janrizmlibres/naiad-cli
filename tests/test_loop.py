@@ -37,7 +37,7 @@ from naiad.runtime.answers import AnswerLog
 from naiad.runtime.log import RunLog
 from naiad.runtime.loop import UndrivableRun, tick
 from naiad.domain.entry import Entry
-from naiad.runtime.queue import RUNNING, Queue, status_of
+from naiad.runtime.queue import RUNNING, Queue, cancel, prune, status_of
 from naiad.runtime.records import (
     Children,
     Clears,
@@ -2055,3 +2055,39 @@ def test_a_workflow_without_join_ignores_the_children(run, workflow, session):
     assert session.sent == [
         ("send", "%42", "/grill-with-docs add dark mode, then announce review")
     ]
+
+
+def queued_child(run, queue, name, child):
+    """The Entry a started Child became, in the Queue beside its Run."""
+    queue.add(
+        Entry(
+            id=f"entry-{name}",
+            workflow_path=run.workflow_path,
+            task="t",
+            target_repo=child.target_repo,
+            created_at="2026-07-19T12:00:00Z",
+            working_branch=f"feat--{name}",
+            parent=run.id,
+            run_id=child.id,
+        )
+    )
+
+
+def test_a_cancelled_lone_child_reaches_its_parents_next_join_as_cancelled(
+    run, joining, session, tmp_path
+):
+    """Cancelled by name and pruned in between, it is still named: a Prune
+    leaves the Run of a Child its live Parent has not been told of."""
+    queue = Queue(tmp_path / "queue")
+    runs = RunStore(run.root.parent)
+    queued_child(run, queue, "03", spawned(run, "03"))
+    queued_child(run, queue, "04", spawned(run, "04"))
+    announce(run, "implement")
+    assert drive(run, joining, session, queue=queue) == NOTHING
+
+    cancel(queue, runs, "entry-03")
+    prune(queue, runs)
+    drive(run, joining, session, queue=queue)
+
+    assert named(session) == ["03.md"]
+    assert "- 03.md: cancelled," in session.sent[-1][2]

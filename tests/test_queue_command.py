@@ -421,7 +421,7 @@ prompt = "build {subject}"
 
 def joining_parent(home, repo, *, child_finished, announced=True):
     """A Parent that has announced its Join State, with one started Child
-    listed beneath it."""
+    listed beneath it. Answers with the Child's working tree."""
     (repo / "workflow.toml").write_text(JOINING)
     parent = run_entry(home, repo, "parent", start_state="implement")
     worktree = repo.parent / "repo-wt--01"
@@ -452,6 +452,7 @@ def joining_parent(home, repo, *, child_finished, announced=True):
         RunLog(child.root).record(Finish(state="done"), seq=1)
     if announced:
         Announcements(parent.root).announce("implement")
+    return worktree
 
 
 def test_a_parent_held_at_a_join_state_reads_joining(home, repo, capsys):
@@ -1599,3 +1600,17 @@ def test_a_child_held_by_its_parents_limit_reads_waiting(home, repo, tmp_path, c
         )
 
     assert _cells(capsys, "  1-held")[1:3] == ["1-held", "waiting"]
+
+
+def test_cancelling_a_parent_prints_an_untold_childs_working_tree_as_left_to_remove(
+    home, repo, capsys
+):
+    """Which Children are reached is held in tests/test_queue_store.py; here,
+    that the command hands the operator their working trees."""
+    worktree = joining_parent(home, repo, child_finished=False)
+    capsys.readouterr()
+
+    assert main(["queue", "rm", "parent"]) == 0
+
+    printed = capsys.readouterr().out
+    assert f"left for you to remove: {worktree}" in printed

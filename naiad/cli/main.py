@@ -1704,6 +1704,8 @@ def _queue_rm(arguments: argparse.Namespace) -> int:
     # the operator a session in either case would be a claim, not a report.
     if cancelled.run is not None:
         print(_cancellation_line(cancelled.run))
+    for worktree in cancelled.worktrees:
+        print(f"child working tree left for you to remove: {worktree}")
     return 0
 
 

@@ -75,6 +75,13 @@ def unfinished_children(parent_root: Path, *, runs: RunStore, entered: Entered) 
     ]
 
 
+def untold_children(parent_root: Path) -> list[Child]:
+    """The Run's Children no Join delivery has named yet, in the order they
+    were spawned. A Child once named was handed to the Parent's Workflow."""
+    told = Joins(parent_root).every_told()
+    return [child for child in Children(parent_root).all() if child.entry_id not in told]
+
+
 def joining(root: Path, *, runs: RunStore, entered: Entered = every_entry) -> bool:
     """Whether the Run in this directory is held at a Join State: the Prompt
     it is owed belongs to one and the Join is not released. The Prompt owed is
@@ -137,4 +144,4 @@ def _finished(child: Child, *, runs: RunStore, entered: Entered) -> FinishedChil
     )
 
 
-__all__ = ["Entered", "every_entry", "joining", "read_join", "unfinished_children"]
+__all__ = ["Entered", "every_entry", "joining", "read_join", "unfinished_children", "untold_children"]

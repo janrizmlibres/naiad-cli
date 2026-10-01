@@ -807,6 +807,10 @@ class Joins:
             for child in recorded["children"]
         }
 
+    def every_told(self) -> set[str]:
+        """The Entry ids of every Child named against any Announcement."""
+        return {child["entry_id"] for recorded in self._sets() for child in recorded["children"]}
+
     def record(self, announcement: Announcement | None, children: tuple[FinishedChild, ...]) -> None:
         """Once per Announcement: a set already recorded is the one told."""
         if self.named(announcement) is not None:
