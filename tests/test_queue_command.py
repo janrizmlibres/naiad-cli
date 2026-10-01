@@ -1499,3 +1499,103 @@ def test_listing_shows_each_child_indented_beneath_its_parent(home, repo, tmp_pa
     child_line = lines[at["0-child"]]
     assert child_line.startswith("  0-child") and "waiting" in child_line
     assert not lines[at[unrelated.id]].startswith(" ")
+
+
+# A Child limit, given at the entrance that queues the Parent.
+
+
+def test_adding_an_entry_records_its_child_limit(home, repo):
+    assert add(repo, "--branch", "TASK-8546", "--child-limit", "2") == 0
+
+    (queued,) = queue_of(home).all()
+    assert queued.child_limit == 2
+
+
+def test_adding_an_entry_with_no_child_limit_records_none(home, repo):
+    add(repo, "--branch", "TASK-8546")
+
+    (queued,) = queue_of(home).all()
+    assert queued.child_limit is None
+
+
+@pytest.mark.parametrize("limit", ["0", "-1", "two", "1.5", "2_0", "+3", " 3"])
+def test_a_child_limit_that_is_not_a_positive_whole_number_is_refused(
+    home, repo, capsys, limit
+):
+    """A typo must not silently mean no limit."""
+    with pytest.raises(SystemExit) as refused:
+        add(repo, "--branch", "TASK-8546", f"--child-limit={limit}")
+
+    assert refused.value.code == 2
+    assert "--child-limit" in capsys.readouterr().err
+    assert queue_of(home).all() == []
+
+
+def test_a_batch_file_carries_a_child_limit_as_a_default_and_per_entry(home, repo):
+    path = batch_file(repo, "child-limit = 1\n" + BATCH.replace(
+        'skip-gates = true', 'skip-gates = true\nchild-limit = 3'
+    ))
+
+    assert main(["queue", "add", "--file", str(path)]) == 0
+
+    first, second = queue_of(home).all()
+    assert first.child_limit == 1
+    assert second.child_limit == 3
+
+
+def test_a_child_limit_beside_a_batch_file_is_refused(home, repo, capsys):
+    """The option describes one Entry, and the file has its own key for it."""
+    assert main(
+        ["queue", "add", "--file", str(batch_file(repo)), "--child-limit", "2"]
+    ) == 2
+
+    assert queue_of(home).all() == []
+
+
+def test_a_child_held_by_its_parents_limit_reads_waiting(home, repo, tmp_path, capsys):
+    parent = RunStore(home / "runs").create(
+        run_id="a-parent-run",
+        workflow_path=repo / "workflow.toml",
+        task="task of a-parent",
+        target_repo=repo,
+        created_at="2026-07-22T12:00:00Z",
+        start_state="grill",
+    )
+    queue_of(home).add(
+        Entry(
+            id="a-parent",
+            workflow_path=repo / "workflow.toml",
+            task="task of a-parent",
+            target_repo=repo,
+            working_branch=None,
+            created_at="2026-07-22T12:00:00Z",
+            child_limit=1,
+            run_id=parent.id,
+        )
+    )
+    for name, run_id in (("0-live", "live-run"), ("1-held", None)):
+        worktree = tmp_path / f"repo-wt-{name}"
+        worktree.mkdir()
+        if run_id is not None:
+            RunStore(home / "runs").create(
+                run_id=run_id,
+                workflow_path=repo / "workflow.toml",
+                task="build",
+                target_repo=worktree,
+                created_at="2026-07-22T12:00:00Z",
+                start_state="grill",
+            )
+        queue_of(home).add(
+            Entry(
+                id=name,
+                workflow_path=repo / "workflow.toml",
+                task="build",
+                target_repo=worktree,
+                working_branch=f"TASK-8546--{name}",
+                created_at="2026-07-22T12:00:00Z",
+                parent=parent.id,
+                run_id=run_id,
+            )
+        )
+
+    assert _cells(capsys, "  1-held")[1:3] == ["1-held", "waiting"]

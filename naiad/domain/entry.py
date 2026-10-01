@@ -74,6 +74,9 @@ class Entry:
     # so it is a Lane of its own and is claim-checked, listed and removed like
     # any other Entry.
     parent: str | None = None
+    # How many of its Children may be live at once, absent for no limit of its
+    # own. Never set on a Child, which can have no Children.
+    child_limit: int | None = None
     # What became of it: absent until the Entry starts, and the only field that
     # says anything about the Run. Everything else is asked of the Run itself.
     run_id: str | None = None

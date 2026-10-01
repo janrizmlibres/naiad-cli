@@ -65,6 +65,10 @@ class Work:
     # The Run spawning this work as its Child, given by Spawn alone: the
     # operator's entrances queue work nobody spawned.
     parent: str | None = None
+    # How many of its Children may be live at once, absent for no limit. Given
+    # at the operator's entrances alone: Spawn takes none, a Child having no
+    # Children of its own.
+    child_limit: int | None = None
 
 
 class BranchAlreadyClaimed(Exception):
@@ -188,6 +192,7 @@ def prepare(
         attachment=work.attachment,
         settings=work.settings,
         parent=work.parent,
+        child_limit=work.child_limit,
     )
 
 

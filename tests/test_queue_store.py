@@ -702,3 +702,20 @@ def test_a_run_no_entry_became_has_no_entry(tmp_path, repo):
     queue.add(entry(repo, id="waiting"))
 
     assert queue.entry_of("orphaned-run") is None
+
+
+def test_an_entry_keeps_its_child_limit(queue, repo):
+    queue.add(entry(repo, child_limit=2))
+
+    assert queue.all()[0].child_limit == 2
+
+
+def test_an_entry_written_before_child_limits_reads_as_having_none(queue, repo):
+    """No limit of the Run's own: parallel is the default."""
+    added = queue.add(entry(repo))
+    path = next(queue.root.glob(f"{added.id}*"))
+    document = json.loads(path.read_text())
+    del document["child_limit"]
+    path.write_text(json.dumps(document))
+
+    assert queue.all()[0].child_limit is None

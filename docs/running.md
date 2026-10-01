@@ -34,8 +34,8 @@ That is the entry's id, what became of it, the State it stands in, the repositor
 the branch (`-` until the agent has derived one) and the task. The Run's id is in
 brackets once it has one. What became of an entry is one of five words:
 
-- `waiting`: no Run yet. It is queued behind another entry for its tree, or no
-  Supervisor has reached it.
+- `waiting`: no Run yet. It is queued behind another entry for its tree, it is
+  a Child held by its Parent's Child limit, or no Supervisor has reached it.
 - `running`: the agent is working.
 - `joining`: the Run stands at a Join State and is waiting on its Children.
   Nothing is wrong: its Prompt goes out as soon as a Child finishes.
@@ -50,6 +50,11 @@ prune` removes every done entry together with the Run it became.
 `queue add --file <batch-file>` queues every entry a batch file declares.
 `naiad queue add --help` lists every option, including `--branch`, `--base`,
 `--at` and `--subject`.
+
+`--child-limit N` on `queue add` and `run` caps how many of the Run's Children
+work at once; a batch file says `child-limit = N`, at the top or per entry. With
+none, every Child starts as soon as it is queued. A limit of 1 takes them one at
+a time, in the order they were spawned. A parked Child still counts.
 
 An entry can run some States on a different model or effort from the one the
 Workflow names, without editing the Workflow. Name each State with `--model` or

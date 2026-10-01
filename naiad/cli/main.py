@@ -486,6 +486,15 @@ def _describe_the_work(parser: argparse.ArgumentParser, *, required: bool = True
         default=None,
     )
     _describe_where_and_how(parser)
+    # Here rather than with the options every entrance shares: Spawn's Child
+    # can have no Children, and an Adoption names none.
+    parser.add_argument(
+        "--child-limit",
+        type=_child_limit,
+        default=None,
+        metavar="N",
+        help="how many of this work's Children may run at once (default: no limit)",
+    )
 
 
 def _describe_where_and_how(
@@ -573,6 +582,18 @@ def _named_setting(argument: str) -> tuple[str, str]:
             f"'{argument}' names no State; write STATE=VALUE, such as implement=sonnet"
         )
     return state, value
+
+
+def _child_limit(argument: str) -> int:
+    """A Child limit, refused by argparse when it is not one: a typo must not
+    silently mean no limit. Plain digits only, because `int` would also read
+    `2_0` as twenty."""
+    number = int(argument) if argument.isascii() and argument.isdigit() else 0
+    if number < 1:
+        raise argparse.ArgumentTypeError(
+            f"'{argument}' is not a positive whole number; write --child-limit N, such as 2"
+        )
+    return number
 
 
 def _settings_given(arguments: argparse.Namespace) -> tuple[StateSetting, ...]:
@@ -1339,6 +1360,7 @@ def _describes_one_entry(arguments: argparse.Namespace) -> bool:
             arguments.start_state,
             arguments.subject,
             arguments.skip_gates,
+            arguments.child_limit,
         )
     )
 
@@ -1412,6 +1434,8 @@ def _queued(
                 skip_gates=arguments.skip_gates,
                 attachment=attachment,
                 settings=_settings_given(arguments),
+                # An Adoption's command offers no Child limit.
+                child_limit=getattr(arguments, "child_limit", None),
             ),
             queue=Queue(default_queue_root()),
             runs=RunStore(default_runs_root()),

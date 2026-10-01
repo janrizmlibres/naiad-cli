@@ -333,3 +333,92 @@ def test_a_preceding_entry_for_the_same_repository_is_never_skipped():
     assert supervise(
         draining(landed, stacked, third, finished={"a-run", "another-run"})
     ) == [Start(entry=third, predecessor="TASK-two")]
+
+
+# A Child limit: a Parent with as many live Children as its limit holds back the
+# rest, each in its own Lane, until one finishes.
+
+PARENT_RUN = "parent-run"
+
+
+def parent(**overrides):
+    return entry("parent", run_id=PARENT_RUN, **overrides)
+
+
+def child(identifier, **overrides):
+    return entry(
+        identifier,
+        target_repo=Path(f"/repos/naiad-wt--{identifier}"),
+        parent=PARENT_RUN,
+        pinned_base="feature",
+        **overrides,
+    )
+
+
+def started(scan):
+    return [action.entry.id for action in scan if isinstance(action, Start)]
+
+
+def test_a_child_limit_of_two_starts_two_children_and_holds_the_third():
+    scan = supervise(draining(parent(child_limit=2), child("c1"), child("c2"), child("c3")))
+
+    assert started(scan) == ["c1", "c2"]
+
+
+def test_a_held_child_starts_once_a_live_one_finishes():
+    first = child("c1", run_id="c1-run")
+    second = child("c2", run_id="c2-run")
+
+    scan = supervise(
+        draining(parent(child_limit=2), first, second, child("c3"), finished={"c1-run"})
+    )
+
+    assert started(scan) == ["c3"]
+
+
+def test_a_child_limit_of_one_takes_the_children_one_at_a_time_in_id_order():
+    """The old serial behaviour without a mode: id order is spawn order."""
+    limited = parent(child_limit=1)
+
+    assert started(supervise(draining(limited, child("c1"), child("c2")))) == ["c1"]
+    assert (
+        started(
+            supervise(
+                draining(
+                    limited,
+                    child("c1", run_id="c1-run"),
+                    child("c2"),
+                    finished={"c1-run"},
+                )
+            )
+        )
+        == ["c2"]
+    )
+
+
+def test_no_child_limit_starts_every_childs_lane():
+    scan = supervise(draining(parent(), child("c1"), child("c2"), child("c3")))
+
+    assert started(scan) == ["c1", "c2", "c3"]
+
+
+def test_a_parked_child_counts_toward_the_limit():
+    """Parked is not finished: its Session is live, so it holds a place."""
+    parked = child("c1", run_id="c1-run")
+
+    scan = supervise(draining(parent(child_limit=1), parked, child("c2")))
+
+    assert scan == [Resume(entry=parent(child_limit=1)), Resume(entry=parked)]
+
+
+def test_a_held_child_keeps_its_lane_waiting_behind_it():
+    """Held, it is still that working tree's first Entry not done, so a later
+    Entry for the same tree does not jump ahead of it."""
+    held = child("c2")
+    behind = entry("later", target_repo=held.target_repo)
+
+    scan = supervise(
+        draining(parent(child_limit=1), child("c1", run_id="c1-run"), held, behind)
+    )
+
+    assert started(scan) == []

@@ -27,6 +27,7 @@ be added or removed in between.
 
 from __future__ import annotations
 
+from collections import Counter
 from collections.abc import Collection, Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -121,18 +122,29 @@ def supervise(signals: Signals) -> Scan:
     Run has not been started, so it is Started, and one with a Run the
     finished ids do not name has not ended, so it is Resumed — whether that
     Run is working or parked is not asked, because both want ticking and the
-    difference is the Run's to keep rather than the Queue's. A lane
+    difference is the Run's to keep rather than the Queue's. A Child its
+    Parent's Child limit holds back answers nothing, and keeps its lane. A lane
     that has answered is not asked again, which is one Run per working tree. No
     lane answering means every Entry is done, which is the empty Queue again and
     answers the same way.
     """
     actions: list[Action] = []
     answered: set[Path] = set()
+    live = _live_children(signals)
+    limits = {
+        entry.run_id: entry.child_limit
+        for entry in signals.entries
+        if entry.run_id is not None and entry.child_limit is not None
+    }
     for position, entry in enumerate(signals.entries):
         if entry.target_repo in answered:
             continue
         if entry.run_id is None:
             answered.add(entry.target_repo)
+            if _held(entry, live=live, limits=limits):
+                continue
+            if entry.parent is not None:
+                live[entry.parent] += 1
             actions.append(
                 Start(
                     entry=entry,
@@ -150,6 +162,31 @@ def supervise(signals: Signals) -> Scan:
     if actions:
         return actions
     return IDLE if signals.following else DRAINED
+
+
+def _live_children(signals: Signals) -> Counter[str]:
+    """How many Children each Parent Run has started and not finished. A parked
+    Child counts, because its Session is live."""
+    return Counter(
+        entry.parent
+        for entry in signals.entries
+        if entry.parent is not None
+        and entry.run_id is not None
+        and entry.run_id not in signals.finished
+    )
+
+
+def _held(entry: Entry, *, live: Counter[str], limits: Mapping[str, int]) -> bool:
+    """Whether a Child is held back by its Parent's Child limit.
+
+    It keeps its Lane while held — it is still that working tree's first Entry
+    not done — and the Children are taken in id order, so a limit of one runs
+    them one at a time in the order they were spawned. A Parent whose Entry is
+    gone from the Queue, or that names no limit, holds nothing back.
+    """
+    if entry.parent is None or entry.parent not in limits:
+        return False
+    return live[entry.parent] >= limits[entry.parent]
 
 
 def _predecessor(

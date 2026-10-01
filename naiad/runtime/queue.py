@@ -180,6 +180,9 @@ class Queue:
             # Read with a default: an Entry written before Children existed
             # was spawned by nobody.
             parent=document.get("parent"),
+            # Read with a default: an Entry written before Child limits existed
+            # has no limit of its own.
+            child_limit=document.get("child_limit"),
             run_id=document.get("run_id"),
         )
 
@@ -482,6 +485,7 @@ def _document(entry: Entry) -> dict[str, Any]:
         "attachment": _attachment_document(entry.attachment),
         "settings": settings_document(entry.settings),
         "parent": entry.parent,
+        "child_limit": entry.child_limit,
         "run_id": entry.run_id,
     }
 
