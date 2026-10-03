@@ -39,12 +39,17 @@ naiad queue watch --capacity 6
 
 Below the ceiling, the machine must also be unstrained. No Run starts while the
 operating system reports memory under pressure: on macOS,
-`kern.memorystatus_vm_pressure_level` above normal; on Linux, `some avg10` above
+`kern.memorystatus_vm_pressure_level` at critical (a warning does not count,
+because a busy machine reads one all day); on Linux, `some avg10` above
 10 in `/proc/pressure/memory`, or less than a tenth of memory available where
 that file is missing. No Run starts into a working tree whose volume has less
 free disk than the larger of 10% and 10 GB; a waiting entry there is passed over
 and another tree may start instead. Where the machine gives no reading, the
 ceiling alone applies.
+
+An adoption is the exception. It joins a session that is already open, so
+neither the ceiling nor memory pressure holds it back. Low disk still does.
+Once started it counts toward the ceiling like any other run.
 
 While nothing can start for one of these reasons (the ceiling, memory or
 disk), the Supervisor says so once.
