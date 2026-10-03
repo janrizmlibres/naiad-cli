@@ -118,6 +118,24 @@ def test_a_missing_working_branch_renders_as_nothing():
     assert rendered == "check out "
 
 
+def test_interpolates_the_child_limit():
+    """A number Naiad hands over without reading it: what one means — build
+    here rather than spawn — is the Workflow's to say."""
+    rendered = render_prompt(
+        "Child limit: {child_limit}", task="t", next_states=("s",), child_limit=1
+    )
+
+    assert rendered == "Child limit: 1"
+
+
+def test_a_missing_child_limit_renders_as_nothing():
+    """No limit of the Run's own is ordinary, and renders empty as an absent
+    Predecessor does."""
+    rendered = render_prompt("Child limit: {child_limit}", task="t", next_states=("s",))
+
+    assert rendered == "Child limit: "
+
+
 def test_leaves_a_placeholder_naiad_does_not_define_untouched():
     """`--base` is a flag, not a placeholder: the Prompt names {predecessor}.
     Only the placeholders Naiad defines are replaced."""
@@ -149,7 +167,10 @@ def test_interpolates_one_line_per_child():
     )
 
 
-def test_no_children_named_renders_the_slot_as_nothing():
-    rendered = render_prompt("take in [{children}]", task="t", next_states=(), children=())
+def test_no_children_named_says_so():
+    """A Join State delivered at once names nothing, and an empty slot read as a
+    gap under 'take in each Child named below', ahead of rules that applied to
+    none. Said as a list line, so it reads as the list being empty."""
+    rendered = render_prompt("take in:\n{children}", task="t", next_states=(), children=())
 
-    assert rendered == "take in []"
+    assert rendered == "take in:\n- none"

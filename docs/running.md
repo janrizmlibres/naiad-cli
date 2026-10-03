@@ -90,7 +90,10 @@ Child its Parent is still waiting to be told of.
 `--child-limit N` on `queue add`, `run` and `adopt` caps how many of the Run's Children
 work at once; a batch file says `child-limit = N`, at the top or per entry. With
 none, every Child starts as soon as it is queued. A limit of 1 takes them one at
-a time, in the order they were spawned. A parked Child still counts.
+a time, in the order they were spawned. A parked Child still counts. The number
+also reaches the Run's Prompts as `{child_limit}`, so a Workflow can act on it,
+for example by spawning no Children at 1 and doing the work in the Run's own
+session.
 
 An entry can run some States on a different model or effort from the one the
 Workflow names, without editing the Workflow. Name each State with `--model` or

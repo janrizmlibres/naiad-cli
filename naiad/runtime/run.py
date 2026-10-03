@@ -75,6 +75,11 @@ class Run:
     # here: a Workflow edited under a live Run leaves a setting for a State that
     # no longer delivers simply unused.
     settings: tuple[StateSetting, ...] = ()
+    # How many of this Run's Children may work at once, as its Entry named it,
+    # or None for no limit of its own. The Supervisor counts with the Entry's
+    # copy; this one is for the Prompt, which is where a Workflow decides what
+    # the number means, and is read on every delivery like the branch.
+    child_limit: int | None = None
     # The name of the State the Run began at, resolved when it started: the
     # first declared State when the Entry named none. What the Standing State
     # is read from before the Run has announced anything, so that a Workflow
@@ -139,6 +144,7 @@ class Run:
             "predecessor": self.predecessor,
             "skip_gates": self.skip_gates,
             "settings": settings_document(self.settings),
+            "child_limit": self.child_limit,
             "start_state": self.start_state,
             "start_subject": self.start_subject,
             "adopted": self.adopted,
@@ -168,6 +174,7 @@ class RunStore:
         predecessor: str | None = None,
         skip_gates: bool = False,
         settings: tuple[StateSetting, ...] = (),
+        child_limit: int | None = None,
         start_state: str | None = None,
         start_subject: str | None = None,
         adopted: bool = False,
@@ -191,6 +198,7 @@ class RunStore:
             predecessor=predecessor,
             skip_gates=skip_gates,
             settings=settings,
+            child_limit=child_limit,
             start_state=start_state,
             start_subject=start_subject,
             adopted=adopted,
@@ -253,6 +261,7 @@ class RunStore:
             predecessor=document.get("predecessor"),
             skip_gates=document.get("skip_gates", False),
             settings=settings_from(document.get("settings", [])),
+            child_limit=document.get("child_limit"),
             start_state=document.get("start_state"),
             start_subject=document.get("start_subject"),
             adopted=document.get("adopted", False),

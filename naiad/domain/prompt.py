@@ -52,6 +52,7 @@ def render_prompt(
     branch: str | None = None,
     predecessor: str | None = None,
     children: Sequence[FinishedChild] = (),
+    child_limit: int | None = None,
 ) -> str:
     """next_states is plural even though most States have exactly one: at a
     Branching State the Prompt reads as naming both exits, and the Prompt's own
@@ -77,11 +78,11 @@ def render_prompt(
     Workflow Clear, and a State that has forgotten everything can still name
     the branch it is working on.
 
-    They stay separate arguments rather than one object grouping the three
+    They stay separate arguments rather than one object grouping the four
     Run-level facts. The type that object wants to be already exists and is
     called Run — both callers pass exactly its fields — but this module is
     domain and the Run is runtime, so taking one would invert the layering
-    every other rule here observes. A second type holding a copy of three of
+    every other rule here observes. A second type holding a copy of four of
     the Run's fields buys nothing but a place for them to drift. The Children
     a Join State names are no Run-level fact either, being decided per
     Announcement as the Subject is.
@@ -95,8 +96,14 @@ def render_prompt(
     declaration then forgotten is refused at the next Announcement, where the
     agent can still correct it, rather than here.
 
+    child_limit is the Run's own Child limit, a Run-level fact like the
+    branch, rendered as the number or as nothing when the Entry named none.
+    Naiad counts with it; what a limit means for the work — that one builds in
+    the Parent's own Session rather than through Children, say — is the
+    Prompt's to decide.
+
     children is the finished Children a Join State's delivery names, one line
-    each. The loader refuses the slot anywhere else, and it renders as nothing
+    each. The loader refuses the slot anywhere else, and it renders `- none`
     when none is named.
     """
     return (
@@ -106,6 +113,7 @@ def render_prompt(
         .replace(BRANCH_PLACEHOLDER, branch or "")
         .replace("{predecessor}", predecessor or "")
         .replace(CHILDREN_PLACEHOLDER, render_children(children))
+        .replace("{child_limit}", "" if child_limit is None else str(child_limit))
     )
 
 

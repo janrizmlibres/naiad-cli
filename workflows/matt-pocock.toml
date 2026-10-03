@@ -108,12 +108,13 @@ model = "opus"
 effort = "medium"
 clear = true
 join = true
-next = ["implement", "triage", "handover", "pull-request"]
+next = ["implement", "build-here", "triage", "handover", "pull-request"]
 prompt = """
 Working branch: {branch}
 Predecessor: {predecessor}
+Child limit: {child_limit}
 
-Coordinate this feature's tickets and build none of them yourself: each ready ticket is built by a Child of this Run, in a worktree of its own. The tickets are the set this Run's task was split into, kept where this repository's issue tracker keeps them. A ticket or ticket set the task names is that set.
+Coordinate this feature's tickets. The tickets are the set this Run's task was split into, kept where this repository's issue tracker keeps them. A ticket or ticket set the task names is that set.
 
 {task}
 
@@ -123,17 +124,25 @@ If the Working branch line above is empty, this Run was started here without one
 
 A ticket is closed when its Status line reads resolved or wontfix, and open otherwise, claimed included. A ticket's branch is `<working-branch>--<NN>`, where `<NN>` is its number, and its worktree is the sibling of this repository's checkout named `<repo>-wt-<working-branch-slug>--<NN>`: the checkout's directory name, `-wt-`, the Working branch with every `/` made `-`, then `--` and the number. A ticket's Child is in flight while the ticket reads claimed, its worktree exists, and `naiad queue list` shows a Child of this Run working in that worktree. Where git does not track the ticket set, its files live only in the checkout that holds them, whichever branch it stands on: make every Status change and comment below there, with nothing of it to commit.
 
+The build limit, how many tickets may be built at once, is the smaller of the Child limit above and the `children` key of a .matt-pocock.toml at this repository's root. Either one absent sets no limit, and both absent means none at all. When the build limit is 1, nothing would run beside a Child, so spawn none: each ready ticket is handed in turn to build-here, which builds it in this session on the Working branch. Otherwise each ready ticket is built by a Child of this Run, in a worktree of its own. Either way, build none of them yourself.
+
 Do these three things, in order.
 
-1. Take in each Child named below. A pass may name none.
-
-{children}
+1. Take in each Child listed at the end of this step.
 
    A completed Child: merge its branch into the Working branch and run the tests. Where git does not track the ticket set, set its ticket's Status line to resolved. Where the ticket reached a companion repository — one the `companions` key of a .matt-pocock.toml at this repository's root names — merge the companion's branch of the same name into the companion's feature branch, which carries the Working branch's name, in whichever worktree of the companion has it checked out, creating it from the companion's base branch on first need. Then remove the Child's worktrees, here and in companions, and delete its branches with `git branch -d`. Resolve a merge conflict yourself and run the tests. If you cannot get them passing, abort the merge, say so in the session, and announce handover.
 
    A cancelled Child: remove its worktree, keep its branch, and add a line under its ticket's `## Comments` heading saying its Child was cancelled and its branch is kept, and commit that on the Working branch. Its ticket stays claimed with no Child in flight.
 
-2. Scan. For every open ticket whose Status line reads ready-for-agent and whose blocking edges are all satisfied, lowest-numbered first, stopping once as many Children are in flight as the `children` key of a .matt-pocock.toml at this repository's root allows (no key, no limit):
+   These are the Children that have finished since the last pass. When the list reads `- none`, there is nothing to take in: go on to step 2.
+
+{children}
+
+2. Scan the open tickets whose Status line reads ready-for-agent and whose blocking edges are all satisfied, lowest-numbered first.
+
+   When the build limit is 1, claim nothing and spawn nothing: step 3 hands the next ticket on.
+
+   Otherwise, for each of them, stopping once as many Children are in flight as the build limit allows:
    - set its Status line to claimed and commit that on the Working branch;
    - `git worktree add -b <working-branch>--<NN> <its worktree> <working-branch>`;
    - copy into that worktree the untracked setup the repository needs to build and test: its `.env` files, whatever its README names as a setup step, and the ticket set where git does not track it;
@@ -142,6 +151,7 @@ Do these three things, in order.
 3. Route, by the first line that applies:
    - an open ticket whose blocking edges are all satisfied reads needs-triage — announce triage, passing that ticket's file as the subject;
    - a Child is in flight — announce implement, with no subject;
+   - the build limit is 1 and an open ticket whose blocking edges are all satisfied reads ready-for-agent — announce build-here, passing the lowest-numbered such ticket's file as the subject;
    - an open ticket remains, whatever its status, including claimed with no Child in flight — announce handover, and say in the session which tickets and statuses you found and why you are stopping, naming every ticket whose Child was cancelled;
    - no open ticket remains — announce pull-request.
 """
@@ -196,6 +206,26 @@ Once every one of them is settled, opened or deliberately not, announce {next_st
 [[states]]
 name = "done"
 terminal = true
+
+# Entered only by name: `implement` hands it one ticket at a time when its
+# build limit is 1.
+
+[[states]]
+name = "build-here"
+next = ["implement", "handover"]
+prompt = """
+/implement {subject}
+
+Working branch: {branch}
+
+Build that one ticket on the Working branch above, wherever it is checked out, and leave the other tickets alone. Run `git worktree list` before you change anything. If a worktree of this repository has the Working branch checked out, work and commit in that worktree. Otherwise check it out here.
+
+If the ticket reaches a companion repository — one the `companions` key of a .matt-pocock.toml at this repository's root names — do that part on the companion's branch named the same as the Working branch, in whichever worktree of the companion has it checked out, creating it from the companion's base branch on first need.
+
+When the ticket is done and its tests pass, set its Status line to resolved, commit on the Working branch and on any companion branch, and announce implement, with no subject. Where git does not track the ticket set, change the Status line in the checkout that holds it, with nothing of it to commit.
+
+If you cannot get its tests passing, leave its Status line as it is, say so in the session, and announce handover.
+"""
 
 # Entered only by name: each Child of `implement` starts here.
 
