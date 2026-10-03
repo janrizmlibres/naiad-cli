@@ -101,6 +101,45 @@ def test_a_prompt_ending_in_a_newline_does_not_type_a_trailing_empty_segment():
     ]
 
 
+def test_a_line_ending_in_a_semicolon_types_the_semicolon():
+    """tmux reads an argument ending in `;` as the end of one command and drops
+    the `;`, so a Prompt whose bullets end in one arrived without them and the
+    Session turned every attempt away as cut short. `\\;` is tmux's own escape
+    for a literal one."""
+    assert keystrokes_for("%1", "commit that on the Working branch;") == [
+        ["tmux", "send-keys", "-t", "%1", "-l", "--", "commit that on the Working branch\\;"],
+        ["tmux", "send-keys", "-t", "%1", "Enter"],
+    ]
+
+
+def test_a_semicolon_closing_a_piece_mid_line_types_too():
+    """Every piece is an argument of its own, so a `;` the cut leaves last in a
+    piece is dropped exactly as one ending a line is."""
+    line = "x" * (TYPED_PIECE_BYTES - 1) + ";rest"
+
+    assert keystrokes_for("%1", line) == [
+        ["tmux", "send-keys", "-t", "%1", "-l", "--", "x" * (TYPED_PIECE_BYTES - 1) + "\\;"],
+        ["tmux", "send-keys", "-t", "%1", "-l", "--", "rest"],
+        ["tmux", "send-keys", "-t", "%1", "Enter"],
+    ]
+
+
+def test_a_line_ending_in_a_backslash_and_semicolon_types_both():
+    """tmux turns the backslash before a closing `;` into the `;`, so a typed
+    backslash there needs one of its own."""
+    assert keystrokes_for("%1", "escape it with \\;") == [
+        ["tmux", "send-keys", "-t", "%1", "-l", "--", "escape it with \\\\;"],
+        ["tmux", "send-keys", "-t", "%1", "Enter"],
+    ]
+
+
+def test_a_semicolon_inside_a_line_is_typed_as_it_is():
+    assert keystrokes_for("%1", "one; two") == [
+        ["tmux", "send-keys", "-t", "%1", "-l", "--", "one; two"],
+        ["tmux", "send-keys", "-t", "%1", "Enter"],
+    ]
+
+
 def fake_tmux(directory, monkeypatch, *, says, status):
     """A tmux on PATH that records its arguments and answers as told."""
     directory.mkdir()
