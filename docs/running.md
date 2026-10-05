@@ -321,6 +321,9 @@ not follow.
 A Run normally starts its own session. An **Adoption** attaches a Run to a
 Claude Code session you are already in, so the phases that remain run there with
 the conversation still in context. It needs that session to be in tmux.
+A background session, one Claude Code's daemon hosts and you view through
+`claude attach`, is not in tmux even when the view is: stop it with
+`claude stop <id>`, then `claude --resume` it in a tmux pane and adopt from there.
 
 `naiad install` puts the `naiad-adopt` skill in your skills directory. In the
 session, ask for it by naming Naiad, for example "naiad, start to-spec" or "let

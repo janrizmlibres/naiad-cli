@@ -63,6 +63,7 @@ def adopting_pane(monkeypatch):
     which unset it themselves."""
     monkeypatch.setenv("TMUX_PANE", "%42")
     monkeypatch.delenv("CLAUDE_SESSION_ID", raising=False)
+    monkeypatch.delenv("CLAUDE_CODE_SESSION_KIND", raising=False)
 
 
 @pytest.fixture(autouse=True)
@@ -262,6 +263,39 @@ def test_adopting_outside_tmux_is_refused_naming_the_constraint(
     assert adopt(repo) == 2
 
     assert "tmux" in capsys.readouterr().err
+    assert queue_of(home).all() == []
+
+
+# A background session, the kind Claude Code's daemon hosts, has no pane of its
+# own: the human watching it through `claude attach` from a pane is not where
+# it lives, and a `--resume` while it runs only attaches again.
+
+
+def test_adopting_from_a_background_session_is_refused_naming_the_way_out(
+    home, repo, monkeypatch, capsys
+):
+    monkeypatch.delenv("TMUX_PANE", raising=False)
+    monkeypatch.setenv("CLAUDE_CODE_SESSION_KIND", "bg")
+
+    assert adopt(repo) == 2
+
+    err = capsys.readouterr().err
+    assert "background" in err
+    assert "claude stop" in err
+    assert "claude --resume" in err
+    assert queue_of(home).all() == []
+
+
+def test_a_background_session_is_refused_even_with_a_pane_in_its_environment(
+    home, repo, monkeypatch, capsys
+):
+    # Inherited from wherever the daemon was started, it names a pane the
+    # session does not live in: typing there would reach someone else.
+    monkeypatch.setenv("CLAUDE_CODE_SESSION_KIND", "bg")
+
+    assert adopt(repo) == 2
+
+    assert "background" in capsys.readouterr().err
     assert queue_of(home).all() == []
 
 
