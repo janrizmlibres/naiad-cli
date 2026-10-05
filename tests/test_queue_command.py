@@ -12,10 +12,10 @@ import time
 import pytest
 from rich.text import Text
 
-from fake_terminal import ESCAPE, to_terminal
+from fake_terminal import ESCAPE, styles_of, to_terminal
 from naiad.adapters.lock import SupervisorLock
 from naiad.cli.hold import declare_hold
-from naiad.cli.main import _drive, _ticker, main
+from naiad.cli.main import _cancellation_line, _drive, _ticker, main
 from naiad.cli.style import GLYPHS, Styled
 from naiad.cli.wait import declare_wait
 from naiad.domain.decide import NUDGE_LIMIT, SILENCE_SECONDS, Finish, Notify
@@ -91,6 +91,33 @@ def add(repo, *arguments):
             *arguments,
         ]
     )
+
+
+def test_adding_an_entry_reports_it_in_the_words_an_agent_reads(home, repo, capsys):
+    """Agents run `naiad queue add`, and adopt and spawn report through the
+    same lines, so their words and layout are held whole."""
+    assert add(repo, "--branch", "TASK-8546") == 0
+
+    (queued,) = queue_of(home).all()
+    assert capsys.readouterr().out == (
+        f"queued {queued.id}\n  branch TASK-8546   in {repo}\n"
+    )
+
+
+def test_adding_an_entry_reports_the_same_words_coloured_at_a_terminal(
+    home, repo, monkeypatch
+):
+    terminal = to_terminal(monkeypatch)
+
+    assert add(repo, "--branch", "TASK-8546") == 0
+
+    (queued,) = queue_of(home).all()
+    lines = terminal.getvalue().splitlines()
+    assert all(ESCAPE in line for line in lines)
+    assert [words_of(line) for line in lines] == [
+        f"queued {queued.id}",
+        f"  branch TASK-8546   in {repo}",
+    ]
 
 
 def test_adding_an_entry_records_it_under_the_naiad_home(home, repo, capsys):
@@ -970,6 +997,43 @@ def test_removing_an_entry_names_the_session_the_operator_now_has(home, repo, ca
     assert "%7" in printed
 
 
+def words_of(printed):
+    """What a terminal was shown, without its escape codes: the words a reader
+    off a terminal is given."""
+    return re.sub(r"\x1b\[[0-9;]*m", "", printed)
+
+
+def test_removing_an_entry_says_what_was_removed_and_cancelled_in_these_words(
+    home, repo, capsys
+):
+    queued_run(home, repo)
+
+    assert main(["queue", "rm", "an-entry"]) == 0
+
+    assert capsys.readouterr().out == (
+        "removed an-entry\ncancelled run a-run; its session at pane %7 is yours\n"
+    )
+
+
+def test_removing_an_entry_says_the_same_words_coloured_at_a_terminal(home, repo, monkeypatch):
+    queued_run(home, repo)
+    terminal = to_terminal(monkeypatch)
+
+    assert main(["queue", "rm", "an-entry"]) == 0
+
+    printed = terminal.getvalue()
+    assert ESCAPE in printed
+    assert words_of(printed) == (
+        "removed an-entry\ncancelled run a-run; its session at pane %7 is yours\n"
+    )
+
+
+def test_a_cancellation_names_its_run_and_pane_as_ids(home, repo):
+    run = queued_run(home, repo)
+
+    assert styles_of(_cancellation_line(run)) == {"a-run": "id", "%7": "id"}
+
+
 def test_removing_a_waiting_entry_says_nothing_about_a_session(home, repo, capsys):
     """There is no Run and so no Session, and a line about one would send the
     operator looking for a session that was never opened."""
@@ -1353,6 +1417,20 @@ def test_pruning_names_each_entry_it_took_and_says_how_many(home, repo, capsys):
     assert "first-entry" in printed and "second-entry" in printed
     assert "add dark mode" in printed
     assert "2" in printed
+
+
+def test_pruning_says_the_same_words_coloured_at_a_terminal(home, repo, monkeypatch, capsys):
+    finished(home, repo, entry_id="first-entry", run_id="first-run")
+    RunLog(orphan(home, repo).root).record(Finish(state="done"))
+    terminal = to_terminal(monkeypatch)
+
+    assert main(["queue", "prune"]) == 0
+
+    printed = terminal.getvalue()
+    assert ESCAPE in printed
+    assert words_of(printed) == (
+        "pruned first-entry  add dark mode\npruned orphaned run orphaned-run\n2 pruned\n"
+    )
 
 
 def test_pruning_a_queue_with_nothing_done_says_so_rather_than_printing_nothing(
@@ -1948,3 +2026,18 @@ def test_cancelling_a_parent_prints_an_untold_childs_working_tree_as_left_to_rem
 
     printed = capsys.readouterr().out
     assert f"left for you to remove: {worktree}" in printed
+
+
+def test_a_working_tree_left_to_remove_is_styled_as_a_path_at_a_terminal(
+    home, repo, monkeypatch
+):
+    worktree = joining_parent(home, repo, child_finished=False)
+    terminal = to_terminal(monkeypatch)
+
+    assert main(["queue", "rm", "parent"]) == 0
+
+    (line,) = [
+        line for line in terminal.getvalue().splitlines() if "left for you to remove" in line
+    ]
+    assert ESCAPE in line
+    assert words_of(line) == f"child working tree left for you to remove: {worktree}"

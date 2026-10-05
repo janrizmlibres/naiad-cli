@@ -67,6 +67,8 @@ THEME = Theme(
         "branch": "magenta",
         "state": "cyan",
         "workflow": "bold",
+        # How many a line reports, such as the Entries a Prune took.
+        "count": "bold",
         # What Naiad does on entering a State. A Gate is the one that wants
         # a person, and a Terminal State does nothing but end the Run.
         "kind.prompt": "none",
@@ -197,16 +199,27 @@ class Styled(str):
 
     text: Text
 
-    def __new__(cls, text: Text) -> Styled:
-        line = super().__new__(cls, text.plain)
+    def __new__(cls, text: Text, *, words: str | None = None) -> Styled:
+        line = super().__new__(cls, text.plain if words is None else words)
         line.text = text
         return line
 
     @classmethod
     def assemble(cls, *pieces: str | tuple[str, str] | Text) -> Styled:
         """A line from its pieces in order, each plain, a Text, or words with
-        the name of their style."""
-        return cls(Text.assemble(*pieces))
+        the name of their style.
+
+        Its words are the pieces' own rather than the Text's, which drops a
+        control character such as a carriage return: a path or a Task quoted
+        into a line reaches a reader off a terminal exactly as it was."""
+        return cls(Text.assemble(*pieces), words="".join(map(_words, pieces)))
+
+
+def _words(piece: str | tuple[str, str] | Text) -> str:
+    """What one piece of a line says, without its style."""
+    if isinstance(piece, Text):
+        return piece.plain
+    return piece if isinstance(piece, str) else piece[0]
 
 
 def styled(line: str) -> Text:

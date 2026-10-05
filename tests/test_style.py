@@ -212,3 +212,13 @@ def test_a_said_line_under_no_color_is_its_words_byte_for_byte(monkeypatch):
     say("fix\tthis")
 
     assert terminal.getvalue() == "fix\tthis\n"
+
+
+def test_a_line_assembled_from_pieces_keeps_every_character_of_its_words(capsys):
+    """A Text drops control characters from what it holds; the words a reader
+    off a terminal is given are what the pieces said."""
+    line = Styled.assemble(("queued", "event.progress"), " in ", ("/tmp/odd\rname", "repo"))
+
+    assert line == "queued in /tmp/odd\rname"
+    say(line)
+    assert capsys.readouterr().out == "queued in /tmp/odd\rname\n"

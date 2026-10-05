@@ -1179,7 +1179,11 @@ def _run(arguments: argparse.Namespace) -> int:
             # Fire-and-forget. Adding work never blocks on work already
             # running, and the Supervisor holding the lock takes this Entry in
             # its turn.
-            print("a supervisor is already running; it will take this in turn")
+            say(
+                Styled.assemble(
+                    ("a supervisor is already running; it will take this in turn", "secondary")
+                )
+            )
             return 0
         return _supervise(following=False, ceiling=ceiling)
 
@@ -1564,8 +1568,15 @@ def _queued(
 def _report(entry: Entry) -> None:
     """What an Entry looks like once it is queued. One place, so that a batch
     reports each of its Entries exactly as a single one is reported."""
-    print(f"queued {entry.id}")
-    print(f"  branch {_branch_shown(entry)}   in {entry.target_repo}")
+    say(Styled.assemble(("queued", "event.progress"), " ", (entry.id, "id")))
+    say(
+        Styled.assemble(
+            "  branch ",
+            (_branch_shown(entry), "branch"),
+            "   in ",
+            (str(entry.target_repo), "repo"),
+        )
+    )
 
 
 def _queue_list(arguments: argparse.Namespace) -> int:
@@ -1846,18 +1857,18 @@ def _queue_rm(arguments: argparse.Namespace) -> int:
         )
         return 2
 
-    print(f"removed {cancelled.entry.id}")
+    say(Styled.assemble("removed ", (cancelled.entry.id, "id")))
     # Only a Run this act actually ended. An Entry that never started one, and
     # one whose Run was already over, release no Session — and a line offering
     # the operator a session in either case would be a claim, not a report.
     if cancelled.run is not None:
-        print(_cancellation_line(cancelled.run))
+        say(_cancellation_line(cancelled.run))
     for worktree in cancelled.worktrees:
-        print(f"child working tree left for you to remove: {worktree}")
+        say(Styled.assemble("child working tree left for you to remove: ", (str(worktree), "repo")))
     return 0
 
 
-def _cancellation_line(run: Run) -> str:
+def _cancellation_line(run: Run) -> Styled:
     """What was cancelled, and where to go and read what the agent was doing.
 
     A Run cancelled between its directory being made and its session being
@@ -1865,8 +1876,14 @@ def _cancellation_line(run: Run) -> str:
     looking for one that was never opened.
     """
     if run.tmux_pane is None:
-        return f"cancelled run {run.id}; it had no session yet"
-    return f"cancelled run {run.id}; its session at pane {run.tmux_pane} is yours"
+        return Styled.assemble("cancelled run ", (run.id, "id"), "; it had no session yet")
+    return Styled.assemble(
+        "cancelled run ",
+        (run.id, "id"),
+        "; its session at pane ",
+        (run.tmux_pane, "id"),
+        " is yours",
+    )
 
 
 def _queue_prune(arguments: argparse.Namespace) -> int:
@@ -1887,25 +1904,34 @@ def _queue_prune(arguments: argparse.Namespace) -> int:
         return 2
 
     if not (pruned.removed or pruned.orphans or pruned.skipped or pruned.failures):
-        print(
-            "nothing to prune: no entry in the queue is done and no run is orphaned"
-            f" ({default_queue_root()})"
+        say(
+            Styled.assemble(
+                (
+                    "nothing to prune: no entry in the queue is done and no run is orphaned"
+                    f" ({default_queue_root()})",
+                    "secondary",
+                )
+            )
         )
         return 0
 
     for entry in pruned.removed:
-        print(f"pruned {entry.id}  {entry.task}")
+        say(Styled.assemble("pruned ", (entry.id, "id"), f"  {entry.task}"))
     # An orphan has no line in the listing, so this printed line is the only
     # record its removal ever gets.
     for run_id in pruned.orphans:
-        print(f"pruned orphaned run {run_id}")
+        say(Styled.assemble("pruned orphaned run ", (run_id, "id")))
     if pruned.removed or pruned.orphans:
-        print(f"{len(pruned.removed) + len(pruned.orphans)} pruned")
+        say(Styled.assemble((str(len(pruned.removed) + len(pruned.orphans)), "count"), " pruned"))
 
     # Left rather than failed: whether a running orphan is truly live is the
     # operator's fact, so naming it defers the judgment without alarming them.
     for path in pruned.skipped:
-        print(f"left orphaned run {path}: reads as running, yours to judge")
+        say(
+            Styled.assemble(
+                "left orphaned run ", (str(path), "repo"), ": reads as running, yours to judge"
+            )
+        )
 
     for failure in pruned.failures:
         print(f"naiad: {failure}", file=sys.stderr)

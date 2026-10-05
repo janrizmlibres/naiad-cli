@@ -15,8 +15,11 @@ the failure this project is avoiding; the loop is covered in
 tests/test_supervisor.py and its rules in tests/test_supervise.py.
 """
 
+import re
+
 import pytest
 
+from fake_terminal import ESCAPE, to_terminal
 from naiad.adapters.lock import SupervisorLock
 from naiad.cli.main import main
 from naiad.runtime.queue import Queue
@@ -360,6 +363,21 @@ def test_running_while_a_supervisor_holds_the_lock_returns_immediately(
     (queued,) = queue_of(home).all()
     assert queued.id in capsys.readouterr().out
     assert queued.run_id is None
+
+
+def test_running_while_a_supervisor_holds_the_lock_says_so_coloured_at_a_terminal(
+    home, repo, supervised, monkeypatch
+):
+    refuse_supervising(monkeypatch)
+    terminal = to_terminal(monkeypatch)
+
+    assert run(repo, "--branch", "TASK-8546") == 0
+
+    last = terminal.getvalue().splitlines()[-1]
+    assert ESCAPE in last
+    assert re.sub(r"\x1b\[[0-9;]*m", "", last) == (
+        "a supervisor is already running; it will take this in turn"
+    )
 
 
 def test_running_records_the_child_limit_it_was_given(home, repo, monkeypatch):
