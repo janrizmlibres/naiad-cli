@@ -36,6 +36,13 @@ TMUX_PANE_VARIABLE = "TMUX_PANE"
 # reliable key and the one an Adoption actually turns on.
 CLAUDE_SESSION_VARIABLE = "CLAUDE_SESSION_ID"
 
+# Claude Code's own, "bg" in a session its daemon hosts. Such a session lives in
+# the daemon's terminal, never a pane: the human watching it through `claude
+# attach` stands in a pane the session does not, and any TMUX_PANE it carries
+# was inherited from wherever the daemon started.
+CLAUDE_SESSION_KIND_VARIABLE = "CLAUDE_CODE_SESSION_KIND"
+BACKGROUND_SESSION_KIND = "bg"
+
 
 class NotInTmux(Exception):
     """Adoption asked of a session with no pane to attach to.
@@ -52,7 +59,20 @@ def attachment_in(environ: Mapping[str, str]) -> Attachment:
     Taken from the environment rather than named on the command line, because
     the agent typing the command has no way to know its own pane, and one it
     guessed would attach the Run to somebody else's session.
+
+    A background session is refused before the pane is read, and with its own
+    way out: the human is looking at it from a pane, so "not in tmux" reads as
+    false to them, and resuming it while it runs only attaches to it again.
     """
+    if environ.get(CLAUDE_SESSION_KIND_VARIABLE) == BACKGROUND_SESSION_KIND:
+        raise NotInTmux(
+            "adoption needs a tmux pane to attach to, and this is a background "
+            "session: Claude Code's daemon runs it outside any pane, even while "
+            "you watch it through `claude attach`. Stop it with `claude stop "
+            "<id>` (`claude agents` lists the ids), resume it in a tmux pane with "
+            "`claude --resume <session-id>`, and adopt from there; nothing has "
+            "been queued"
+        )
     pane = environ.get(TMUX_PANE_VARIABLE)
     if not pane:
         raise NotInTmux(
