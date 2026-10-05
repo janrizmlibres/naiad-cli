@@ -28,11 +28,14 @@ from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
 
+from rich.text import Text
+
 from naiad.adapters.claude_config import default_settings_path, default_skills_root
 from naiad.adapters.executable import naiad_command
 from naiad.adapters.notify import OSASCRIPT, push_legs
 from naiad.adapters.tmux import CLAUDE, TMUX
 from naiad.cli.library import LibraryError, resolve_workflow
+from naiad.cli.style import Styled, refusal
 from naiad.domain.workflow import WorkflowError
 from naiad.hooks.settings import installed_hooks
 from naiad.runtime.home import default_library_root, naiad_home
@@ -86,21 +89,35 @@ def first_failure() -> Finding | None:
     return next(_failures(), None)
 
 
-def entrance_refusal() -> str | None:
+def entrance_refusal() -> Styled | None:
     """The one line an entrance refuses with, or None where it may go on: the
-    missing thing, why Naiad needs it, the fix, then the doctor."""
+    missing thing, why Naiad needs it, the fix, then the doctor.
+
+    `naiad adopt` is an entrance, and an agent reads its refusal, so only the
+    `naiad:` is styled, and only a terminal is shown it."""
     failure = first_failure()
     if failure is None:
         return None
-    return f"naiad: {failure.what} — {failure.why}; {failure.fix}, then run `naiad doctor`"
-
-
-def render_report(findings: list[Finding]) -> str:
-    """One line per finding: its severity, what is so, and what to run."""
-    return "\n".join(
-        f"{finding.severity.value}  {finding.what}" + (f" — {finding.fix}" if finding.fix else "")
-        for finding in findings
+    return Styled(
+        refusal(f"{failure.what} — {failure.why}; {failure.fix}, then run `naiad doctor`")
     )
+
+
+def render_report(findings: list[Finding]) -> Styled:
+    """One line per finding: its severity, what is so, and what to run.
+
+    The severity is the first word of every line, coloured for how much it
+    matters, because a reader — a person scanning, a script gating — finds a
+    line by it."""
+    return Styled(Text("\n").join(_reported(finding) for finding in findings))
+
+
+def _reported(finding: Finding) -> Text:
+    severity = finding.severity.value
+    line = Text.assemble((severity, f"severity.{severity}"), f"  {finding.what}")
+    if finding.fix:
+        line.append(" — ", style="secondary").append(finding.fix)
+    return line
 
 
 def _failures() -> Iterator[Finding]:

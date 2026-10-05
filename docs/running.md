@@ -374,7 +374,8 @@ and repairs nothing:
 naiad doctor
 ```
 
-Every line starts with its severity. `fail` means Naiad cannot work, and doctor
+Every line starts with its severity, coloured on a terminal and plain when the
+output is piped or `NO_COLOR` is set. `fail` means Naiad cannot work, and doctor
 exits 1. `warn` means Naiad works but something you expect will not. `info` is
 worth knowing. `naiad install` ends by printing the same report.
 

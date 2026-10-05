@@ -969,12 +969,12 @@ def _install(arguments: argparse.Namespace) -> int:
 
     try:
         settings = install_hooks(settings_path=arguments.settings)
-        print(f"installed naiad's hooks into {settings}")
+        say(_installed("naiad's hooks", settings))
         skill = install_adopt_skill(skills_root=arguments.skills)
-        print(f"installed the adopt skill into {skill}")
+        say(_installed("the adopt skill", skill))
         if arguments.starter:
             starter = install_starter(library=default_library_root(), force=arguments.force)
-            print(f"installed the starter workflow into {starter}")
+            say(_installed("the starter workflow", starter))
     except (OSError, ValueError) as error:
         print(f"naiad: {error}", file=sys.stderr)
         return 2
@@ -982,9 +982,15 @@ def _install(arguments: argparse.Namespace) -> int:
         # After what install did or refused to do, and never changing its exit
         # code: install is the command that fixes what the report finds, so the
         # report is the check that it did.
-        print(render_report(diagnose()))
+        say(render_report(diagnose()))
 
     return 0
+
+
+def _installed(what: str, where: Path | str) -> Styled:
+    """The line for one thing install put in place, led by the word a script
+    reading install's output matches on."""
+    return Styled.assemble(("installed", "event.progress"), f" {what} into {where}")
 
 
 def _doctor(arguments: argparse.Namespace) -> int:
@@ -992,7 +998,7 @@ def _doctor(arguments: argparse.Namespace) -> int:
     to run is the operator's to run. Exits 1 only when a check fails, so that a
     warning never stops a script that gates on it."""
     findings = diagnose()
-    print(render_report(findings))
+    say(render_report(findings))
     return 1 if any(finding.severity is Severity.FAIL for finding in findings) else 0
 
 
@@ -1004,7 +1010,7 @@ def _refused_at_the_door() -> bool:
     refusal = entrance_refusal()
     if refusal is None:
         return False
-    print(refusal, file=sys.stderr)
+    say(refusal, stderr=True)
     return True
 
 
