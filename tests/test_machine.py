@@ -69,8 +69,9 @@ def test_total_memory_elsewhere_is_unknown(tmp_path):
 # it gives none.
 
 
-@pytest.mark.parametrize(("level", "strained"), [(1, False), (2, True), (4, True)])
-def test_memory_on_macos_is_strained_above_the_normal_pressure_level(bin_dir, level, strained):
+@pytest.mark.parametrize(("level", "strained"), [(1, False), (2, False), (4, True)])
+def test_memory_on_macos_is_strained_only_at_the_critical_pressure_level(bin_dir, level, strained):
+    """A warning is an ordinary day on a busy machine; the ceiling bounds that."""
     install_sysctl(bin_dir, pressure_level=level)
 
     assert Machine(platform="darwin").strained() is strained

@@ -61,7 +61,11 @@ class Join:
 
 
 def render_children(children: Sequence[FinishedChild]) -> str:
-    """The `{children}` slot: one line per Child, nothing when none is named."""
+    """The `{children}` slot: one line per Child, and a `- none` line when none
+    is named, so a delivery naming nothing reads as an empty list rather than
+    as a gap."""
+    if not children:
+        return "- none"
     return "\n".join(
         f"- {child.subject or '-'}: {child.outcome}, branch {child.branch or '-'}, "
         f"working tree {child.worktree}"

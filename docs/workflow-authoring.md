@@ -174,8 +174,9 @@ Marks are optional keys on a State:
 - **`join = true`** makes a Join State, the place a Run that spawns Children
   takes them in. Its Prompt is held while Children are working and goes out
   as soon as one finishes that the Run has not been told of, naming it in
-  `{children}`. It goes out at once, naming none, when no Child is unfinished,
-  so the same State can make the first `naiad spawn` and notice the end.
+  `{children}`. It goes out at once, with `{children}` reading `- none`,
+  when no Child is unfinished, so the same State can make the first
+  `naiad spawn` and notice the end.
   While the Prompt is held there is no Nudge and no notification, and the
   listing shows the Run as `joining`. A Join State needs a Prompt and cannot
   be Terminal. A Run cannot announce its Terminal State while a Child is
@@ -237,8 +238,8 @@ says so in its Prompt and counts what it has in flight before it spawns.
 
 ## 4. The slots
 
-A Prompt is prose, and six slots in it are filled in when it is typed. Only
-these six are substituted. Anything else that looks like a placeholder, such as
+A Prompt is prose, and seven slots in it are filled in when it is typed. Only
+these seven are substituted. Anything else that looks like a placeholder, such as
 JSON in a Prompt, is left alone.
 
 | Slot | Renders as | Empty when |
@@ -248,11 +249,13 @@ JSON in a Prompt, is left alone.
 | `{predecessor}` | The branch the work stands on, from `queue add --base`. Naiad does not check that it exists, so the Prompt decides what to do with it. | No `--base` was given, which is ordinary. |
 | `{subject}` | What the agent said its last Announcement was about: `naiad announce <state> --subject <value>`. For the State a Run starts at, the `--subject` given to `queue add`. | The Announcement carried none. A Prompt with `{subject}` in it refuses an Announcement of its State that has none, so the agent corrects itself in its own turn. |
 | `{next_state}` | The States the agent may announce next, read as a phrase: `verify`, or `no-repro or pull-request`. It is the State's `next` list when it has one, otherwise the next State in declared order. | Nothing follows: a Terminal State, the last State, or only skipped Gates. |
-| `{children}` | One line per finished Child the Run has not been told of: its Subject, `completed` or `cancelled`, its Working branch and its working tree. Each Child is named once across all deliveries. A retyped Prompt names the same Children again. Allowed only in a Join State. | No Child has finished untold, which is the delivery a Join State makes when none is unfinished. |
+| `{children}` | One line per finished Child the Run has not been told of: its Subject, `completed` or `cancelled`, its Working branch and its working tree. Each Child is named once across all deliveries. A retyped Prompt names the same Children again. Allowed only in a Join State. | Never: when no Child has finished untold, which is the delivery a Join State makes when none is unfinished, it renders `- none`. |
+| `{child_limit}` | The Run's Child limit, from `--child-limit` on `queue add`, `run` or `adopt`, or `child-limit` in a batch file, as a number. Naiad counts with it either way; the slot lets the Prompt decide what the number means for the work, such as building in its own session at 1 rather than spawning. | No `--child-limit` was given: the Run sets no limit of its own. |
 
-`{branch}` and `{predecessor}` are facts of the Run, like the task, so they reach
-every Prompt, and a State that has forgotten everything can still name the branch
-it is on. `{subject}` belongs to one Announcement.
+`{branch}`, `{predecessor}` and `{child_limit}` are facts of the Run, like the
+task, so they reach every Prompt, and a State that has forgotten everything can
+still name the branch it is on and how many Children it may have at once.
+`{subject}` belongs to one Announcement.
 
 With `--skip-gates` the declared order steps past Gates, so `{next_state}` names
 the State after the Gate. A Gate that some State names in its `next` is a

@@ -173,7 +173,9 @@ def supervise(signals: Signals) -> Scan:
     is low on disk — keeps its lane and waits for a later scan, while a later
     lane may start in its place. Capacity's reasons are worth giving, the
     ceiling before memory before disk; the one-start rule clears on the next
-    pass by itself.
+    pass by itself. An Adoption is asked only about disk and the one-start
+    rule: it joins a Session already live, so starting it adds nothing for the
+    ceiling or memory to bound. Once started it is counted like any Run.
     """
     actions: list[Action] = []
     answered: set[Path] = set()
@@ -195,10 +197,11 @@ def supervise(signals: Signals) -> Scan:
                 continue
             if starting:
                 continue
-            if signals.ceiling is not None and running >= signals.ceiling:
+            spawns = entry.attachment is None
+            if spawns and signals.ceiling is not None and running >= signals.ceiling:
                 withheld = CEILING
                 continue
-            if signals.strained:
+            if spawns and signals.strained:
                 withheld = MEMORY
                 continue
             if entry.target_repo in signals.low_disk:

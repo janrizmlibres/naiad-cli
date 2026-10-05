@@ -94,6 +94,7 @@ def start_entry(
             start_state=entry.start_state,
             skip_gates=entry.skip_gates,
             settings=entry.settings,
+            child_limit=entry.child_limit,
             subject=entry.subject,
         )
         # After the session is joined rather than before the Run exists, so a
@@ -115,6 +116,7 @@ def start_entry(
         start_state=entry.start_state,
         skip_gates=entry.skip_gates,
         settings=entry.settings,
+        child_limit=entry.child_limit,
         subject=entry.subject,
     )
 
@@ -141,6 +143,7 @@ def start_run(
     # Optional, and opaque: recorded and substituted without being read, and
     # absent for work that stands on nothing.
     predecessor: str | None = None,
+    child_limit: int | None = None,
 ) -> Run:
     # Every refusal first, so that a mistyped State or a missing Subject costs
     # the operator nothing but the error message: no Run directory, no session.
@@ -169,6 +172,7 @@ def start_run(
         predecessor=predecessor,
         skip_gates=skip_gates,
         settings=settings,
+        child_limit=child_limit,
         start_state=first.name,
         start_subject=subject,
     )
@@ -183,13 +187,14 @@ def start_run(
         if first.is_gate_state
         else render_prompt(
             first.prompt or "",
-            # The three Run-level facts are read back off the Run just written,
+            # The Run-level facts are read back off the Run just written,
             # as the tick loop reads them, so both entrances to delivery draw
             # on one source. The Subject is not among them: it belongs to an
             # Announcement, and kickoff announces nothing.
             task=run.task,
             branch=run.working_branch,
             predecessor=run.predecessor,
+            child_limit=run.child_limit,
             next_states=successors,
             subject=subject,
         )
@@ -249,6 +254,7 @@ def attach_run(
     settings: tuple[StateSetting, ...] = (),
     subject: str | None = None,
     predecessor: str | None = None,
+    child_limit: int | None = None,
 ) -> Run:
     """Join the session an Adoption named, and deliver nothing yet.
 
@@ -288,6 +294,7 @@ def attach_run(
         predecessor=predecessor,
         skip_gates=skip_gates,
         settings=settings,
+        child_limit=child_limit,
         start_state=checked.state.name,
         # Read back by the delivery that follows, in a later tick and possibly
         # a later process: what an adopted Run's first Prompt renders from

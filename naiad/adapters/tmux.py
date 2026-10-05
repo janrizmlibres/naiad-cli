@@ -149,8 +149,20 @@ def keystrokes_for(pane: str, text: str) -> list[list[str]]:
             # it ends tmux's option parsing, and a line is never anything but
             # text. Without it a bulleted Answer types `-l - step` and tmux
             # rejects the bullet as a flag.
-            keys += [[TMUX, "send-keys", "-t", pane, "-l", "--", piece] for piece in _pieces(line)]
+            keys += [
+                [TMUX, "send-keys", "-t", pane, "-l", "--", _literal(piece)]
+                for piece in _pieces(line)
+            ]
     return keys + [[TMUX, "send-keys", "-t", pane, "Enter"]]
+
+
+def _literal(piece: str) -> str:
+    """The piece as an argument tmux types back exactly. tmux reads an argument
+    ending in `;` as the end of a command and drops the `;`, unless a backslash
+    stands before it, which it turns into the `;` instead."""
+    if piece.endswith(";"):
+        return piece[:-1] + "\\;"
+    return piece
 
 
 def _pieces(line: str) -> list[str]:

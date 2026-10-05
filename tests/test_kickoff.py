@@ -766,3 +766,37 @@ def test_the_compaction_point_the_spawn_carried_is_written_to_the_log(repo, stor
 
     assert [(e.kind, e.state) for e in RunLog(run.root).entries()] == [("launched", "grill")]
     assert RunLog(run.root).belief(announcement(seq=1)) == ({}, False)
+
+
+def _naming_the_child_limit(repo):
+    path = repo / "limited.toml"
+    path.write_text(
+        'name = "w"\n'
+        "[[states]]\nname = 'grill'\nprompt = 'at most {child_limit} at once'\n"
+        "[[states]]\nname = 'done'\nterminal = true\n"
+    )
+    return path
+
+
+def test_an_entrys_child_limit_reaches_the_runs_first_prompt(repo, store, sessions, tmp_path):
+    """The Prompt is where a Workflow decides what the number means, so the
+    operator's limit has to reach it and not only the Supervisor."""
+    entry = _entry(repo, workflow_path=_naming_the_child_limit(repo), child_limit=1)
+
+    started_from(entry, store, sessions, tmp_path)
+
+    (spawn,) = sessions.spawned
+    assert spawn.initial_prompt == "at most 1 at once"
+
+
+def test_an_adopted_run_records_its_entrys_child_limit(
+    repo, store, sessions, tmp_path
+):
+    """An Adoption's first Prompt goes out in a later tick, possibly from
+    another process, so the limit is read back off the stored Run."""
+    entry = _entry(repo, attachment=Attachment(tmux_pane="%7"), child_limit=2)
+
+    started_from(entry, store, sessions, tmp_path)
+
+    (stored,) = store.all()
+    assert stored.child_limit == 2

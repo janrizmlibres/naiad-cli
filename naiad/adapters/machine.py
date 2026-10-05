@@ -18,8 +18,10 @@ from naiad.domain.capacity import Disk
 # How long a probe may take before its answer is taken as unknown.
 PROBE_SECONDS = 5.0
 
-# macOS's pressure levels: 1 is normal, 2 a warning and 4 critical.
-NORMAL_PRESSURE_LEVEL = 1
+# macOS's pressure levels: 1 is normal, 2 a warning and 4 critical. Only
+# critical is strain: a busy machine reads a warning all day, and the ceiling
+# already bounds how many Runs it takes.
+CRITICAL_PRESSURE_LEVEL = 4
 
 # Above this share of the last ten seconds with some task stalled on memory,
 # a Linux machine is strained.
@@ -51,13 +53,13 @@ class Machine:
 
     def strained(self) -> bool | None:
         """Whether memory is under pressure, as the operating system reports
-        it: `kern.memorystatus_vm_pressure_level` above normal on macOS; on
+        it: `kern.memorystatus_vm_pressure_level` at critical on macOS; on
         Linux the pressure file's `some avg10` above ten, or, where there is no
         such file, less than a tenth of memory available. None when nothing
         answers."""
         if self.platform == "darwin":
             level = _sysctl("kern.memorystatus_vm_pressure_level")
-            return None if level is None else level > NORMAL_PRESSURE_LEVEL
+            return None if level is None else level >= CRITICAL_PRESSURE_LEVEL
         if self.platform.startswith("linux"):
             stalled = _some_avg10(self.proc / "pressure" / "memory")
             if stalled is not None:

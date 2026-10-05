@@ -45,6 +45,7 @@ TASK = "add dark mode"
 SUBJECT = "tickets/dark-mode/issues/04-toggle.md"
 BRANCH = "TASK-8546"
 PREDECESSOR = "TASK-8500"
+CHILD_LIMIT = 2
 
 # The renderer's closed set (naiad.domain.prompt): a slot spelled any other
 # way is delivered to the agent verbatim.
@@ -55,6 +56,7 @@ PLACEHOLDERS = (
     BRANCH_PLACEHOLDER,
     "{predecessor}",
     CHILDREN_PLACEHOLDER,
+    "{child_limit}",
 )
 
 # What a slot looks like when an author writes one. Deliberately narrow — a
@@ -98,7 +100,14 @@ NEEDING_A_SUBJECT = each_state(names_a_subject)
 STARTABLE_BARE = each_state(lambda state: delivers(state) and not names_a_subject(state))
 
 
-def delivered(path, state_name, subject=SUBJECT, branch=BRANCH, predecessor=PREDECESSOR):
+def delivered(
+    path,
+    state_name,
+    subject=SUBJECT,
+    branch=BRANCH,
+    predecessor=PREDECESSOR,
+    child_limit=CHILD_LIMIT,
+):
     """A State's Prompt as the agent reads it, with the successors the Workflow
     resolves interpolated — which is what Naiad sends (naiad.runtime.loop).
 
@@ -113,6 +122,7 @@ def delivered(path, state_name, subject=SUBJECT, branch=BRANCH, predecessor=PRED
         subject=subject,
         branch=branch,
         predecessor=predecessor,
+        child_limit=child_limit,
     )
 
 
@@ -219,7 +229,7 @@ def test_a_run_started_with_no_state_named_begins_at_the_first_state(path, tmp_p
 
     prompt = kickoff(path, tmp_path, sessions)
 
-    assert prompt == delivered(path, first.name, subject=None, predecessor=None)
+    assert prompt == delivered(path, first.name, subject=None, predecessor=None, child_limit=None)
 
 
 @pytest.mark.parametrize(("path", "state_name"), STARTABLE_BARE)
@@ -229,7 +239,7 @@ def test_a_run_can_start_at_any_state_that_delivers(path, tmp_path, sessions, st
     table blesses."""
     prompt = kickoff(path, tmp_path, sessions, start_state=state_name)
 
-    assert prompt == delivered(path, state_name, subject=None, predecessor=None)
+    assert prompt == delivered(path, state_name, subject=None, predecessor=None, child_limit=None)
 
 
 @pytest.mark.parametrize(("path", "state_name"), NEEDING_A_SUBJECT)
@@ -254,5 +264,5 @@ def test_a_run_started_with_a_subject_is_delivered_that_subject(
     removal."""
     prompt = kickoff(path, tmp_path, sessions, start_state=state_name, subject=SUBJECT)
 
-    assert prompt == delivered(path, state_name, predecessor=None)
+    assert prompt == delivered(path, state_name, predecessor=None, child_limit=None)
     assert SUBJECT in prompt

@@ -9,7 +9,7 @@ asserted separately here because each would be a different bug.
 from dataclasses import replace
 from pathlib import Path
 
-from naiad.domain.entry import Entry
+from naiad.domain.entry import Attachment, Entry
 from naiad.domain.supervise import (
     CEILING,
     DISK,
@@ -622,3 +622,46 @@ def test_a_live_run_on_a_low_disk_is_still_resumed():
     running = entry("one", run_id="a-run")
 
     assert supervise(capped(running, low_disk={REPO})) == [Resume(entry=running)]
+
+
+# An Adoption joins a Session that is already live, so starting it adds nothing
+# for memory or the ceiling to bound. Disk is still asked.
+
+
+def adoption(identifier, **overrides):
+    return entry(identifier, attachment=Attachment(tmux_pane="%7"), **overrides)
+
+
+def test_an_adoption_starts_while_memory_is_strained():
+    adopted = adoption("one")
+
+    assert supervise(capped(adopted, strained=True)) == [Start(entry=adopted, predecessor=None)]
+
+
+def test_an_adoption_starts_with_the_live_runs_at_the_ceiling():
+    running = entry("one", run_id="a-run")
+    adopted = adoption("two", target_repo=ANOTHER_REPO)
+
+    assert supervise(capped(running, adopted, ceiling=1)) == [
+        Resume(entry=running),
+        Start(entry=adopted, predecessor=None),
+    ]
+
+
+def test_an_adoption_into_a_working_tree_low_on_disk_waits():
+    adopted = adoption("one")
+
+    assert supervise(capped(adopted, strained=True, low_disk={REPO})) == [
+        AtCapacity(reason=DISK)
+    ]
+
+
+def test_a_live_adoption_is_counted():
+    """Once started it is a Run like any other, and its Session is live."""
+    adopted = adoption("one", run_id="a-run")
+    waiting = entry("two", target_repo=ANOTHER_REPO)
+
+    assert supervise(capped(adopted, waiting, ceiling=1)) == [
+        Resume(entry=adopted),
+        AtCapacity(reason=CEILING),
+    ]

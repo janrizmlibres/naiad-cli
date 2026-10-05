@@ -809,7 +809,7 @@ def test_a_run_started_with_gates_skipped_delivers_the_next_state_that_has_a_pro
     assert session.sent == [("send", "%7", "work, then announce spec")]
 
 
-def _branching_run(tmp_path, **overrides):
+def _branching_run(tmp_path, prompt="work on {branch} based on {predecessor}", **overrides):
     """A Run whose Workflow names the Working branch in a State that Clears —
     the case the fields exist for, since a Cleared context has forgotten the
     branch it was told about at kickoff."""
@@ -820,7 +820,7 @@ def _branching_run(tmp_path, **overrides):
         'name = "branched"\n'
         "[[states]]\nname = 'grill'\nprompt = 'work'\n"
         "[[states]]\nname = 'implement'\n"
-        "prompt = 'work on {branch} based on {predecessor}'\nclear = true\n"
+        f"prompt = '{prompt}'\nclear = true\n"
         "[[states]]\nname = 'done'\nterminal = true\n"
     )
     fields = dict(
@@ -865,6 +865,19 @@ def test_the_branch_reaches_every_delivery_not_only_the_first(tmp_path, session)
 
     delivered = [message for kind, _, message in session.sent if kind == "send"]
     assert delivered == ["work on TASK-8546 based on TASK-8000"] * 2
+
+
+def test_a_prompt_after_a_clear_still_names_the_child_limit(tmp_path, session):
+    """The coordinating State Clears every pass, and decides on each one whether
+    to build in place or spawn, so the limit reaches every delivery."""
+    run, workflow = _branching_run(
+        tmp_path, prompt="work on {branch} at most {child_limit} at once", child_limit=1
+    )
+    announce(run, "implement")
+
+    deliver_clearing(run, workflow, session)
+
+    assert ("send", "%7", "work on TASK-8546 at most 1 at once") in session.sent
 
 
 def test_a_run_with_no_predecessor_delivers_the_prompt_with_it_empty(tmp_path, session):
@@ -1991,12 +2004,12 @@ def test_a_child_waiting_in_the_queue_holds_the_join(run, joining, session, tmp_
     assert drive(run, joining, session, queue=queue) == NOTHING
 
 
-def test_no_unfinished_child_delivers_at_once_with_an_empty_slot(run, joining, session):
+def test_no_unfinished_child_delivers_at_once_saying_none_is_named(run, joining, session):
     announce(run, "implement")
 
     drive(run, joining, session)
 
-    assert session.sent[-1][2] == "take in:\n\nthen announce implement or done"
+    assert session.sent[-1][2] == "take in:\n- none\nthen announce implement or done"
 
 
 def test_two_join_deliveries_never_name_the_same_child(run, joining, session):

@@ -39,12 +39,17 @@ naiad queue watch --capacity 6
 
 Below the ceiling, the machine must also be unstrained. No Run starts while the
 operating system reports memory under pressure: on macOS,
-`kern.memorystatus_vm_pressure_level` above normal; on Linux, `some avg10` above
+`kern.memorystatus_vm_pressure_level` at critical (a warning does not count,
+because a busy machine reads one all day); on Linux, `some avg10` above
 10 in `/proc/pressure/memory`, or less than a tenth of memory available where
 that file is missing. No Run starts into a working tree whose volume has less
 free disk than the larger of 10% and 10 GB; a waiting entry there is passed over
 and another tree may start instead. Where the machine gives no reading, the
 ceiling alone applies.
+
+An adoption is the exception. It joins a session that is already open, so
+neither the ceiling nor memory pressure holds it back. Low disk still does.
+Once started it counts toward the ceiling like any other run.
 
 While nothing can start for one of these reasons (the ceiling, memory or
 disk), the Supervisor says so once.
@@ -85,7 +90,10 @@ Child its Parent is still waiting to be told of.
 `--child-limit N` on `queue add`, `run` and `adopt` caps how many of the Run's Children
 work at once; a batch file says `child-limit = N`, at the top or per entry. With
 none, every Child starts as soon as it is queued. A limit of 1 takes them one at
-a time, in the order they were spawned. A parked Child still counts.
+a time, in the order they were spawned. A parked Child still counts. The number
+also reaches the Run's Prompts as `{child_limit}`, so a Workflow can act on it,
+for example by spawning no Children at 1 and doing the work in the Run's own
+session.
 
 An entry can run some States on a different model or effort from the one the
 Workflow names, without editing the Workflow. Name each State with `--model` or
