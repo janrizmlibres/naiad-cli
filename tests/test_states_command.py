@@ -9,6 +9,7 @@ which Workflows a call reaches and how it fails.
 
 import pytest
 
+from fake_terminal import to_terminal
 from naiad.cli.main import main
 
 WORKFLOW = """
@@ -117,3 +118,85 @@ def test_one_unreadable_workflow_does_not_hide_the_rest(library, capsys):
     printed = capsys.readouterr().out
     assert "/to-spec" in printed
     assert "broken" in printed
+
+
+# What the adopt skill reads, written out in full. An installed copy of the
+# skill outlives a release, so the listing is held to its exact text rather
+# than to the facts each line carries: a column moved or a word restyled is a
+# change to what a skill already on the operator's machine parses.
+PINNED = """
+name = "marked"
+model = "opus"
+autocompact = "200k"
+
+[answerer]
+fallback = "sonnet"
+
+[[states]]
+name = "classify"
+next = ["plan", "review"]
+prompt = "Decide what kind of work the following task is."
+
+[[states]]
+name = "plan"
+clear = true
+report = true
+effort = "high"
+questions = "human"
+next = ["build"]
+prompt = "/to-spec {task}"
+
+[[states]]
+name = "review"
+
+[[states]]
+name = "build"
+prompt = "/implement {task}"
+
+[[states]]
+name = "done"
+terminal = true
+"""
+
+PINNED_LISTING = (
+    "marked  (autocompact 200k)\n"
+    "  classify  prompt                → plan, review  questions: answerer  model: opus\n"
+    "  plan      prompt    /to-spec    → build  clears  report  questions: human  model: opus"
+    "  effort: high\n"
+    "  review    gate\n"
+    "  build     prompt    /implement  questions: answerer  model: opus\n"
+    "  done      terminal\n"
+)
+
+
+def test_the_listing_the_adopt_skill_reads_is_exactly_this(library, capsys):
+    (library / "marked.toml").write_text(PINNED)
+
+    assert main(["states", "marked"]) == 0
+
+    assert capsys.readouterr().out == PINNED_LISTING
+
+
+def test_every_workflows_listing_is_exactly_this(library, capsys):
+    (library / "marked.toml").write_text(PINNED)
+    (library / "broken.toml").write_text('name = "broken"\nmodle = "opus"\n')
+
+    assert main(["states"]) == 0
+
+    assert capsys.readouterr().out == (
+        "broken\n"
+        f"  workflow {library / 'broken.toml'}: unknown key 'modle' in the file; "
+        "allowed: name, model, effort, autocompact, answerer, states\n"
+        "\n" + PINNED_LISTING
+    )
+
+
+def test_the_listing_is_as_plain_at_a_terminal_as_anywhere(library, monkeypatch):
+    """The agent's verb, whoever runs it: a person trying out what the skill
+    reads sees the same bytes the skill does."""
+    (library / "marked.toml").write_text(PINNED)
+    terminal = to_terminal(monkeypatch)
+
+    assert main(["states", "marked"]) == 0
+
+    assert terminal.getvalue() == PINNED_LISTING

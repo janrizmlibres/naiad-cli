@@ -132,6 +132,13 @@ def test_the_last_column_keeps_its_least_width_however_narrow_the_terminal():
     assert plain(lines)[1] == "a" * 40 + "  " + "y" * 11 + "…"
 
 
+def test_no_width_cuts_nothing():
+    """For a last column the reader needs whole, as a terminal wraps it."""
+    lines = columns([["NAME", "PROBLEM"], ["broken", "z" * 500]], width=None)
+
+    assert plain(lines)[1] == "broken  " + "z" * 500
+
+
 def test_columns_are_measured_in_cells_and_keep_their_styles():
     """A wide character takes two columns, and a style takes none."""
     wide = Text("漢字", style="state")

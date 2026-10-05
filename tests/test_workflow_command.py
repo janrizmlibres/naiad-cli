@@ -7,10 +7,13 @@ files a call reaches and how it fails.
 """
 
 import os
+import re
 
 import pytest
 
+from fake_terminal import ESCAPE, to_terminal
 from naiad.cli.main import build_parser, main
+from naiad.cli.style import ABSENT
 from naiad.domain.workflow import load_workflow
 from naiad.runtime.log import RunLog
 from naiad.runtime.queue import Queue
@@ -28,6 +31,11 @@ prompt = "/to-spec {task}"
 name = "done"
 terminal = true
 """
+
+
+def cells(line):
+    """A line's cells, told apart by two spaces or more."""
+    return re.split(r"\s{2,}", line.strip())
 
 
 @pytest.fixture
@@ -55,8 +63,12 @@ def test_show_then_lists_that_one_terminal_state(library, capsys):
     assert main(["workflow", "show", "demo"]) == 0
 
     printed = capsys.readouterr().out
-    assert printed.splitlines()[0].split() == ["name", "demo"]
-    assert [line.split()[:2] for line in printed.splitlines()[2:]] == [["done", "terminal"]]
+    assert [cells(line) for line in printed.splitlines()] == [
+        ["name", "demo"],
+        [""],
+        ["STATE", "KIND"],
+        ["done", "terminal"],
+    ]
 
 
 def test_check_passes_on_what_new_wrote(library, capsys):
@@ -128,16 +140,28 @@ def test_check_reads_a_path_as_a_path(tmp_path, capsys):
     assert main(["workflow", "check", str(elsewhere)]) == 0
 
 
-def test_states_and_show_render_the_states_the_same(library, capsys):
+def test_states_and_show_name_the_same_states_with_the_same_words(library, capsys):
+    """The agent's listing and the author's table are two layouts of one set of
+    facts; with its header and dashes left out, show's row is the agent's line."""
     library.mkdir(parents=True)
     (library / "demo.toml").write_text(STARTER_LIKE)
 
     main(["states", "demo"])
-    listed = capsys.readouterr().out.splitlines()[1:]
+    listed = [cells(line) for line in capsys.readouterr().out.splitlines()[1:]]
     main(["workflow", "show", "demo"])
     shown = capsys.readouterr().out.splitlines()
+    table = shown[shown.index("") + 2 :]
 
-    assert shown[-len(listed):] == listed
+    assert [[cell for cell in cells(row) if cell != ABSENT] for row in table] == listed
+
+
+def test_show_is_styled_at_a_terminal(library, monkeypatch):
+    held(library)
+    terminal = to_terminal(monkeypatch)
+
+    assert main(["workflow", "show", "demo"]) == 0
+
+    assert ESCAPE in terminal.getvalue()
 
 
 def held(library, name="demo", text=STARTER_LIKE):
@@ -163,7 +187,11 @@ def test_list_names_every_library_entry(library, capsys):
 
     assert main(["workflow", "list"]) == 0
 
-    assert [line.split()[0] for line in capsys.readouterr().out.splitlines()] == ["alpha", "beta"]
+    assert [cells(line) for line in capsys.readouterr().out.splitlines()] == [
+        ["WORKFLOW"],
+        ["alpha"],
+        ["beta"],
+    ]
 
 
 def test_list_names_a_broken_link_as_broken_and_still_lists_the_rest(library, tmp_path, capsys):
@@ -172,9 +200,19 @@ def test_list_names_a_broken_link_as_broken_and_still_lists_the_rest(library, tm
 
     assert main(["workflow", "list"]) == 0
 
-    lines = capsys.readouterr().out.splitlines()
-    assert [line.split()[0] for line in lines] == ["alpha", "gone"]
-    assert "broken" in lines[1]
+    rows = [cells(line) for line in capsys.readouterr().out.splitlines()]
+    assert [row[0] for row in rows] == ["WORKFLOW", "alpha", "gone"]
+    assert rows[1][1] == ABSENT
+    assert "broken" in rows[2][1]
+
+
+def test_list_is_styled_at_a_terminal(library, monkeypatch):
+    held(library, "alpha", 'name = "alpha"\nmodle = "x"\n')
+    terminal = to_terminal(monkeypatch)
+
+    assert main(["workflow", "list"]) == 0
+
+    assert ESCAPE in terminal.getvalue()
 
 
 def test_list_names_a_file_the_loader_refuses_in_place(library, capsys):

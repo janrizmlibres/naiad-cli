@@ -18,12 +18,14 @@ from pathlib import Path
 from naiad.adapters.editor import EditorError, edit_text
 from naiad.cli.library import LibraryError, resolve_workflow
 from naiad.cli.picker import pick_states
+from naiad.cli.style import say
+from naiad.cli.terminal import terminal_width
+from naiad.cli.workflow_view import render_state, render_state_list
 from naiad.domain.key_table import (
     state_key_help,
     state_row,
     state_value,
 )
-from naiad.domain.listing import render_state, render_state_list
 from naiad.domain.workflow import Workflow, WorkflowError, load_workflow
 from naiad.runtime.home import StorageError, default_library_root
 from naiad.runtime.state_file import (
@@ -228,13 +230,23 @@ def _load(argument: str) -> tuple[Path, Workflow]:
 
 
 def _list(arguments: argparse.Namespace) -> int:
-    print(render_state_list(_load(arguments.workflow)[1]))
+    say(render_state_list(_load(arguments.workflow)[1], width=terminal_width()))
     return 0
 
 
 def _show(arguments: argparse.Namespace) -> int:
+    """The State's row, then its Prompt in full: what the table cuts to a
+    command, and the only part of a State an author cannot read off a row. A
+    Gate and a Terminal State show their row alone.
+
+    The Prompt is printed as it is rather than through a Console, which would
+    expand its tabs: it is the author's own prose, read back to them.
+    """
     workflow = _load(arguments.workflow)[1]
-    print(render_state(workflow, require_state(workflow, arguments.state)))
+    state = require_state(workflow, arguments.state)
+    say(render_state(state))
+    if state.prompt is not None:
+        print(f"\n{state.prompt.rstrip()}")
     return 0
 
 

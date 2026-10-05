@@ -25,18 +25,25 @@ naiad workflow new mine --from starter
 naiad workflow show mine
 ```
 
-`show` prints the file's own settings and each State's kind and marks:
+`show` prints the file's own settings, then a table of its States with each
+one's kind and marks. A column no State fills is left out, and `—` marks a cell
+with nothing in it:
 
 ```text
 name  mine
 
-  plan       prompt    questions: human
-  review     gate
-  implement  prompt    clears  questions: human
-  verify     prompt    clears  questions: human
-  ship       prompt    clears  questions: human
-  done       terminal
+STATE      KIND      MARKS
+plan       prompt    questions: human
+review     gate      —
+implement  prompt    clears  questions: human
+verify     prompt    clears  questions: human
+ship       prompt    clears  questions: human
+done       terminal  —
 ```
+
+A State whose Prompt opens with a slash command shows it under `COMMAND`, and
+one that lists its successors shows them under `NEXT`. `naiad state show`
+prints one State's row with its Prompt in full beneath it.
 
 `questions: human` says a Question asked from that State goes to you, because the
 starter declares no Answerer (Part 6 covers it).
@@ -108,10 +115,11 @@ naiad state list fix
 ```
 
 ```text
-  reproduce  prompt    questions: human
-  patch      prompt    clears  questions: human
-  approve    gate
-  done       terminal
+STATE      KIND      MARKS
+reproduce  prompt    questions: human
+patch      prompt    clears  questions: human
+approve    gate      —
+done       terminal  —
 ```
 
 Then check it the way a Run would load it, and queue it:

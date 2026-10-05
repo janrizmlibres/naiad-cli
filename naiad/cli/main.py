@@ -62,6 +62,7 @@ from naiad.cli.supervisor import supervise_queue
 from naiad.cli.terminal import terminal_width
 from naiad.cli.wait import WaitError, declare_wait
 from naiad.cli.watch import tick_once, watch
+from naiad.cli.workflow_view import render_library, render_workflow
 from naiad.domain.capacity import (
     CAPACITY_VARIABLE,
     CapacityError,
@@ -70,7 +71,7 @@ from naiad.domain.capacity import (
 )
 from naiad.domain.entry import Attachment, Entry
 from naiad.domain.key_table import file_key_help, file_row, file_value
-from naiad.domain.listing import render_states, render_workflow
+from naiad.domain.listing import render_states
 from naiad.domain.protocol import ANNOUNCE_SUBCOMMAND, SPAWN_SUBCOMMAND
 from naiad.domain.settings import Setting, StateSetting
 from naiad.domain.short_ids import short_ids
@@ -1286,14 +1287,20 @@ def _states(arguments: argparse.Namespace) -> int:
     if arguments.workflow is None:
         return _every_workflow(library)
 
-    return _print_workflow(arguments.workflow, render_states, library=library)
+    # Printed as it is, never through a Console: the adopt skill parses this
+    # text, and a Console would expand a tab or colour a word on its way out.
+    return _print_workflow(arguments.workflow, render_states, library=library, show=print)
 
 
 def _print_workflow(
-    argument: str, render: Callable[[Workflow], str], *, library: Path | None = None
+    argument: str,
+    render: Callable[[Workflow], str],
+    *,
+    library: Path | None = None,
+    show: Callable[[str], object] = say,
 ) -> int:
-    """A Workflow named by name or path, loaded the way a Run loads it and laid
-    out by `render`, or refused in one line.
+    """A Workflow named by name or path, loaded the way a Run loads it, laid
+    out by `render` and printed by `show`, or refused in one line.
 
     A name asked for by name is refused rather than answered with something
     else: the reader named one thing, and printing another would answer a
@@ -1307,12 +1314,14 @@ def _print_workflow(
         print(f"naiad: {error}", file=sys.stderr)
         return 2
 
-    print(render(workflow))
+    show(render(workflow))
     return 0
 
 
 def _workflow_show(arguments: argparse.Namespace) -> int:
-    return _print_workflow(arguments.workflow, render_workflow)
+    return _print_workflow(
+        arguments.workflow, lambda workflow: render_workflow(workflow, width=terminal_width())
+    )
 
 
 def _workflow_check(arguments: argparse.Namespace) -> int:
@@ -1335,17 +1344,15 @@ def _workflow_new(arguments: argparse.Namespace) -> int:
 
 
 def _workflow_list(arguments: argparse.Namespace) -> int:
-    """Every entry the library holds, one line each, the ones a Run could not
-    start from saying why beside their name."""
+    """Every entry the library holds, one row each under a header, the ones a
+    Run could not start from saying why beside their name."""
     library = default_library_root()
     held = library_entries(library)
     if not held:
         print(empty_library_message(library))
         return 0
 
-    width = max(len(name) for name, _ in held)
-    for name, problem in held:
-        print(f"{name:<{width}}  {problem}" if problem else name)
+    say(render_library(held))
     return 0
 
 

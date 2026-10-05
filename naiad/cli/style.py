@@ -66,6 +66,15 @@ THEME = Theme(
         "repo": "blue",
         "branch": "magenta",
         "state": "cyan",
+        "workflow": "bold",
+        # What Naiad does on entering a State. A Gate is the one that wants
+        # a person, and a Terminal State does nothing but end the Run.
+        "kind.prompt": "none",
+        "kind.gate": "yellow",
+        "kind.terminal": "dim",
+        # The slash command a State's Prompt opens with: the words an operator
+        # says a phase by.
+        "command": "bold",
         # A column's name, and anything said beside the line rather than in it.
         "header": "bold",
         "secondary": "dim",
@@ -124,10 +133,12 @@ LEAST = 20
 
 
 def columns(
-    rows: Sequence[Sequence[Text | str]], *, width: int, least: int = LEAST
+    rows: Sequence[Sequence[Text | str]], *, width: int | None, least: int = LEAST
 ) -> list[Text]:
     """Rows as lines: each column padded to its widest cell, and the last cut
-    with an ellipsis so that the line fits in width columns.
+    with an ellipsis so that the line fits in width columns — or not cut at
+    all where width is None, for a last column the reader needs whole, which a
+    terminal wraps instead.
 
     Only the last column is cut, and the others are never touched, because they
     hold what a reader matches whole — an id, a path, a branch. When those
@@ -140,7 +151,7 @@ def columns(
     """
     lines = [[cell if isinstance(cell, Text) else Text(cell) for cell in row] for row in rows]
     widths = [max(line[at].cell_len for line in lines) for at in range(len(lines[0]) - 1)]
-    room = max(width - sum(widths) - len(GAP) * len(widths), least)
+    room = None if width is None else max(width - sum(widths) - len(GAP) * len(widths), least)
     laid_out = []
     for line in lines:
         text = Text()
@@ -148,7 +159,8 @@ def columns(
             text.append_text(cell)
             text.append(" " * (column_width - cell.cell_len) + GAP)
         last = line[-1].copy()
-        last.truncate(room, overflow="ellipsis")
+        if room is not None:
+            last.truncate(room, overflow="ellipsis")
         text.append_text(last)
         laid_out.append(text)
     return laid_out
