@@ -30,6 +30,7 @@ from naiad.domain.decide import (
     Report,
     Respond,
 )
+from naiad.domain.notification import Notification
 from naiad.domain.protocol import DEFAULT_NAIAD
 from naiad.domain.workflow import Workflow
 from naiad.runtime.log import RunLog
@@ -188,6 +189,30 @@ def _narrate(action: Action, *, width: int) -> Styled | None:
     return None
 
 
+# A telling's `naiad:` by what kind of telling it is, in the narration's
+# styles: a person needed, the work over, or a State entered.
+_TOLD = {
+    Notification.NOTIFY: "event.attention",
+    Notification.FINISH: "event.ended",
+    Notification.REPORT: "event.progress",
+}
+
+
+def told(title: str, message: str, kind: Notification) -> Styled:
+    """A telling as the terminal leg prints it: the title and the message the
+    banner and the phone are given, with the Run the title names styled as an
+    id."""
+    prefix, _, run_id = title.partition(": ")
+    if not run_id:
+        return Styled.assemble(title, f": {message}")
+    return Styled.assemble((prefix + ":", _TOLD[kind]), " ", (run_id, "id"), f": {message}")
+
+
+def tell(title: str, message: str, kind: Notification) -> None:
+    """The terminal leg's writer: a telling on stderr, styled at a terminal."""
+    say(told(title, message, kind), stderr=True)
+
+
 def _cut(text: Text, width: int) -> Styled:
     """The line as it fits in width columns: whole when it fits, otherwise
     truncated with an ellipsis in the last of them, measured in cells."""
@@ -207,4 +232,4 @@ def _one_line(text: str) -> str:
     return " ".join(text.split())
 
 
-__all__ = ["TICK_SECONDS", "tick_once", "watch"]
+__all__ = ["TICK_SECONDS", "tell", "tick_once", "told", "watch"]

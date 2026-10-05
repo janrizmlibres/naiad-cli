@@ -14,7 +14,9 @@ import pytest
 
 from fake_terminal import ESCAPE, to_terminal
 from naiad.adapters.lock import SupervisorLock
-from naiad.cli.main import _run_id, build_parser, main
+from naiad.adapters.notify import TerminalNotifications
+from naiad.cli.main import _notifier, _run_id, build_parser, main
+from naiad.cli.watch import tell
 
 STARTED = datetime(2026, 7, 19, 12, 0, 0, tzinfo=timezone.utc)
 
@@ -325,3 +327,11 @@ def test_a_hooks_complaint_stays_plain_at_a_terminal(monkeypatch, tmp_path):
 
     assert terminal.getvalue().startswith("naiad: ")
     assert ESCAPE not in terminal.getvalue()
+
+
+def test_a_driven_runs_tellings_reach_the_terminal_styled_by_the_entry_point():
+    """The terminal leg is the one whose line looks like the rest of the
+    Supervisor's; the banner and the phone are given the plain strings."""
+    (terminal,) = [leg for leg in _notifier().legs if isinstance(leg, TerminalNotifications)]
+
+    assert terminal.write is tell

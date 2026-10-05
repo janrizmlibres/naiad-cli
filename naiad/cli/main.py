@@ -30,7 +30,7 @@ from naiad.adapters.answerer import HeadlessAnswerer
 from naiad.adapters.executable import naiad_command
 from naiad.adapters.lock import SupervisorLock
 from naiad.adapters.machine import Machine
-from naiad.adapters.notify import configured_notifier
+from naiad.adapters.notify import Notifications, TerminalNotifications, configured_notifier
 from naiad.adapters.tmux import TmuxError, TmuxSessions
 from naiad.cli.adopt import NotInTmux, attachment_in, teaching_for
 from naiad.cli.announce import AnnounceError, announce_state, announcement_reply
@@ -61,7 +61,7 @@ from naiad.cli.style import ABSENT, Styled, columns, console, refuse, say, statu
 from naiad.cli.supervisor import supervise_queue
 from naiad.cli.terminal import terminal_width
 from naiad.cli.wait import WaitError, declare_wait
-from naiad.cli.watch import tick_once, watch
+from naiad.cli.watch import tell, tick_once, watch
 from naiad.cli.workflow_view import render_library, render_workflow
 from naiad.domain.capacity import (
     CAPACITY_VARIABLE,
@@ -1060,7 +1060,7 @@ def _drive(run: Run) -> None:
         run=run,
         workflow=load_workflow(run.workflow_path),
         session=TmuxSessions(),
-        notifier=configured_notifier(),
+        notifier=_notifier(),
         answerer=HeadlessAnswerer(),
         # The naiad driving this Run, so a nudged agent is told to type the
         # command that exists rather than whatever the session's PATH holds.
@@ -1068,6 +1068,13 @@ def _drive(run: Run) -> None:
         entry_id=_entry_id_of(run),
         queue=Queue(default_queue_root()),
     )
+
+
+def _notifier() -> Notifications:
+    """Every leg a telling goes down, the terminal's line styled as the rest of
+    what the Supervisor prints. The banner and the phone are handed the plain
+    title and message, which is all either can show."""
+    return configured_notifier(terminal=TerminalNotifications(tell))
 
 
 def _entry_id_of(run: Run) -> str | None:
@@ -1090,7 +1097,7 @@ def _ticker() -> Callable[[Run], None]:
     prints it too: where the Run is driven rather than where it was queued.
     """
     session = TmuxSessions()
-    notifier = configured_notifier()
+    notifier = _notifier()
     answerer = HeadlessAnswerer()
     naiad = naiad_command()
     watching: set[str] = set()

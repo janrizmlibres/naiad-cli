@@ -9,8 +9,9 @@ parked at a Gate that stops ticking and never notices the human's reply.
 
 import pytest
 
-from fake_terminal import styles_of
-from naiad.cli.watch import _narrate, tick_once, watch
+from fake_terminal import ESCAPE, styles_of, to_terminal
+from naiad.cli.watch import _narrate, tell, tick_once, told, watch
+from naiad.domain.notification import Notification
 from naiad.domain.answerer import Answered
 from naiad.domain.decide import Clear, Confirm, Finish, Notify, Nudge, Report
 from naiad.domain.question import Question
@@ -312,3 +313,37 @@ def test_watching_a_run_that_has_already_ended_says_so_as_an_end(run):
 
     assert told == ["a-run has already ended"]
     assert styles_of(told[0]) == {"a-run": "id", "has already ended": "event.ended"}
+
+
+# A telling on the terminal leg: the same words the desktop banner and the
+# phone are given, with its Run styled as an id and its naiad: as the kind of
+# telling it is.
+
+
+def test_a_telling_reads_as_its_title_and_message():
+    line = told("naiad: run-1", "entered ship", Notification.REPORT)
+
+    assert line == "naiad: run-1: entered ship"
+
+
+def test_a_telling_is_styled_by_what_kind_of_telling_it_is():
+    report = told("naiad: run-1", "entered ship", Notification.REPORT)
+    needed = told("naiad: run-1", "parked at review", Notification.NOTIFY)
+    finished = told("naiad: run-1", "finished at done", Notification.FINISH)
+
+    assert styles_of(report) == {"naiad:": "event.progress", "run-1": "id"}
+    assert styles_of(needed)["naiad:"] == "event.attention"
+    assert styles_of(finished)["naiad:"] == "event.ended"
+
+
+def test_a_title_naming_no_run_is_kept_whole():
+    assert told("naiad", "why", Notification.NOTIFY) == "naiad: why"
+
+
+def test_a_telling_is_coloured_on_stderr_only_at_a_terminal(monkeypatch, capsys):
+    tell("naiad: run-1", "entered ship", Notification.REPORT)
+    assert capsys.readouterr().err == "naiad: run-1: entered ship\n"
+
+    terminal = to_terminal(monkeypatch, stream="stderr")
+    tell("naiad: run-1", "entered ship", Notification.REPORT)
+    assert ESCAPE in terminal.getvalue()
