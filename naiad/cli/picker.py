@@ -1,13 +1,18 @@
-"""A numbered prompt for choosing States, from the standard library alone.
+"""A numbered prompt for choosing States: numbered lines and `input`.
 
 `naiad state next` opens it when given no States: the list is short and the
-author knows the names, so a line of numbers is enough, and a picker that
-takes over the screen would be a dependency this release does not carry.
+author knows the names, so a line of numbers is enough. A picker that takes
+over the screen would be a third dependency, since rich, which styles these
+lines, draws no interactive one. The
+lines are said as every other line is, so the States are styled as States at
+a terminal and the words are the same everywhere.
 """
 
 from __future__ import annotations
 
 from collections.abc import Callable, Sequence
+
+from naiad.cli.style import Styled, say
 
 
 def pick_states(
@@ -16,7 +21,7 @@ def pick_states(
     marked: Sequence[str],
     *,
     read: Callable[[str], str] | None = None,
-    write: Callable[[str], object] = print,
+    write: Callable[[str], object] = say,
 ) -> list[str] | None:
     """The States the author chose for `subject`'s successors, in the order
     they typed them, or None when they left the current ones as they are.
@@ -25,10 +30,14 @@ def pick_states(
     number meant would write an edge the author did not choose.
     """
     ask = read or input
-    write(f"Successors of {subject} (* marks the current ones):")
+    write(Styled.assemble("Successors of ", (subject, "state"), " (* marks the current ones):"))
     width = len(str(len(states)))
     for number, state in enumerate(states, start=1):
-        write(f"  {number:>{width}}  {state}{'  *' if state in marked else ''}")
+        write(
+            Styled.assemble(
+                f"  {number:>{width}}  ", (state, "state"), "  *" if state in marked else ""
+            )
+        )
 
     while True:
         try:

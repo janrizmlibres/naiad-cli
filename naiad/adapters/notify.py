@@ -22,7 +22,7 @@ import os
 import shutil
 import subprocess
 import sys
-from typing import Mapping, Protocol
+from typing import Callable, Mapping, Protocol
 
 from naiad.adapters.ntfy import NTFY_TOKEN_VARIABLE, NTFY_URL_VARIABLE, NtfyNotifications
 from naiad.adapters.posting import Post, post
@@ -46,15 +46,30 @@ class Leg(Protocol):
     def notify(self, title: str, message: str, kind: Notification) -> None: ...
 
 
+Write = Callable[[str, str, Notification], None]
+
+
+def _printed(title: str, message: str, kind: Notification) -> None:
+    print(f"{title}: {message}", file=sys.stderr, flush=True)
+
+
 class TerminalNotifications:
     """The record of the night, in the terminal the Run was driven from.
 
     The one leg that is never configured away, because it is the only one that
     can still be read hours later.
+
+    How the line looks is the entry point's to say, as every other line it
+    prints is, so it hands in the writer; given none, the leg prints the title
+    and the message as one plain line. The other legs are handed the same title
+    and message, and none of them is styled.
     """
 
+    def __init__(self, write: Write = _printed) -> None:
+        self.write = write
+
     def notify(self, title: str, message: str, kind: Notification) -> None:
-        print(f"{title}: {message}", file=sys.stderr, flush=True)
+        self.write(title, message, kind)
 
 
 class DesktopNotifications:
@@ -127,13 +142,17 @@ def push_legs(environ: Mapping[str, str], *, post: Post = post) -> list[Leg]:
 
 
 def configured_notifier(
-    environ: Mapping[str, str] | None = None, *, post: Post = post
+    environ: Mapping[str, str] | None = None,
+    *,
+    post: Post = post,
+    terminal: TerminalNotifications | None = None,
 ) -> Notifications:
     """Every leg this machine has: the two local ones, and whatever the
-    operator configured beside them."""
+    operator configured beside them. `terminal` is the terminal leg as the
+    caller wants its line to look, or the plain one."""
     environ = os.environ if environ is None else environ
     return Notifications(
-        TerminalNotifications(), DesktopNotifications(), *push_legs(environ, post=post)
+        terminal or TerminalNotifications(), DesktopNotifications(), *push_legs(environ, post=post)
     )
 
 

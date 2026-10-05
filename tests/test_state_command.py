@@ -12,6 +12,7 @@ import tomllib
 
 import pytest
 
+from fake_terminal import ESCAPE, styles_of, to_terminal
 from naiad.cli.main import main
 from naiad.domain.workflow import load_workflow
 
@@ -109,17 +110,43 @@ def test_list_prints_the_states_the_workflow_show_prints(demo, run):
     _, shown, _ = run("workflow", "show", "demo")
 
     assert shown.endswith(listed)
+    assert listed.splitlines()[0].split()[0] == "STATE"
     assert "plan" in listed and "clears" in listed
 
 
-def test_show_prints_the_state_and_its_prompt_in_full(demo, run):
+def test_show_prints_the_states_row_then_its_prompt_in_full(demo, run):
     run("state", "add", "demo", "plan", "--prompt", "Line one.\nLine two.")
 
     code, out, _ = run("state", "show", "demo", "plan")
 
     assert code == 0
-    assert out.splitlines()[0].split()[:2] == ["plan", "prompt"]
-    assert out.endswith("Line one.\nLine two.\n")
+    assert [line.split() for line in out.splitlines()[:3]] == [
+        ["STATE", "KIND", "MARKS"],
+        ["plan", "prompt", "questions:", "human"],
+        [],
+    ]
+    assert out.endswith("\n\nLine one.\nLine two.\n")
+
+
+def test_show_prints_the_prompt_exactly_as_the_author_wrote_it(demo, run, monkeypatch):
+    """Prose the author wrote, read back to them: a tab stays a tab, and words
+    in brackets are words, at a terminal too."""
+    prompt = "Indented\twith a tab.\n  [bold]not markup[/bold]"
+    run("state", "add", "demo", "plan", "--prompt", prompt)
+    terminal = to_terminal(monkeypatch)
+
+    assert main(["state", "show", "demo", "plan"]) == 0
+
+    assert terminal.getvalue().endswith(f"\n\n{prompt}\n")
+    assert ESCAPE in terminal.getvalue().split("\n\n")[0]
+
+
+def test_a_gate_shows_its_row_and_no_prompt(demo, run):
+    run("state", "add", "demo", "review", "--gate")
+
+    _, out, _ = run("state", "show", "demo", "review")
+
+    assert [line.split() for line in out.splitlines()] == [["STATE", "KIND"], ["review", "gate"]]
 
 
 def test_show_of_a_state_that_is_not_there_names_the_states(demo, run):
@@ -467,6 +494,71 @@ def test_next_with_no_arguments_opens_a_numbered_picker_in_a_terminal(demo, run,
 
     assert code == 0
     assert load_workflow(demo).state("plan").next_candidates == ("build", "done")
+
+
+# --- what a verb says --------------------------------------------------------
+
+
+@pytest.fixture
+def said(monkeypatch):
+    """Every line a verb says, as it said it."""
+    lines = []
+    monkeypatch.setattr("naiad.cli.state.say", lambda line, **_: lines.append(line))
+    return lines
+
+
+def test_each_verb_says_what_it_did_with_the_workflow_and_states_it_names_styled(
+    demo, run, said
+):
+    """The words are what they were, for a script reading them; at a terminal
+    the Workflow and the States stand out from what was done to them."""
+    run("state", "add", "demo", "plan", "--prompt", "Plan it.")
+    run("state", "add", "demo", "build", "--prompt", "Build it.")
+    run("state", "set", "demo", "plan", "effort", "high")
+    run("state", "unset", "demo", "plan", "effort")
+    run("state", "rename", "demo", "plan", "draft")
+    run("state", "move", "demo", "build", "--before", "draft")
+    run("state", "next", "demo", "draft", "build", "done")
+    run("state", "set-prompt", "demo", "draft", "--prompt", "Draft it.")
+    run("state", "next", "demo", "draft", "--none")
+    run("state", "rm", "demo", "build")
+
+    assert said == [
+        "demo: added plan at position 1",
+        "demo: added build at position 2",
+        "demo/plan: effort = high",
+        "demo/plan: effort removed",
+        "demo: renamed plan to draft",
+        "demo: moved build to position 1",
+        "demo/draft: next = build, done",
+        "demo/draft: Prompt replaced",
+        "demo/draft: next = none",
+        "demo: removed build",
+    ]
+    assert [styles_of(line) for line in said] == [
+        {"demo": "workflow", "plan": "state"},
+        {"demo": "workflow", "build": "state"},
+        {"demo": "workflow", "plan": "state"},
+        {"demo": "workflow", "plan": "state"},
+        {"demo": "workflow", "plan": "state", "draft": "state"},
+        {"demo": "workflow", "build": "state"},
+        {"demo": "workflow", "draft": "state", "build": "state", "done": "state"},
+        {"demo": "workflow", "draft": "state"},
+        {"demo": "workflow", "draft": "state"},
+        {"demo": "workflow", "build": "state"},
+    ]
+
+
+def test_a_verb_that_changed_nothing_says_so_with_its_names_styled(
+    demo, run, said, tmp_path
+):
+    empty = tmp_path / "empty.md"
+    empty.write_text("")
+
+    run("state", "add", "demo", "plan", "--from", str(empty))
+
+    assert said == ["the Prompt is empty, so nothing was added to demo"]
+    assert styles_of(said[0]) == {"demo": "workflow"}
 
 
 def test_next_of_a_successor_the_workflow_lacks_is_refused(demo, run):

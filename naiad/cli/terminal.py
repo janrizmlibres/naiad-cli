@@ -32,18 +32,10 @@ def terminal_width() -> int:
         return PIPED_WIDTH
 
 
-def cut(line: str, width: int) -> str:
-    """The line as it fits in width columns: whole when it fits, otherwise
-    truncated with an ellipsis in the last of them."""
-    if len(line) <= width:
-        return line
-    return line[: max(width - 1, 0)] + "…"
-
-
 def first_clause(text: str) -> str:
     """The text up to its first clause boundary. What an operator watching a
     stream needs of an answer is which way it went, not why."""
     return _CLAUSE_END.split(text, maxsplit=1)[0]
 
 
-__all__ = ["PIPED_WIDTH", "cut", "first_clause", "terminal_width"]
+__all__ = ["PIPED_WIDTH", "first_clause", "terminal_width"]

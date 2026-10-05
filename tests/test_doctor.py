@@ -18,9 +18,17 @@ from fake_machine import (
     install_osascript,
     install_tmux,
 )
+from fake_terminal import ESCAPE, styles_of, to_terminal
 from naiad.adapters.claude_config import default_settings_path
-from naiad.cli.doctor import Severity, diagnose, entrance_refusal, first_failure, render_report
-from naiad.cli.main import main
+from naiad.cli.doctor import (
+    Finding,
+    Severity,
+    diagnose,
+    entrance_refusal,
+    first_failure,
+    render_report,
+)
+from naiad.cli.main import _installed, main
 from naiad.hooks.install import install_hooks
 from naiad.runtime.home import naiad_home
 from naiad.skills.install import install_adopt_skill
@@ -334,6 +342,36 @@ def test_the_report_is_one_line_per_finding_with_its_severity(healthy):
     assert all(line.split()[0] in {"fail", "warn", "info"} for line in lines)
 
 
+def test_each_severity_is_styled_as_its_own_and_the_words_are_unchanged():
+    report = render_report(
+        [
+            Finding(Severity.FAIL, "tmux is not on PATH", "install tmux"),
+            Finding(Severity.WARN, "the adopt skill is missing", "run `naiad install`"),
+            Finding(Severity.INFO, "notifications will fire through: terminal"),
+        ]
+    )
+
+    assert report.splitlines() == [
+        "fail  tmux is not on PATH — install tmux",
+        "warn  the adopt skill is missing — run `naiad install`",
+        "info  notifications will fire through: terminal",
+    ]
+    assert styles_of(report) == {
+        "fail": "severity.fail",
+        "warn": "severity.warn",
+        "info": "severity.info",
+        " — ": "secondary",
+    }
+
+
+def test_doctor_colours_its_report_at_a_terminal(bin_dir, monkeypatch):
+    terminal = to_terminal(monkeypatch)
+
+    main(["doctor"])
+
+    assert ESCAPE in terminal.getvalue()
+
+
 def test_failures_are_reported_before_warnings_before_info(healthy):
     (healthy / "tmux").unlink()
     install_claude(healthy, says="1.0.0 (Claude Code)")
@@ -413,6 +451,23 @@ def test_the_refusal_says_the_thing_why_it_is_needed_the_fix_and_then_doctor(hea
     assert "install tmux" in refusal
     assert refusal.endswith("then run `naiad doctor`")
     assert "\n" not in refusal
+
+
+def test_the_refusal_marks_its_naiad_as_a_refusal(healthy):
+    (healthy / "tmux").unlink()
+
+    assert styles_of(entrance_refusal()) == {"naiad:": "refusal"}
+
+
+def test_an_entrance_refusal_is_coloured_only_at_a_terminal(
+    healthy, real_entrances, monkeypatch
+):
+    (healthy / "tmux").unlink()
+    terminal = to_terminal(monkeypatch, stream="stderr")
+
+    assert main(["watch"]) == 2
+    assert ESCAPE in terminal.getvalue()
+    assert len(terminal.getvalue().splitlines()) == 1
 
 
 def test_an_entrance_stops_at_the_first_failure(bin_dir):
@@ -501,3 +556,20 @@ def test_a_failed_install_still_prints_the_report_and_exits_two(bin_dir, capsys)
     assert code == 2
     assert "not valid JSON" in captured.err
     assert "fail" in captured.out
+
+
+def test_install_says_what_it_installed_styled_at_a_terminal(bin_dir, monkeypatch):
+    terminal = to_terminal(monkeypatch)
+
+    assert main(["install"]) == 0
+
+    lines = terminal.getvalue().splitlines()
+    assert ESCAPE in lines[0] and "naiad's hooks" in lines[0]
+    assert ESCAPE in lines[1] and "adopt skill" in lines[1]
+
+
+def test_what_install_says_leads_with_installed_and_is_styled_as_progress():
+    line = _installed("naiad's hooks", "/x/settings.json")
+
+    assert line == "installed naiad's hooks into /x/settings.json"
+    assert styles_of(line) == {"installed": "event.progress"}

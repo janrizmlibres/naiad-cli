@@ -795,7 +795,7 @@ def test_cancelling_a_parent_cancels_its_started_children_and_removes_the_unstar
     assert RunLog(parent.root).ending() == "cancelled"
     assert RunLog(running.root).ending() == "cancelled"
     assert RunLog(parked.root).ending() == "cancelled"
-    assert queue.find("03") is None
+    assert queue.named("03") is None
     assert cancelled.worktrees == (str(running_tree), str(parked_tree), str(unstarted_tree))
 
 
@@ -841,7 +841,7 @@ def test_pruning_leaves_a_done_child_its_live_parent_has_not_been_told_of(queue,
     pruned = prune(queue, runs)
 
     assert pruned.removed == []
-    assert queue.find("01") is not None
+    assert queue.named("01") is not None
     assert child.root.is_dir()
 
 

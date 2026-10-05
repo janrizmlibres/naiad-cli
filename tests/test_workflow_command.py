@@ -7,11 +7,14 @@ files a call reaches and how it fails.
 """
 
 import os
+import re
 
 import pytest
 
-from naiad.cli.main import build_parser, main
-from naiad.domain.workflow import load_workflow
+from fake_terminal import ESCAPE, styles_of, to_terminal
+from naiad.cli.main import _checked, build_parser, main
+from naiad.cli.style import ABSENT
+from naiad.domain.workflow import load_workflow, parse_workflow
 from naiad.runtime.log import RunLog
 from naiad.runtime.queue import Queue
 from naiad.runtime.run import RunStore
@@ -28,6 +31,11 @@ prompt = "/to-spec {task}"
 name = "done"
 terminal = true
 """
+
+
+def cells(line):
+    """A line's cells, told apart by two spaces or more."""
+    return re.split(r"\s{2,}", line.strip())
 
 
 @pytest.fixture
@@ -55,8 +63,12 @@ def test_show_then_lists_that_one_terminal_state(library, capsys):
     assert main(["workflow", "show", "demo"]) == 0
 
     printed = capsys.readouterr().out
-    assert printed.splitlines()[0].split() == ["name", "demo"]
-    assert [line.split()[:2] for line in printed.splitlines()[2:]] == [["done", "terminal"]]
+    assert [cells(line) for line in printed.splitlines()] == [
+        ["name", "demo"],
+        [""],
+        ["STATE", "KIND"],
+        ["done", "terminal"],
+    ]
 
 
 def test_check_passes_on_what_new_wrote(library, capsys):
@@ -66,6 +78,55 @@ def test_check_passes_on_what_new_wrote(library, capsys):
     assert main(["workflow", "check", "demo"]) == 0
 
     assert capsys.readouterr().out.strip() == "demo: OK"
+
+
+def test_check_is_styled_at_a_terminal(library, capsys, monkeypatch):
+    main(["workflow", "new", "demo"])
+    capsys.readouterr()
+    terminal = to_terminal(monkeypatch)
+
+    assert main(["workflow", "check", "demo"]) == 0
+
+    assert ESCAPE in terminal.getvalue()
+
+
+def test_check_names_the_workflow_and_says_ok_in_their_styles():
+    workflow = parse_workflow(STARTER_LIKE)
+
+    line = _checked(workflow)
+
+    assert line == "demo: OK"
+    assert styles_of(line) == {"demo": "workflow", "OK": "severity.ok"}
+
+
+def test_each_verb_says_what_it_did_with_the_workflows_it_names_styled(
+    library, monkeypatch
+):
+    """The words are what they were, for a script reading them; at a terminal
+    the Workflow stands out from what was done to it."""
+    said = []
+    monkeypatch.setattr("naiad.cli.main.say", lambda line, **_: said.append(line))
+
+    main(["workflow", "new", "demo"])
+    main(["workflow", "set", "demo", "model", "opus"])
+    main(["workflow", "unset", "demo", "model"])
+    main(["workflow", "unset", "demo", "model"])
+    main(["workflow", "rename", "demo", "other"])
+
+    assert said == [
+        f"created demo: {library / 'demo.toml'}",
+        "demo: model = opus",
+        "demo: model removed",
+        "demo: model was not set",
+        f"renamed demo to other: {library / 'other.toml'}",
+    ]
+    assert [styles_of(line) for line in said] == [
+        {"demo": "workflow"},
+        {"demo": "workflow"},
+        {"demo": "workflow"},
+        {"demo": "workflow"},
+        {"demo": "workflow", "other": "workflow"},
+    ]
 
 
 def test_the_queue_accepts_a_workflow_new_wrote(home, tmp_path):
@@ -128,16 +189,28 @@ def test_check_reads_a_path_as_a_path(tmp_path, capsys):
     assert main(["workflow", "check", str(elsewhere)]) == 0
 
 
-def test_states_and_show_render_the_states_the_same(library, capsys):
+def test_states_and_show_name_the_same_states_with_the_same_words(library, capsys):
+    """The agent's listing and the author's table are two layouts of one set of
+    facts; with its header and dashes left out, show's row is the agent's line."""
     library.mkdir(parents=True)
     (library / "demo.toml").write_text(STARTER_LIKE)
 
     main(["states", "demo"])
-    listed = capsys.readouterr().out.splitlines()[1:]
+    listed = [cells(line) for line in capsys.readouterr().out.splitlines()[1:]]
     main(["workflow", "show", "demo"])
     shown = capsys.readouterr().out.splitlines()
+    table = shown[shown.index("") + 2 :]
 
-    assert shown[-len(listed):] == listed
+    assert [[cell for cell in cells(row) if cell != ABSENT] for row in table] == listed
+
+
+def test_show_is_styled_at_a_terminal(library, monkeypatch):
+    held(library)
+    terminal = to_terminal(monkeypatch)
+
+    assert main(["workflow", "show", "demo"]) == 0
+
+    assert ESCAPE in terminal.getvalue()
 
 
 def held(library, name="demo", text=STARTER_LIKE):
@@ -163,7 +236,11 @@ def test_list_names_every_library_entry(library, capsys):
 
     assert main(["workflow", "list"]) == 0
 
-    assert [line.split()[0] for line in capsys.readouterr().out.splitlines()] == ["alpha", "beta"]
+    assert [cells(line) for line in capsys.readouterr().out.splitlines()] == [
+        ["WORKFLOW"],
+        ["alpha"],
+        ["beta"],
+    ]
 
 
 def test_list_names_a_broken_link_as_broken_and_still_lists_the_rest(library, tmp_path, capsys):
@@ -172,9 +249,19 @@ def test_list_names_a_broken_link_as_broken_and_still_lists_the_rest(library, tm
 
     assert main(["workflow", "list"]) == 0
 
-    lines = capsys.readouterr().out.splitlines()
-    assert [line.split()[0] for line in lines] == ["alpha", "gone"]
-    assert "broken" in lines[1]
+    rows = [cells(line) for line in capsys.readouterr().out.splitlines()]
+    assert [row[0] for row in rows] == ["WORKFLOW", "alpha", "gone"]
+    assert rows[1][1] == ABSENT
+    assert "broken" in rows[2][1]
+
+
+def test_list_is_styled_at_a_terminal(library, monkeypatch):
+    held(library, "alpha", 'name = "alpha"\nmodle = "x"\n')
+    terminal = to_terminal(monkeypatch)
+
+    assert main(["workflow", "list"]) == 0
+
+    assert ESCAPE in terminal.getvalue()
 
 
 def test_list_names_a_file_the_loader_refuses_in_place(library, capsys):

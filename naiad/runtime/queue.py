@@ -24,6 +24,7 @@ from pathlib import Path
 from typing import Any, Literal
 
 from naiad.domain.entry import Attachment, Entry
+from naiad.domain.short_ids import named_by
 from naiad.runtime.announcements import Announcements
 from naiad.runtime.atomic import write_atomically
 from naiad.runtime.family import Entered, every_entry, joining, untold_children
@@ -46,6 +47,20 @@ RUNNING: Status = "running"
 JOINING: Status = "joining"
 PARKED: Status = "parked"
 DONE: Status = "done"
+
+
+class AmbiguousName(Exception):
+    """A name that stands for more than one Entry on the Queue. Refused rather
+    than resolved: whichever one was chosen, the act would land on an Entry
+    nobody named."""
+
+    def __init__(self, name: str, ids: list[str]) -> None:
+        super().__init__(
+            f"'{name}' names {len(ids)} entries in the queue ({', '.join(ids)}); "
+            f"give enough of the id to name one"
+        )
+        self.name = name
+        self.ids = ids
 
 
 class Queue:
@@ -92,13 +107,22 @@ class Queue:
         self._write(attached)
         return attached
 
-    def find(self, entry_id: str) -> Entry | None:
-        """One Entry by its id, or nothing when the Queue holds no such Entry.
+    def named(self, name: str) -> Entry | None:
+        """One Entry by its id or by any shorter form of it that names it
+        alone — the form `naiad queue list` shows — or nothing when the Queue
+        holds no Entry by that name.
 
-        Read through `all` rather than from the file directly, so that a
-        damaged Entry is refused by one reader (`_read`) however it is reached.
+        Read at the moment of asking, so a short form that has come to name
+        two Entries since it was shown raises AmbiguousName instead of acting
+        on either. Read through `all` rather than from a file directly, so
+        that a damaged Entry is refused by one reader (`_read`) however it is
+        reached.
         """
-        return next((entry for entry in self.all() if entry.id == entry_id), None)
+        entries = self.all()
+        ids = named_by([entry.id for entry in entries], name)
+        if len(ids) > 1:
+            raise AmbiguousName(name, ids)
+        return next((entry for entry in entries if entry.id in ids), None)
 
     def entry_of(self, run_id: str) -> Entry | None:
         """The Entry a Run became, or nothing for a Run that was never queued —
@@ -295,9 +319,11 @@ def cancel(queue: Queue, runs: RunStore, entry_id: str) -> Cancelled | None:
     ever removes one — which the next Prune does, since a cancelled Run now
     reads done.
 
-    None when the Queue holds no such Entry, as `Queue.remove` answers False.
+    The Entry is named as `Queue.named` reads a name, so the operator may type
+    the short form a listing shows. None when the Queue holds no such Entry, as
+    `Queue.remove` answers False.
     """
-    entry = queue.find(entry_id)
+    entry = queue.named(entry_id)
     if entry is None:
         return None
 
@@ -559,6 +585,7 @@ __all__ = [
     "PARKED",
     "RUNNING",
     "WAITING",
+    "AmbiguousName",
     "Cancelled",
     "Pruned",
     "Queue",

@@ -134,3 +134,34 @@ def test_a_configured_service_joins_the_local_legs_rather_than_replacing_them():
 
     assert any(isinstance(leg, TerminalNotifications) for leg in legs)
     assert any(isinstance(leg, NtfyNotifications) for leg in legs)
+
+
+def test_the_terminal_leg_prints_its_title_and_message_as_one_plain_line(capsys):
+    TerminalNotifications().notify(
+        title="naiad: run-1", message="entered ship", kind=Notification.REPORT
+    )
+
+    assert capsys.readouterr().err == "naiad: run-1: entered ship\n"
+
+
+def test_the_terminal_leg_hands_its_telling_to_the_writer_it_was_given(capsys):
+    """How the line looks is the entry point's to say, as every other line
+    is; the leg only says where the telling goes."""
+    written = []
+
+    TerminalNotifications(lambda *telling: written.append(telling)).notify(
+        title="naiad: run-1", message="why", kind=Notification.NOTIFY
+    )
+
+    assert written == [("naiad: run-1", "why", Notification.NOTIFY)]
+    assert capsys.readouterr().err == ""
+
+
+def test_the_terminal_leg_given_takes_the_place_of_the_plain_one():
+    terminal = TerminalNotifications(lambda *telling: None)
+
+    legs = configured_notifier(environ={NTFY_URL_VARIABLE: URL}, terminal=terminal).legs
+
+    assert [leg for leg in legs if isinstance(leg, TerminalNotifications)] == [terminal]
+    assert any(isinstance(leg, DesktopNotifications) for leg in legs)
+    assert any(isinstance(leg, NtfyNotifications) for leg in legs)

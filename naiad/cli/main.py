@@ -24,11 +24,13 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
+from rich.text import Text
+
 from naiad.adapters.answerer import HeadlessAnswerer
 from naiad.adapters.executable import naiad_command
 from naiad.adapters.lock import SupervisorLock
 from naiad.adapters.machine import Machine
-from naiad.adapters.notify import configured_notifier
+from naiad.adapters.notify import Notifications, TerminalNotifications, configured_notifier
 from naiad.adapters.tmux import TmuxError, TmuxSessions
 from naiad.cli.adopt import NotInTmux, attachment_in, teaching_for
 from naiad.cli.announce import AnnounceError, announce_state, announcement_reply
@@ -55,10 +57,12 @@ from naiad.cli.kickoff import start_entry
 from naiad.cli.protocol import injection_for, standing_in
 from naiad.cli.refusals import ADD_COMMAND, ADOPT_COMMAND, RUN_COMMAND, Remedy
 from naiad.cli.spawn import SpawnError, spawn_child
+from naiad.cli.style import ABSENT, Styled, columns, console, refuse, say, status, styled
 from naiad.cli.supervisor import supervise_queue
 from naiad.cli.terminal import terminal_width
 from naiad.cli.wait import WaitError, declare_wait
-from naiad.cli.watch import tick_once, watch
+from naiad.cli.watch import tell, tick_once, watch
+from naiad.cli.workflow_view import render_library, render_workflow
 from naiad.domain.capacity import (
     CAPACITY_VARIABLE,
     CapacityError,
@@ -67,9 +71,10 @@ from naiad.domain.capacity import (
 )
 from naiad.domain.entry import Attachment, Entry
 from naiad.domain.key_table import file_key_help, file_row, file_value
-from naiad.domain.listing import render_states, render_workflow
+from naiad.domain.listing import render_states
 from naiad.domain.protocol import ANNOUNCE_SUBCOMMAND, SPAWN_SUBCOMMAND
 from naiad.domain.settings import Setting, StateSetting
+from naiad.domain.short_ids import short_ids
 from naiad.domain.workflow import Workflow, WorkflowError, load_workflow
 from naiad.hooks.install import install_hooks
 from naiad.runtime.announcements import Announcements
@@ -82,7 +87,15 @@ from naiad.runtime.home import (
     default_queue_root,
     default_runs_root,
 )
-from naiad.runtime.queue import Queue, cancel, entered_in, prune, status_of
+from naiad.runtime.queue import (
+    AmbiguousName,
+    Queue,
+    branch_of,
+    cancel,
+    entered_in,
+    prune,
+    status_of,
+)
 from naiad.runtime.records import Clears, EntryTurns, Turns
 from naiad.runtime.resolve import NoRunError, RunResolver, turn_recipient
 from naiad.runtime.run import Run, RunStore
@@ -95,6 +108,7 @@ Handler = Callable[[argparse.Namespace], int]
 # Everything a command can fail with that the operator or agent should read as
 # a message rather than a traceback.
 FAILURES = (
+    AmbiguousName,
     AnnounceError,
     AskError,
     BatchError,
@@ -202,7 +216,7 @@ def build_parser() -> argparse.ArgumentParser:
         "answers", help="what became of every Question a Run asked, in the order they were asked"
     )
     queue_answers.add_argument(
-        "entry_or_run", help="an Entry or a Run, as `naiad queue list` names them"
+        "entry_or_run", help="an Entry, as `naiad queue list` names it, or a Run by its id"
     )
     queue_answers.set_defaults(handler=_queue_answers)
 
@@ -635,7 +649,7 @@ def _ceiling(arguments: argparse.Namespace) -> int | None:
             total_memory=Machine().total_memory,
         )
     except CapacityError as error:
-        print(f"naiad: {error}", file=sys.stderr)
+        refuse(error)
         return None
 
 
@@ -676,7 +690,7 @@ def _announce(arguments: argparse.Namespace) -> int:
         )
         reply = announcement_reply(announcement, run=run)
     except FAILURES as error:
-        print(f"naiad: {error}", file=sys.stderr)
+        refuse(error)
         return 2
 
     print(reply, end="")
@@ -693,7 +707,7 @@ def _ask(arguments: argparse.Namespace) -> int:
             arguments.question, options=arguments.options or [], run=run
         )
     except FAILURES as error:
-        print(f"naiad: {error}", file=sys.stderr)
+        refuse(error)
         return 2
 
     print(f"asked ({announcement.seq}); the answer will arrive in this session")
@@ -707,7 +721,7 @@ def _wait(arguments: argparse.Namespace) -> int:
             arguments.reason, run=run, now=time.time(), seconds=arguments.seconds
         )
     except FAILURES as error:
-        print(f"naiad: {error}", file=sys.stderr)
+        refuse(error)
         return 2
 
     # The granted number is said back because a claim past the remaining
@@ -725,7 +739,7 @@ def _hold(arguments: argparse.Namespace) -> int:
         run = _current_run()
         declare_hold(arguments.reason, run=run)
     except FAILURES as error:
-        print(f"naiad: {error}", file=sys.stderr)
+        refuse(error)
         return 2
 
     # No granted number to say back: a Hold has no clock. What the agent must
@@ -747,7 +761,7 @@ def _branch(arguments: argparse.Namespace) -> int:
             runs=RunStore(default_runs_root()),
         )
     except FAILURES as error:
-        print(f"naiad: {error}", file=sys.stderr)
+        refuse(error)
         return 2
 
     print(f"declared working branch '{arguments.name}'; this run's work belongs on it")
@@ -786,7 +800,7 @@ def _spawn(arguments: argparse.Namespace) -> int:
             created_at=_timestamp(added),
         )
     except FAILURES as error:
-        print(f"naiad: {error}", file=sys.stderr)
+        refuse(error)
         return 2
 
     _report(entry)
@@ -828,6 +842,8 @@ def _stopped(arguments: argparse.Namespace) -> int:
         latest = Announcements(recipient.root).latest()
         Turns(recipient.root).record_end(latest_seq=latest.seq if latest else None)
     except FAILURES as error:
+        # Printed plain rather than refused: a hook's stderr goes to Claude
+        # Code rather than to a terminal, and its words are a hook's contract.
         print(f"naiad: {error}", file=sys.stderr)
     return 0
 
@@ -951,27 +967,33 @@ def _install(arguments: argparse.Namespace) -> int:
     changes install's exit code: that is install's own outcome.
     """
     if arguments.force and not arguments.starter:
-        print("naiad: --force applies to --starter, and --starter was not given", file=sys.stderr)
+        refuse("--force applies to --starter, and --starter was not given")
         return 2
 
     try:
         settings = install_hooks(settings_path=arguments.settings)
-        print(f"installed naiad's hooks into {settings}")
+        say(_installed("naiad's hooks", settings))
         skill = install_adopt_skill(skills_root=arguments.skills)
-        print(f"installed the adopt skill into {skill}")
+        say(_installed("the adopt skill", skill))
         if arguments.starter:
             starter = install_starter(library=default_library_root(), force=arguments.force)
-            print(f"installed the starter workflow into {starter}")
+            say(_installed("the starter workflow", starter))
     except (OSError, ValueError) as error:
-        print(f"naiad: {error}", file=sys.stderr)
+        refuse(error)
         return 2
     finally:
         # After what install did or refused to do, and never changing its exit
         # code: install is the command that fixes what the report finds, so the
         # report is the check that it did.
-        print(render_report(diagnose()))
+        say(render_report(diagnose()))
 
     return 0
+
+
+def _installed(what: str, where: Path | str) -> Styled:
+    """The line for one thing install put in place, led by the word a script
+    reading install's output matches on."""
+    return Styled.assemble(("installed", "event.progress"), f" {what} into {where}")
 
 
 def _doctor(arguments: argparse.Namespace) -> int:
@@ -979,7 +1001,7 @@ def _doctor(arguments: argparse.Namespace) -> int:
     to run is the operator's to run. Exits 1 only when a check fails, so that a
     warning never stops a script that gates on it."""
     findings = diagnose()
-    print(render_report(findings))
+    say(render_report(findings))
     return 1 if any(finding.severity is Severity.FAIL for finding in findings) else 0
 
 
@@ -991,7 +1013,7 @@ def _refused_at_the_door() -> bool:
     refusal = entrance_refusal()
     if refusal is None:
         return False
-    print(refusal, file=sys.stderr)
+    say(refusal, stderr=True)
     return True
 
 
@@ -1005,10 +1027,9 @@ def _watch(arguments: argparse.Namespace) -> int:
         return 2
 
     if SupervisorLock(default_lock_path()).held():
-        print(
-            "naiad: a supervisor is already driving the queue's live run; "
+        refuse(
+            "a supervisor is already driving the queue's live run; "
             "a second watch would deliver everything twice",
-            file=sys.stderr,
         )
         return 2
 
@@ -1016,7 +1037,7 @@ def _watch(arguments: argparse.Namespace) -> int:
         run = _named_run(arguments.run_id) if arguments.run_id else _current_run()
         _drive(run)
     except FAILURES as error:
-        print(f"naiad: {error}", file=sys.stderr)
+        refuse(error)
         return 2
     except KeyboardInterrupt:
         # The operator giving up on a Run that has not ended. The session is
@@ -1034,12 +1055,12 @@ def _drive(run: Run) -> None:
     # The line the operator needs to look in on the work, printed where the Run
     # is driven rather than where it was queued: an Entry queued tonight is
     # started hours later, and the session it names does not exist until then.
-    print(f"watching {run.id}   (tmux attach -t {run.tmux_session})")
+    say(_watching(run))
     watch(
         run=run,
         workflow=load_workflow(run.workflow_path),
         session=TmuxSessions(),
-        notifier=configured_notifier(),
+        notifier=_notifier(),
         answerer=HeadlessAnswerer(),
         # The naiad driving this Run, so a nudged agent is told to type the
         # command that exists rather than whatever the session's PATH holds.
@@ -1049,9 +1070,17 @@ def _drive(run: Run) -> None:
     )
 
 
+def _notifier() -> Notifications:
+    """Every leg a telling goes down, the terminal's line styled as the rest of
+    what the Supervisor prints. The banner and the phone are handed the plain
+    title and message, which is all either can show."""
+    return configured_notifier(terminal=TerminalNotifications(tell))
+
+
 def _entry_id_of(run: Run) -> str | None:
     """The Entry a Run became, so that a notification can point the operator at
-    `naiad queue answers` by the id `naiad queue list` shows. The Run records no
+    `naiad queue answers` by the Entry's id, which that command takes whole as
+    readily as the short form `naiad queue list` shows. The Run records no
     Entry; the Queue is asked, and a Run it does not know is pointed at by its
     own id."""
     entry = Queue(default_queue_root()).entry_of(run.id)
@@ -1068,7 +1097,7 @@ def _ticker() -> Callable[[Run], None]:
     prints it too: where the Run is driven rather than where it was queued.
     """
     session = TmuxSessions()
-    notifier = configured_notifier()
+    notifier = _notifier()
     answerer = HeadlessAnswerer()
     naiad = naiad_command()
     watching: set[str] = set()
@@ -1076,7 +1105,7 @@ def _ticker() -> Callable[[Run], None]:
     def tick_run(run: Run) -> None:
         if run.id not in watching:
             watching.add(run.id)
-            print(f"watching {run.id}   (tmux attach -t {run.tmux_session})")
+            say(_watching(run))
         tick_once(
             run=run,
             workflow=load_workflow(run.workflow_path),
@@ -1086,11 +1115,24 @@ def _ticker() -> Callable[[Run], None]:
             naiad=naiad,
             entry_id=_entry_id_of(run),
             queue=Queue(default_queue_root()),
-            report=lambda message: print(f"{run.id}  {message}"),
+            report=lambda message: say(
+                Styled.assemble((f"{run.id}  ", "secondary"), styled(message))
+            ),
             lead=len(f"{run.id}  "),
         )
 
     return tick_run
+
+
+def _watching(run: Run) -> Styled:
+    """The line saying a Run is being driven, and the command that looks in on
+    its session."""
+    return Styled.assemble(
+        ("watching", "event.progress"),
+        " ",
+        (run.id, "id"),
+        (f"   (tmux attach -t {run.tmux_session})", "secondary"),
+    )
 
 
 def _named_run(run_id: str) -> Run:
@@ -1145,7 +1187,11 @@ def _run(arguments: argparse.Namespace) -> int:
             # Fire-and-forget. Adding work never blocks on work already
             # running, and the Supervisor holding the lock takes this Entry in
             # its turn.
-            print("a supervisor is already running; it will take this in turn")
+            say(
+                Styled.assemble(
+                    ("a supervisor is already running; it will take this in turn", "secondary")
+                )
+            )
             return 0
         return _supervise(following=False, ceiling=ceiling)
 
@@ -1164,17 +1210,15 @@ def _queue_add(arguments: argparse.Namespace) -> int:
         if arguments.model or arguments.effort:
             # Its own refusal, because the one below sends the option into the
             # file, and a batch file has no key for a setting.
-            print(
-                "naiad: --model and --effort name settings for one entry, and a batch "
+            refuse(
+                "--model and --effort name settings for one entry, and a batch "
                 "file cannot name them; queue that entry on its own or drop --file",
-                file=sys.stderr,
             )
             return 2
         if _describes_one_entry(arguments):
-            print(
-                "naiad: --file describes the work itself, so the options that "
+            refuse(
+                "--file describes the work itself, so the options that "
                 "describe one entry belong in the file; drop them or drop --file",
-                file=sys.stderr,
             )
             return 2
         return _queued_from_file(arguments)
@@ -1185,11 +1229,10 @@ def _queue_add(arguments: argparse.Namespace) -> int:
         # instead. A missing task is not refused here — a given Subject stands
         # in for it, and which of the two must be present is the enqueue's one
         # check to make.
-        print(
-            "naiad: no workflow was given, and no batch file either; "
+        refuse(
+            "no workflow was given, and no batch file either; "
             "try: naiad queue add <workflow> <task>, "
             "or naiad queue add --file <batch.toml>",
-            file=sys.stderr,
         )
         return 2
 
@@ -1216,7 +1259,7 @@ def _adopt(arguments: argparse.Namespace) -> int:
         # nowhere would only defer the refusal to a moment nobody is at.
         attachment = attachment_in(os.environ)
     except FAILURES as error:
-        print(f"naiad: {error}", file=sys.stderr)
+        refuse(error)
         return 2
 
     entry = _queued(arguments, remedy=ADOPT_COMMAND, attachment=attachment)
@@ -1253,14 +1296,20 @@ def _states(arguments: argparse.Namespace) -> int:
     if arguments.workflow is None:
         return _every_workflow(library)
 
-    return _print_workflow(arguments.workflow, render_states, library=library)
+    # Printed as it is, never through a Console: the adopt skill parses this
+    # text, and a Console would expand a tab or colour a word on its way out.
+    return _print_workflow(arguments.workflow, render_states, library=library, show=print)
 
 
 def _print_workflow(
-    argument: str, render: Callable[[Workflow], str], *, library: Path | None = None
+    argument: str,
+    render: Callable[[Workflow], str],
+    *,
+    library: Path | None = None,
+    show: Callable[[str], object] = say,
 ) -> int:
-    """A Workflow named by name or path, loaded the way a Run loads it and laid
-    out by `render`, or refused in one line.
+    """A Workflow named by name or path, loaded the way a Run loads it, laid
+    out by `render` and printed by `show`, or refused in one line.
 
     A name asked for by name is refused rather than answered with something
     else: the reader named one thing, and printing another would answer a
@@ -1271,21 +1320,29 @@ def _print_workflow(
             resolve_workflow(argument, library=library or default_library_root())
         )
     except (*FAILURES, WorkflowError) as error:
-        print(f"naiad: {error}", file=sys.stderr)
+        refuse(error)
         return 2
 
-    print(render(workflow))
+    show(render(workflow))
     return 0
 
 
 def _workflow_show(arguments: argparse.Namespace) -> int:
-    return _print_workflow(arguments.workflow, render_workflow)
+    return _print_workflow(
+        arguments.workflow, lambda workflow: render_workflow(workflow, width=terminal_width())
+    )
 
 
 def _workflow_check(arguments: argparse.Namespace) -> int:
     """Whether a Run could start from this file, decided by loading it exactly
     as a Run does: through the library's resolution, then the one loader."""
-    return _print_workflow(arguments.workflow, lambda workflow: f"{workflow.name}: OK")
+    return _print_workflow(arguments.workflow, _checked)
+
+
+def _checked(workflow: Workflow) -> Styled:
+    """What `check` says of a file a Run could start from. The words are fixed,
+    since a script may read them."""
+    return Styled.assemble((workflow.name, "workflow"), ": ", ("OK", "severity.ok"))
 
 
 def _workflow_new(arguments: argparse.Namespace) -> int:
@@ -1294,25 +1351,23 @@ def _workflow_new(arguments: argparse.Namespace) -> int:
             arguments.name, library=default_library_root(), source=arguments.source
         )
     except (*FAILURES, WorkflowError) as error:
-        print(f"naiad: {error}", file=sys.stderr)
+        refuse(error)
         return 2
 
-    print(f"created {workflow.name}: {path}")
+    say(Styled.assemble("created ", (workflow.name, "workflow"), f": {path}"))
     return 0
 
 
 def _workflow_list(arguments: argparse.Namespace) -> int:
-    """Every entry the library holds, one line each, the ones a Run could not
-    start from saying why beside their name."""
+    """Every entry the library holds, one row each under a header, the ones a
+    Run could not start from saying why beside their name."""
     library = default_library_root()
     held = library_entries(library)
     if not held:
         print(empty_library_message(library))
         return 0
 
-    width = max(len(name) for name, _ in held)
-    for name, problem in held:
-        print(f"{name:<{width}}  {problem}" if problem else name)
+    say(render_library(held))
     return 0
 
 
@@ -1322,10 +1377,10 @@ def _workflow_set(arguments: argparse.Namespace) -> int:
         path = resolve_workflow(arguments.workflow, library=default_library_root())
         edit_workflow(path, lambda document: set_file_key(document, arguments.key, value))
     except (*FAILURES, WorkflowError) as error:
-        print(f"naiad: {error}", file=sys.stderr)
+        refuse(error)
         return 2
 
-    print(f"{path.stem}: {arguments.key} = {value}")
+    say(Styled.assemble((path.stem, "workflow"), f": {arguments.key} = {value}"))
     return 0
 
 
@@ -1338,13 +1393,11 @@ def _workflow_unset(arguments: argparse.Namespace) -> int:
             path, lambda document: removed.append(unset_file_key(document, arguments.key))
         )
     except (*FAILURES, WorkflowError) as error:
-        print(f"naiad: {error}", file=sys.stderr)
+        refuse(error)
         return 2
 
-    if removed == [True]:
-        print(f"{path.stem}: {arguments.key} removed")
-    else:
-        print(f"{path.stem}: {arguments.key} was not set")
+    said = "removed" if removed == [True] else "was not set"
+    say(Styled.assemble((path.stem, "workflow"), f": {arguments.key} {said}"))
     return 0
 
 
@@ -1357,7 +1410,7 @@ def _workflow_rm(arguments: argparse.Namespace) -> int:
             runs=RunStore(default_runs_root()),
         )
     except (*FAILURES, WorkflowError) as error:
-        print(f"naiad: {error}", file=sys.stderr)
+        refuse(error)
         return 2
 
     print(f"removed {path}")
@@ -1374,10 +1427,18 @@ def _workflow_rename(arguments: argparse.Namespace) -> int:
             runs=RunStore(default_runs_root()),
         )
     except (*FAILURES, WorkflowError) as error:
-        print(f"naiad: {error}", file=sys.stderr)
+        refuse(error)
         return 2
 
-    print(f"renamed {arguments.workflow} to {arguments.new}: {path}")
+    say(
+        Styled.assemble(
+            "renamed ",
+            (arguments.workflow, "workflow"),
+            " to ",
+            (arguments.new, "workflow"),
+            f": {path}",
+        )
+    )
     return 0
 
 
@@ -1448,7 +1509,7 @@ def _queued_from_file(arguments: argparse.Namespace) -> int:
             source=str(path),
         )
     except FAILURES as error:
-        print(f"naiad: {error}", file=sys.stderr)
+        refuse(error)
         return 2
 
     for entry in entries:
@@ -1502,7 +1563,7 @@ def _queued(
             remedy=remedy,
         )
     except FAILURES as error:
-        print(f"naiad: {error}", file=sys.stderr)
+        refuse(error)
         return None
 
     _report(entry)
@@ -1512,58 +1573,83 @@ def _queued(
 def _report(entry: Entry) -> None:
     """What an Entry looks like once it is queued. One place, so that a batch
     reports each of its Entries exactly as a single one is reported."""
-    print(f"queued {entry.id}")
-    print(f"  branch {_branch_shown(entry)}   in {entry.target_repo}")
+    say(Styled.assemble(("queued", "event.progress"), " ", (entry.id, "id")))
+    say(
+        Styled.assemble(
+            "  branch ",
+            (_branch_shown(entry), "branch"),
+            "   in ",
+            (str(entry.target_repo), "repo"),
+        )
+    )
 
 
 def _queue_list(arguments: argparse.Namespace) -> int:
     """The Entries in id order, which is Queue order, each with what became of
-    it — asked of its Run rather than read from a status the Queue keeps."""
+    it — asked of its Run rather than read from a status the Queue keeps.
+
+    One row per Entry under a header, each Child beneath its Parent, and the
+    settings an Entry names on lines of their own under its row. Each Entry is
+    shown by the short form of its id that `naiad queue rm` and `naiad queue
+    answers` take back.
+    """
     try:
         queue = Queue(default_queue_root())
         entries = queue.all()
     except FAILURES as error:
         # An Entry file the operator has damaged. They can see these files, so
         # they can break one, and a traceback is not something they can act on.
-        print(f"naiad: {error}", file=sys.stderr)
+        refuse(error)
         return 2
 
+    out = console()
     if not entries:
-        print(f"the queue is empty ({default_queue_root()})")
+        out.print(Text(f"the queue is empty ({default_queue_root()})", style="secondary"))
         return 0
 
     runs = RunStore(default_runs_root())
-    standing = {entry.id: _standing_shown(entry, runs) for entry in entries}
-    # Padded to the longest here rather than to a fixed width, because a State
-    # is named by the Workflow and Naiad knows no name in advance.
-    width = max(len(name) for name in standing.values())
-    for entry, depth in _families(entries):
-        indent = "  " * depth
-        print(
-            indent
-            + _queue_line(entry, runs, queue, state=f"{standing[entry.id]:<{width}}")
-        )
-        for line in _settings_shown(entry):
-            print(f"{indent}    {line}")
+    shown = short_ids(entry.id for entry in entries)
+    rows: list[Sequence[Text | str]] = [[Text(name, style="header") for name in QUEUE_COLUMNS]]
+    beneath: list[list[str]] = [[]]
+    for entry, tree in _families(entries):
+        rows.append(_queue_row(entry, runs, queue, shown=shown[entry.id], tree=tree))
+        beneath.append([f"{_UNDER[tree]}  {line}" for line in _settings_shown(entry)])
+    for line, lines_under in zip(columns(rows, width=terminal_width()), beneath):
+        out.print(line)
+        for under in lines_under:
+            out.print(Text(under, style="secondary"))
     return 0
 
 
-def _families(entries: Sequence[Entry]) -> list[tuple[Entry, int]]:
-    """Each Entry with how deep to indent it: every Child straight beneath the
-    Entry whose Run spawned it, so that a fan-out reads as one piece of work.
-    A Child whose Parent's Entry has left the Queue stands on its own."""
+QUEUE_COLUMNS = ("ID", "STATUS", "STATE", "REPO", "BRANCH", "TASK")
+
+# What is drawn before a Child's id, joining it to its Parent's row, and what
+# is drawn before the lines beneath that Child: a Child with a sibling below it
+# carries the line on down to that sibling.
+_FIRST, _LAST = "├ ", "└ "
+_UNDER = {"": "", _FIRST: "│ ", _LAST: "  "}
+
+
+def _families(entries: Sequence[Entry]) -> list[tuple[Entry, str]]:
+    """Each Entry with the tree drawn before its id: every Child straight
+    beneath the Entry whose Run spawned it, so that a fan-out reads as one
+    piece of work. A Child whose Parent's Entry has left the Queue stands on
+    its own."""
     parents = {entry.run_id for entry in entries if entry.run_id is not None}
     children: dict[str, list[Entry]] = {}
     for entry in entries:
         if entry.parent in parents:
             children.setdefault(entry.parent, []).append(entry)
-    families: list[tuple[Entry, int]] = []
+    families: list[tuple[Entry, str]] = []
     for entry in entries:
         if entry.parent in parents:
             continue
-        families.append((entry, 0))
+        families.append((entry, ""))
         if entry.run_id is not None:
-            families.extend((child, 1) for child in children.get(entry.run_id, []))
+            spawned = children.get(entry.run_id, [])
+            families.extend(
+                (child, _LAST if child is spawned[-1] else _FIRST) for child in spawned
+            )
     return families
 
 
@@ -1577,29 +1663,46 @@ def _settings_shown(entry: Entry) -> list[str]:
     return [f"{state}: {', '.join(said)}" for state, said in by_state.items()]
 
 
-def _standing_shown(entry: Entry, runs: RunStore) -> str:
+def _standing_shown(entry: Entry, runs: RunStore) -> str | None:
     """The State the Entry's Run stands in, as the Run recorded it — never
-    re-derived from a Workflow that may have been edited since. A dash where
+    re-derived from a Workflow that may have been edited since. None where
     there is none: a waiting Entry has no Run, and a Run written before kickoff
     recorded its start has nothing to show until it announces."""
     run = runs.load(entry.run_id) if entry.run_id is not None else None
-    return (standing_in(run) if run is not None else None) or "-"
+    return standing_in(run) if run is not None else None
 
 
-def _queue_line(entry: Entry, runs: RunStore, queue: Queue, *, state: str) -> str:
-    """One Entry as one line: which, what became of it, the State it stands in,
+def _queue_row(
+    entry: Entry, runs: RunStore, queue: Queue, *, shown: str, tree: str
+) -> list[Text | str]:
+    """One Entry as one row: which, what became of it, the State it stands in,
     where, on what branch, and what the work is.
 
     The repository in full rather than by its directory's name, because one
     Queue spans every repository and two checkouts of the same project — a
     worktree, a second clone — share that name and would otherwise read as one.
+    And never cut to fit: an agent tells which of its Children is working in a
+    worktree by the path on that Child's row.
+
+    The task on one line however it was written, since a row is one line.
     """
-    became = status_of(entry, runs, queue)
-    line = (
-        f"{entry.id}  {became:<7}  {state}  {_shortened(entry.target_repo)}  "
-        f"{_branch_shown(entry)}  {entry.task}"
-    )
-    return line if entry.run_id is None else f"{line}  ({entry.run_id})"
+    standing = _standing_shown(entry, runs)
+    # The Run's when the Entry named none: the agent derives a branch inside
+    # the Run and declares it there, and the Entry keeps what was typed.
+    branch = branch_of(entry, runs)
+    return [
+        Text.assemble((tree, "secondary"), (shown, "id")),
+        status(status_of(entry, runs, queue)),
+        _cell(standing, "state"),
+        Text(_shortened(entry.target_repo), style="repo"),
+        _cell(branch, "branch"),
+        " ".join(entry.task.split()),
+    ]
+
+
+def _cell(value: str | None, style: str) -> Text:
+    """A cell in its style, or the mark of nothing where there is no value."""
+    return Text(ABSENT, style="secondary") if value is None else Text(value, style=style)
 
 
 def _branch_shown(entry: Entry) -> str:
@@ -1636,10 +1739,9 @@ def _queue_watch(arguments: argparse.Namespace) -> int:
 
     with SupervisorLock(default_lock_path()).taken() as mine:
         if not mine:
-            print(
-                "naiad: a supervisor is already running, and only one may drive "
+            refuse(
+                "a supervisor is already running, and only one may drive "
                 "the queue; queue work with `naiad run` or `naiad queue add` instead",
-                file=sys.stderr,
             )
             return 2
         return _supervise(following=True, ceiling=ceiling)
@@ -1668,7 +1770,7 @@ def _supervise(*, following: bool, ceiling: int) -> int:
             machine=Machine(),
         )
     except FAILURES as error:
-        print(f"naiad: {error}", file=sys.stderr)
+        refuse(error)
         return 2
     except KeyboardInterrupt:
         # The operator stopping the night. The Queue is on disk and every
@@ -1704,35 +1806,31 @@ def _start_entry(entry: Entry, predecessor: str | None) -> Run:
 def _queue_answers(arguments: argparse.Namespace) -> int:
     """Print a Run's Answer log, for the Entry or the Run the operator named.
 
-    An Entry id and a Run id are both what `naiad queue list` prints, so either
-    is taken. An Entry not yet started has no Run to read and says so, rather
+    An Entry is taken as `naiad queue list` shows it, and a Run by its id, for
+    the Run no Entry became. An Entry not yet started has no Run to read and says so, rather
     than printing the empty block of a Run that was asked nothing.
     """
     named = arguments.entry_or_run
     runs = RunStore(default_runs_root())
     try:
-        entry = Queue(default_queue_root()).find(named)
+        entry = Queue(default_queue_root()).named(named)
         run_id = named if entry is None else entry.run_id
         if entry is not None and run_id is None:
-            print(f"{entry.id} has not started, so it has no answers yet")
+            say(Styled.assemble((entry.id, "id"), " has not started, so it has no answers yet"))
             return 0
         run = runs.load(run_id) if run_id is not None else None
     except FAILURES as error:
-        print(f"naiad: {error}", file=sys.stderr)
+        refuse(error)
         return 2
 
     if run is None:
-        print(
-            f"naiad: no entry '{named}' in the queue at {default_queue_root()}, "
+        refuse(
+            f"no entry '{named}' in the queue at {default_queue_root()}, "
             f"and no run under {default_runs_root()}",
-            file=sys.stderr,
         )
         return 2
 
-    print(
-        render_answers(run.id, AnswerLog(run.root).entries(), width=terminal_width()),
-        end="",
-    )
+    say(render_answers(run.id, AnswerLog(run.root).entries(), width=terminal_width()))
     return 0
 
 
@@ -1752,28 +1850,27 @@ def _queue_rm(arguments: argparse.Namespace) -> int:
         # The ending goes first, so a Run that would not take it leaves the
         # Entry in the Queue rather than orphaning a Run that still drives its
         # session.
-        print(f"naiad: {error}", file=sys.stderr)
+        refuse(error)
         return 2
 
     if cancelled is None:
-        print(
-            f"naiad: no entry '{arguments.entry_id}' in the queue at {default_queue_root()}",
-            file=sys.stderr,
+        refuse(
+            f"no entry '{arguments.entry_id}' in the queue at {default_queue_root()}",
         )
         return 2
 
-    print(f"removed {arguments.entry_id}")
+    say(Styled.assemble("removed ", (cancelled.entry.id, "id")))
     # Only a Run this act actually ended. An Entry that never started one, and
     # one whose Run was already over, release no Session — and a line offering
     # the operator a session in either case would be a claim, not a report.
     if cancelled.run is not None:
-        print(_cancellation_line(cancelled.run))
+        say(_cancellation_line(cancelled.run))
     for worktree in cancelled.worktrees:
-        print(f"child working tree left for you to remove: {worktree}")
+        say(Styled.assemble("child working tree left for you to remove: ", (str(worktree), "repo")))
     return 0
 
 
-def _cancellation_line(run: Run) -> str:
+def _cancellation_line(run: Run) -> Styled:
     """What was cancelled, and where to go and read what the agent was doing.
 
     A Run cancelled between its directory being made and its session being
@@ -1781,8 +1878,14 @@ def _cancellation_line(run: Run) -> str:
     looking for one that was never opened.
     """
     if run.tmux_pane is None:
-        return f"cancelled run {run.id}; it had no session yet"
-    return f"cancelled run {run.id}; its session at pane {run.tmux_pane} is yours"
+        return Styled.assemble("cancelled run ", (run.id, "id"), "; it had no session yet")
+    return Styled.assemble(
+        "cancelled run ",
+        (run.id, "id"),
+        "; its session at pane ",
+        (run.tmux_pane, "id"),
+        " is yours",
+    )
 
 
 def _queue_prune(arguments: argparse.Namespace) -> int:
@@ -1799,32 +1902,41 @@ def _queue_prune(arguments: argparse.Namespace) -> int:
         pruned = prune(Queue(default_queue_root()), RunStore(default_runs_root()))
     except FAILURES as error:
         # A damaged Entry, met before anything was deleted.
-        print(f"naiad: {error}", file=sys.stderr)
+        refuse(error)
         return 2
 
     if not (pruned.removed or pruned.orphans or pruned.skipped or pruned.failures):
-        print(
-            "nothing to prune: no entry in the queue is done and no run is orphaned"
-            f" ({default_queue_root()})"
+        say(
+            Styled.assemble(
+                (
+                    "nothing to prune: no entry in the queue is done and no run is orphaned"
+                    f" ({default_queue_root()})",
+                    "secondary",
+                )
+            )
         )
         return 0
 
     for entry in pruned.removed:
-        print(f"pruned {entry.id}  {entry.task}")
+        say(Styled.assemble("pruned ", (entry.id, "id"), f"  {entry.task}"))
     # An orphan has no line in the listing, so this printed line is the only
     # record its removal ever gets.
     for run_id in pruned.orphans:
-        print(f"pruned orphaned run {run_id}")
+        say(Styled.assemble("pruned orphaned run ", (run_id, "id")))
     if pruned.removed or pruned.orphans:
-        print(f"{len(pruned.removed) + len(pruned.orphans)} pruned")
+        say(Styled.assemble((str(len(pruned.removed) + len(pruned.orphans)), "count"), " pruned"))
 
     # Left rather than failed: whether a running orphan is truly live is the
     # operator's fact, so naming it defers the judgment without alarming them.
     for path in pruned.skipped:
-        print(f"left orphaned run {path}: reads as running, yours to judge")
+        say(
+            Styled.assemble(
+                "left orphaned run ", (str(path), "repo"), ": reads as running, yours to judge"
+            )
+        )
 
     for failure in pruned.failures:
-        print(f"naiad: {failure}", file=sys.stderr)
+        refuse(failure)
     return 2 if pruned.failures else 0
 
 

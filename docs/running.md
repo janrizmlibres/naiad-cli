@@ -54,15 +54,28 @@ Once started it counts toward the ceiling like any other run.
 While nothing can start for one of these reasons (the ceiling, memory or
 disk), the Supervisor says so once.
 
-`queue list` prints one line per entry, in queue order:
+`queue list` prints one row per entry under a header, in queue order, with
+each Child beneath the entry whose Run spawned it:
 
 ```text
-20260929-101204-482113-starter-4242  parked   review  ~/dev/shop  feat/dry-run  Add a --dry-run flag  (20260929-101206-starter-4242)
+ID      STATUS     STATE        REPO                             BRANCH           TASK
+4242    ◌ parked   review       ~/dev/shop                       feat/dry-run     Add a --dry-run flag to the…
+4318    ● joining  orchestrate  ~/dev/burrow                     feat/burrow      Build Burrow from the 55 ti…
+├ 4407  ● running  build        ~/dev/burrow-wt-feat-burrow--26  feat/burrow--26  Build ticket 26
+└ 4411  ◌ waiting  —            ~/dev/burrow-wt-feat-burrow--27  feat/burrow--27  Build ticket 27
 ```
 
-That is the entry's id, what became of it, the State it stands in, the repository,
-the branch (`-` until the agent has derived one) and the task. The Run's id is in
-brackets once it has one. What became of an entry is one of five words:
+That is the entry, what became of it, the State it stands in, the repository,
+the branch and the task. An entry is shown by the end of its id, the process id
+that queued it, made longer where two entries share it: an agent queueing a
+night's work in one turn gives every entry the same one. `naiad queue rm` and
+`naiad queue answers` take that short form as well as the full id, and refuse
+one that has come to name more than one entry. The repository is never cut,
+and the task is cut to fit the terminal. The branch is the one the
+entry was queued with, or the one the agent declared on its Run, and `—` until
+there is one. The settings an entry names are listed beneath its row. The
+status is coloured on a terminal, and plain when the output is piped or
+`NO_COLOR` is set. What became of an entry is one of five words:
 
 - `waiting`: no Run yet. It is queued behind another entry for its tree, it is
   a Child held by its Parent's Child limit, the Supervisor is at its ceiling,
@@ -106,14 +119,16 @@ naiad queue add starter "Add a --dry-run flag to the export command" --model imp
 A setting beats the State's own key and the file's default, for that entry only.
 It is refused before anything is queued, and again when the entry starts, if it
 names a State the Workflow lacks, a Gate, a Terminal State, or one State twice.
-`naiad queue list` shows an entry's settings under its line. `naiad adopt` and
+`naiad queue list` shows an entry's settings under its row. `naiad adopt` and
 `naiad run` take the same flags. A batch file cannot name settings yet.
 
 ## Watching and attaching
 
 Leave `queue watch` running in a terminal. It prints what happens to each Run,
-and every notification that fires also lands there, so it is the record of a
-night's work. Interrupt it with `C-c`. Nothing is lost: the records are on disk,
+one line per event after the Run's id, and every notification that fires also
+lands there, so it is the record of a night's work. On a terminal each line's
+leading verb is coloured by kind: work going ahead, something worth a look (a
+nudge, a Question put to the Answerer, nothing starting), or an ending. Interrupt it with `C-c`. Nothing is lost: the records are on disk,
 and a new `queue watch` picks the queue up again.
 
 Each Run has one tmux session, named `naiad-` and the Run's id, opened in the
@@ -201,8 +216,8 @@ Answerer settled and how to read them:
 3 answered by the Answerer — naiad queue answers 20260929-101204-482113-starter-4242
 ```
 
-`naiad queue answers` takes an entry or a Run, as `naiad queue list` names them,
-and prints one numbered block per Question in the order they were asked:
+`naiad queue answers` takes an entry, as `naiad queue list` names it, or a Run
+by its id, and prints one numbered block per Question in the order they were asked:
 
 ```
 naiad queue answers <entry-or-run>
@@ -227,8 +242,10 @@ naiad queue answers <entry-or-run>
 The last line says whose outcome it was. `answerer` is what the Answerer replied.
 `yours` is a Question that reached you, by an escalation or because the Workflow
 gave it to you. Naiad records that it was put to you and never what you typed.
-`abandoned` is a Question the agent walked away from. The output above is an
-example; your Workflow's States and Questions will differ.
+`abandoned` is a Question the agent walked away from. On a terminal the arrow
+and its word are coloured by whose outcome it was, and the output is plain when
+piped or when `NO_COLOR` is set. The output above is an example; your
+Workflow's States and Questions will differ.
 
 ## Reports and notifications
 
@@ -242,8 +259,9 @@ Naiad tells you three kinds of thing:
 
 Each goes down every leg that exists on your machine:
 
-- **Terminal**, always: printed by the `watch` or `queue watch` process. This is
-  the one that is still there in the morning.
+- **Terminal**, always: printed by the `watch` or `queue watch` process, its
+  `naiad:` coloured by the kind of telling on a terminal. This is the one that is
+  still there in the morning.
 - **Desktop**, on macOS only: a banner through `osascript`. There is no desktop
   leg on Linux.
 - **Push**, when `NAIAD_NTFY_URL` is set. This is the only leg that reaches you
@@ -359,7 +377,8 @@ and repairs nothing:
 naiad doctor
 ```
 
-Every line starts with its severity. `fail` means Naiad cannot work, and doctor
+Every line starts with its severity, coloured on a terminal and plain when the
+output is piped or `NO_COLOR` is set. `fail` means Naiad cannot work, and doctor
 exits 1. `warn` means Naiad works but something you expect will not. `info` is
 worth knowing. `naiad install` ends by printing the same report.
 

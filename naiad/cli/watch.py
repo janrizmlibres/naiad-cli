@@ -14,7 +14,10 @@ from __future__ import annotations
 import time
 from collections.abc import Callable
 
-from naiad.cli.terminal import cut, first_clause, terminal_width
+from rich.text import Text
+
+from naiad.cli.style import Styled, say
+from naiad.cli.terminal import first_clause, terminal_width
 from naiad.domain.decide import (
     Action,
     Clear,
@@ -27,6 +30,7 @@ from naiad.domain.decide import (
     Report,
     Respond,
 )
+from naiad.domain.notification import Notification
 from naiad.domain.protocol import DEFAULT_NAIAD
 from naiad.domain.workflow import Workflow
 from naiad.runtime.log import RunLog
@@ -50,7 +54,7 @@ def watch(
     entry_id: str | None = None,
     queue: Queue | None = None,
     sleep: Callable[[float], None] = time.sleep,
-    report: Callable[[str], None] = print,
+    report: Callable[[str], None] = say,
 ) -> Finish | None:
     """Tick until the Run ends, and return the Finish that ended it — or
     nothing at all, if it had already ended before this watch began.
@@ -65,7 +69,7 @@ def watch(
     same one either way.
     """
     if RunLog(run.root).ended():
-        report(f"{run.id} has already ended")
+        report(Styled.assemble((run.id, "id"), " ", ("has already ended", "event.ended")))
         return None
 
     while True:
@@ -98,7 +102,7 @@ def tick_once(
     naiad: str = DEFAULT_NAIAD,
     entry_id: str | None = None,
     queue: Queue | None = None,
-    report: Callable[[str], None] = print,
+    report: Callable[[str], None] = say,
     lead: int = 0,
 ) -> Action:
     """One tick of a Run, narrated. The watch is this in a loop; the
@@ -124,36 +128,102 @@ def tick_once(
     return action
 
 
-def _narrate(action: Action, *, width: int) -> str | None:
+def _narrate(action: Action, *, width: int) -> Styled | None:
     """What the operator watching the terminal is told. Nothing for the ticks
     where nothing happened, which is most of them.
+
+    Each line is led by its verb, styled for what kind of thing happened, and
+    names its State as a State; how each piece is styled is said here, where
+    the line is worded, rather than read back out of the words where it is
+    printed. The words are the same for a reader that sees no styles.
 
     The two lines that carry a Question's or an Answer's words are one line
     cut to width, options dropped and the answer's first clause kept: they run
     long and repeat for every Question, and the Run's Answer log holds the rest
-    (`naiad queue answers`)."""
+    (`naiad queue answers`). They are cut as text, so the styles cost no
+    width."""
     if isinstance(action, Clear):
-        again = "" if action.attempt == 1 else f" again (attempt {action.attempt})"
-        return f"clearing {action.state}{again}"
+        return Styled.assemble(
+            ("clearing", "event.progress"), " ", (action.state, "state"), _again(action.attempt)
+        )
     if isinstance(action, Deliver):
-        again = "" if action.attempt == 1 else f" again (attempt {action.attempt})"
-        return f"delivered {action.state}{again}"
+        return Styled.assemble(
+            ("delivered", "event.progress"), " ", (action.state, "state"), _again(action.attempt)
+        )
     if isinstance(action, Confirm):
-        return f"confirmed {action.state} landed"
+        return Styled.assemble(
+            ("confirmed", "event.progress"), " ", (action.state, "state"), " landed"
+        )
     if isinstance(action, Consult):
-        return cut(f"consulting the answerer: {_one_line(action.question.text)}", width)
+        return _cut(
+            Text.assemble(
+                ("consulting the answerer:", "event.attention"),
+                f" {_one_line(action.question.text)}",
+            ),
+            width,
+        )
     if isinstance(action, Respond):
-        return cut(f"answered: {_one_line(first_clause(action.answer))}", width)
+        return _cut(
+            Text.assemble(
+                ("answered:", "event.attention"), f" {_one_line(first_clause(action.answer))}"
+            ),
+            width,
+        )
     if isinstance(action, Nudge):
-        expired = "" if action.expired_wait is None else f" after its wait on '{action.expired_wait}' expired"
-        return f"nudged the agent ({action.attempt}){expired}"
+        expired = (
+            ""
+            if action.expired_wait is None
+            else f" after its wait on '{action.expired_wait}' expired"
+        )
+        return Styled.assemble(
+            ("nudged the agent", "event.attention"), f" ({action.attempt}){expired}"
+        )
     if isinstance(action, Notify):
-        return f"notified: {action.reason}"
+        return Styled.assemble(("notified:", "event.attention"), f" {action.reason}")
     if isinstance(action, Report):
-        return f"reported entering {action.state}"
+        return Styled.assemble(
+            ("reported entering", "event.progress"), " ", (action.state, "state")
+        )
     if isinstance(action, Finish):
-        return f"finished at {action.state}"
+        return Styled.assemble(("finished at", "event.ended"), " ", (action.state, "state"))
     return None
+
+
+# A telling's `naiad:` by what kind of telling it is, in the narration's
+# styles: a person needed, the work over, or a State entered.
+_TOLD = {
+    Notification.NOTIFY: "event.attention",
+    Notification.FINISH: "event.ended",
+    Notification.REPORT: "event.progress",
+}
+
+
+def told(title: str, message: str, kind: Notification) -> Styled:
+    """A telling as the terminal leg prints it: the title and the message the
+    banner and the phone are given, with the Run the title names styled as an
+    id."""
+    prefix, _, run_id = title.partition(": ")
+    if not run_id:
+        return Styled.assemble(title, f": {message}")
+    return Styled.assemble((prefix + ":", _TOLD[kind]), " ", (run_id, "id"), f": {message}")
+
+
+def tell(title: str, message: str, kind: Notification) -> None:
+    """The terminal leg's writer: a telling on stderr, styled at a terminal."""
+    say(told(title, message, kind), stderr=True)
+
+
+def _cut(text: Text, width: int) -> Styled:
+    """The line as it fits in width columns: whole when it fits, otherwise
+    truncated with an ellipsis in the last of them, measured in cells."""
+    text.truncate(width, overflow="ellipsis")
+    return Styled(text)
+
+
+def _again(attempt: int) -> tuple[str, str] | str:
+    """A retry said aside: the line is about the State, and the count is only
+    which try this was."""
+    return "" if attempt == 1 else (f" again (attempt {attempt})", "secondary")
 
 
 def _one_line(text: str) -> str:
@@ -162,4 +232,4 @@ def _one_line(text: str) -> str:
     return " ".join(text.split())
 
 
-__all__ = ["TICK_SECONDS", "tick_once", "watch"]
+__all__ = ["TICK_SECONDS", "tell", "tick_once", "told", "watch"]

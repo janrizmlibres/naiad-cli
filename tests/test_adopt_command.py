@@ -15,6 +15,7 @@ from naiad.adapters.lock import SupervisorLock
 from naiad.cli.main import main
 from naiad.domain.entry import Attachment
 from naiad.domain.settings import StateSetting
+from naiad.domain.short_ids import short_ids
 from naiad.runtime.queue import Queue
 from naiad.runtime.run import RunStore
 
@@ -234,7 +235,7 @@ def test_an_adoption_is_listed_like_any_other_entry(home, repo, capsys):
     assert main(["queue", "list"]) == 0
 
     printed = capsys.readouterr().out
-    assert queued.id in printed
+    assert short_ids([queued.id])[queued.id] in printed
     assert "the audit log design" in printed
 
 
