@@ -12,6 +12,7 @@ from pathlib import Path
 
 import pytest
 
+from fake_terminal import ESCAPE, to_terminal
 from naiad.adapters.lock import SupervisorLock
 from naiad.cli.main import _run_id, build_parser, main
 
@@ -265,3 +266,62 @@ def test_run_ids_of_concurrent_runs_differ():
 
     assert same_second != "20260719-120000-w"
     assert same_second.rsplit("-", 1)[-1].isdigit()
+
+
+# Refusals. Every command refuses in one shape, `naiad: ` and what was refused,
+# and an agent reads the refusals of the verbs it types; so the words are held
+# whole off a terminal and only the prefix is styled at one. A hook's complaint
+# goes to the hook's own output and is left plain everywhere.
+
+
+@pytest.fixture
+def unattached(monkeypatch):
+    """A shell that no Run is attached to."""
+    for variable in ("NAIAD_RUN_ID", "TMUX_PANE"):
+        monkeypatch.delenv(variable, raising=False)
+
+
+def test_an_agent_verbs_refusal_off_a_terminal_is_its_words_alone(unattached, capsys):
+    assert main(["announce", "grill"]) == 2
+
+    assert capsys.readouterr().err == "naiad: no run is attached to this session\n"
+
+
+def test_an_agent_verbs_refusal_is_coloured_only_at_a_terminal(unattached, monkeypatch):
+    terminal = to_terminal(monkeypatch, stream="stderr")
+
+    assert main(["announce", "grill"]) == 2
+
+    printed = terminal.getvalue()
+    assert ESCAPE in printed
+    assert printed.endswith(" no run is attached to this session\n")
+
+
+def test_an_operators_refusal_is_coloured_at_a_terminal(monkeypatch):
+    terminal = to_terminal(monkeypatch, stream="stderr")
+
+    assert main(["queue", "rm", "nothing-by-this-name"]) == 2
+
+    assert ESCAPE in terminal.getvalue()
+    assert "nothing-by-this-name" in terminal.getvalue()
+
+
+def test_an_authors_refusal_is_coloured_at_a_terminal(monkeypatch):
+    terminal = to_terminal(monkeypatch, stream="stderr")
+
+    assert main(["state", "list", "no-such-workflow"]) == 2
+
+    assert ESCAPE in terminal.getvalue()
+
+
+def test_a_hooks_complaint_stays_plain_at_a_terminal(monkeypatch, tmp_path):
+    queue = tmp_path / "naiad" / "queue"
+    queue.mkdir(parents=True)
+    (queue / "damaged.json").write_text("{ not json")
+    monkeypatch.setenv("NAIAD_HOME", str(tmp_path / "naiad"))
+    terminal = to_terminal(monkeypatch, stream="stderr")
+
+    assert main(["stopped"]) == 0
+
+    assert terminal.getvalue().startswith("naiad: ")
+    assert ESCAPE not in terminal.getvalue()

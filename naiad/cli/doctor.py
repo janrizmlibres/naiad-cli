@@ -98,9 +98,7 @@ def entrance_refusal() -> Styled | None:
     failure = first_failure()
     if failure is None:
         return None
-    return Styled(
-        refusal(f"{failure.what} — {failure.why}; {failure.fix}, then run `naiad doctor`")
-    )
+    return refusal(f"{failure.what} — {failure.why}; {failure.fix}, then run `naiad doctor`")
 
 
 def render_report(findings: list[Finding]) -> Styled:

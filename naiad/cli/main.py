@@ -57,7 +57,7 @@ from naiad.cli.kickoff import start_entry
 from naiad.cli.protocol import injection_for, standing_in
 from naiad.cli.refusals import ADD_COMMAND, ADOPT_COMMAND, RUN_COMMAND, Remedy
 from naiad.cli.spawn import SpawnError, spawn_child
-from naiad.cli.style import ABSENT, Styled, columns, console, say, status, styled
+from naiad.cli.style import ABSENT, Styled, columns, console, refuse, say, status, styled
 from naiad.cli.supervisor import supervise_queue
 from naiad.cli.terminal import terminal_width
 from naiad.cli.wait import WaitError, declare_wait
@@ -649,7 +649,7 @@ def _ceiling(arguments: argparse.Namespace) -> int | None:
             total_memory=Machine().total_memory,
         )
     except CapacityError as error:
-        print(f"naiad: {error}", file=sys.stderr)
+        refuse(error)
         return None
 
 
@@ -690,7 +690,7 @@ def _announce(arguments: argparse.Namespace) -> int:
         )
         reply = announcement_reply(announcement, run=run)
     except FAILURES as error:
-        print(f"naiad: {error}", file=sys.stderr)
+        refuse(error)
         return 2
 
     print(reply, end="")
@@ -707,7 +707,7 @@ def _ask(arguments: argparse.Namespace) -> int:
             arguments.question, options=arguments.options or [], run=run
         )
     except FAILURES as error:
-        print(f"naiad: {error}", file=sys.stderr)
+        refuse(error)
         return 2
 
     print(f"asked ({announcement.seq}); the answer will arrive in this session")
@@ -721,7 +721,7 @@ def _wait(arguments: argparse.Namespace) -> int:
             arguments.reason, run=run, now=time.time(), seconds=arguments.seconds
         )
     except FAILURES as error:
-        print(f"naiad: {error}", file=sys.stderr)
+        refuse(error)
         return 2
 
     # The granted number is said back because a claim past the remaining
@@ -739,7 +739,7 @@ def _hold(arguments: argparse.Namespace) -> int:
         run = _current_run()
         declare_hold(arguments.reason, run=run)
     except FAILURES as error:
-        print(f"naiad: {error}", file=sys.stderr)
+        refuse(error)
         return 2
 
     # No granted number to say back: a Hold has no clock. What the agent must
@@ -761,7 +761,7 @@ def _branch(arguments: argparse.Namespace) -> int:
             runs=RunStore(default_runs_root()),
         )
     except FAILURES as error:
-        print(f"naiad: {error}", file=sys.stderr)
+        refuse(error)
         return 2
 
     print(f"declared working branch '{arguments.name}'; this run's work belongs on it")
@@ -800,7 +800,7 @@ def _spawn(arguments: argparse.Namespace) -> int:
             created_at=_timestamp(added),
         )
     except FAILURES as error:
-        print(f"naiad: {error}", file=sys.stderr)
+        refuse(error)
         return 2
 
     _report(entry)
@@ -842,6 +842,8 @@ def _stopped(arguments: argparse.Namespace) -> int:
         latest = Announcements(recipient.root).latest()
         Turns(recipient.root).record_end(latest_seq=latest.seq if latest else None)
     except FAILURES as error:
+        # Printed plain rather than refused: a hook's stderr goes to Claude
+        # Code rather than to a terminal, and its words are a hook's contract.
         print(f"naiad: {error}", file=sys.stderr)
     return 0
 
@@ -965,7 +967,7 @@ def _install(arguments: argparse.Namespace) -> int:
     changes install's exit code: that is install's own outcome.
     """
     if arguments.force and not arguments.starter:
-        print("naiad: --force applies to --starter, and --starter was not given", file=sys.stderr)
+        refuse("--force applies to --starter, and --starter was not given")
         return 2
 
     try:
@@ -977,7 +979,7 @@ def _install(arguments: argparse.Namespace) -> int:
             starter = install_starter(library=default_library_root(), force=arguments.force)
             say(_installed("the starter workflow", starter))
     except (OSError, ValueError) as error:
-        print(f"naiad: {error}", file=sys.stderr)
+        refuse(error)
         return 2
     finally:
         # After what install did or refused to do, and never changing its exit
@@ -1025,10 +1027,9 @@ def _watch(arguments: argparse.Namespace) -> int:
         return 2
 
     if SupervisorLock(default_lock_path()).held():
-        print(
-            "naiad: a supervisor is already driving the queue's live run; "
+        refuse(
+            "a supervisor is already driving the queue's live run; "
             "a second watch would deliver everything twice",
-            file=sys.stderr,
         )
         return 2
 
@@ -1036,7 +1037,7 @@ def _watch(arguments: argparse.Namespace) -> int:
         run = _named_run(arguments.run_id) if arguments.run_id else _current_run()
         _drive(run)
     except FAILURES as error:
-        print(f"naiad: {error}", file=sys.stderr)
+        refuse(error)
         return 2
     except KeyboardInterrupt:
         # The operator giving up on a Run that has not ended. The session is
@@ -1202,17 +1203,15 @@ def _queue_add(arguments: argparse.Namespace) -> int:
         if arguments.model or arguments.effort:
             # Its own refusal, because the one below sends the option into the
             # file, and a batch file has no key for a setting.
-            print(
-                "naiad: --model and --effort name settings for one entry, and a batch "
+            refuse(
+                "--model and --effort name settings for one entry, and a batch "
                 "file cannot name them; queue that entry on its own or drop --file",
-                file=sys.stderr,
             )
             return 2
         if _describes_one_entry(arguments):
-            print(
-                "naiad: --file describes the work itself, so the options that "
+            refuse(
+                "--file describes the work itself, so the options that "
                 "describe one entry belong in the file; drop them or drop --file",
-                file=sys.stderr,
             )
             return 2
         return _queued_from_file(arguments)
@@ -1223,11 +1222,10 @@ def _queue_add(arguments: argparse.Namespace) -> int:
         # instead. A missing task is not refused here — a given Subject stands
         # in for it, and which of the two must be present is the enqueue's one
         # check to make.
-        print(
-            "naiad: no workflow was given, and no batch file either; "
+        refuse(
+            "no workflow was given, and no batch file either; "
             "try: naiad queue add <workflow> <task>, "
             "or naiad queue add --file <batch.toml>",
-            file=sys.stderr,
         )
         return 2
 
@@ -1254,7 +1252,7 @@ def _adopt(arguments: argparse.Namespace) -> int:
         # nowhere would only defer the refusal to a moment nobody is at.
         attachment = attachment_in(os.environ)
     except FAILURES as error:
-        print(f"naiad: {error}", file=sys.stderr)
+        refuse(error)
         return 2
 
     entry = _queued(arguments, remedy=ADOPT_COMMAND, attachment=attachment)
@@ -1315,7 +1313,7 @@ def _print_workflow(
             resolve_workflow(argument, library=library or default_library_root())
         )
     except (*FAILURES, WorkflowError) as error:
-        print(f"naiad: {error}", file=sys.stderr)
+        refuse(error)
         return 2
 
     show(render(workflow))
@@ -1346,7 +1344,7 @@ def _workflow_new(arguments: argparse.Namespace) -> int:
             arguments.name, library=default_library_root(), source=arguments.source
         )
     except (*FAILURES, WorkflowError) as error:
-        print(f"naiad: {error}", file=sys.stderr)
+        refuse(error)
         return 2
 
     say(Styled.assemble("created ", (workflow.name, "workflow"), f": {path}"))
@@ -1372,7 +1370,7 @@ def _workflow_set(arguments: argparse.Namespace) -> int:
         path = resolve_workflow(arguments.workflow, library=default_library_root())
         edit_workflow(path, lambda document: set_file_key(document, arguments.key, value))
     except (*FAILURES, WorkflowError) as error:
-        print(f"naiad: {error}", file=sys.stderr)
+        refuse(error)
         return 2
 
     say(Styled.assemble((path.stem, "workflow"), f": {arguments.key} = {value}"))
@@ -1388,7 +1386,7 @@ def _workflow_unset(arguments: argparse.Namespace) -> int:
             path, lambda document: removed.append(unset_file_key(document, arguments.key))
         )
     except (*FAILURES, WorkflowError) as error:
-        print(f"naiad: {error}", file=sys.stderr)
+        refuse(error)
         return 2
 
     said = "removed" if removed == [True] else "was not set"
@@ -1405,7 +1403,7 @@ def _workflow_rm(arguments: argparse.Namespace) -> int:
             runs=RunStore(default_runs_root()),
         )
     except (*FAILURES, WorkflowError) as error:
-        print(f"naiad: {error}", file=sys.stderr)
+        refuse(error)
         return 2
 
     print(f"removed {path}")
@@ -1422,7 +1420,7 @@ def _workflow_rename(arguments: argparse.Namespace) -> int:
             runs=RunStore(default_runs_root()),
         )
     except (*FAILURES, WorkflowError) as error:
-        print(f"naiad: {error}", file=sys.stderr)
+        refuse(error)
         return 2
 
     say(
@@ -1504,7 +1502,7 @@ def _queued_from_file(arguments: argparse.Namespace) -> int:
             source=str(path),
         )
     except FAILURES as error:
-        print(f"naiad: {error}", file=sys.stderr)
+        refuse(error)
         return 2
 
     for entry in entries:
@@ -1558,7 +1556,7 @@ def _queued(
             remedy=remedy,
         )
     except FAILURES as error:
-        print(f"naiad: {error}", file=sys.stderr)
+        refuse(error)
         return None
 
     _report(entry)
@@ -1594,7 +1592,7 @@ def _queue_list(arguments: argparse.Namespace) -> int:
     except FAILURES as error:
         # An Entry file the operator has damaged. They can see these files, so
         # they can break one, and a traceback is not something they can act on.
-        print(f"naiad: {error}", file=sys.stderr)
+        refuse(error)
         return 2
 
     out = console()
@@ -1734,10 +1732,9 @@ def _queue_watch(arguments: argparse.Namespace) -> int:
 
     with SupervisorLock(default_lock_path()).taken() as mine:
         if not mine:
-            print(
-                "naiad: a supervisor is already running, and only one may drive "
+            refuse(
+                "a supervisor is already running, and only one may drive "
                 "the queue; queue work with `naiad run` or `naiad queue add` instead",
-                file=sys.stderr,
             )
             return 2
         return _supervise(following=True, ceiling=ceiling)
@@ -1766,7 +1763,7 @@ def _supervise(*, following: bool, ceiling: int) -> int:
             machine=Machine(),
         )
     except FAILURES as error:
-        print(f"naiad: {error}", file=sys.stderr)
+        refuse(error)
         return 2
     except KeyboardInterrupt:
         # The operator stopping the night. The Queue is on disk and every
@@ -1816,14 +1813,13 @@ def _queue_answers(arguments: argparse.Namespace) -> int:
             return 0
         run = runs.load(run_id) if run_id is not None else None
     except FAILURES as error:
-        print(f"naiad: {error}", file=sys.stderr)
+        refuse(error)
         return 2
 
     if run is None:
-        print(
-            f"naiad: no entry '{named}' in the queue at {default_queue_root()}, "
+        refuse(
+            f"no entry '{named}' in the queue at {default_queue_root()}, "
             f"and no run under {default_runs_root()}",
-            file=sys.stderr,
         )
         return 2
 
@@ -1847,13 +1843,12 @@ def _queue_rm(arguments: argparse.Namespace) -> int:
         # The ending goes first, so a Run that would not take it leaves the
         # Entry in the Queue rather than orphaning a Run that still drives its
         # session.
-        print(f"naiad: {error}", file=sys.stderr)
+        refuse(error)
         return 2
 
     if cancelled is None:
-        print(
-            f"naiad: no entry '{arguments.entry_id}' in the queue at {default_queue_root()}",
-            file=sys.stderr,
+        refuse(
+            f"no entry '{arguments.entry_id}' in the queue at {default_queue_root()}",
         )
         return 2
 
@@ -1900,7 +1895,7 @@ def _queue_prune(arguments: argparse.Namespace) -> int:
         pruned = prune(Queue(default_queue_root()), RunStore(default_runs_root()))
     except FAILURES as error:
         # A damaged Entry, met before anything was deleted.
-        print(f"naiad: {error}", file=sys.stderr)
+        refuse(error)
         return 2
 
     if not (pruned.removed or pruned.orphans or pruned.skipped or pruned.failures):
@@ -1934,7 +1929,7 @@ def _queue_prune(arguments: argparse.Namespace) -> int:
         )
 
     for failure in pruned.failures:
-        print(f"naiad: {failure}", file=sys.stderr)
+        refuse(failure)
     return 2 if pruned.failures else 0
 
 

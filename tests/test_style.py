@@ -12,7 +12,18 @@ from typing import get_args
 from rich.text import Text
 
 from fake_terminal import ESCAPE, styles_of, to_terminal
-from naiad.cli.style import GLYPHS, THEME, Styled, columns, console, refusal, say, status, styled
+from naiad.cli.style import (
+    GLYPHS,
+    THEME,
+    Styled,
+    columns,
+    console,
+    refusal,
+    refuse,
+    say,
+    status,
+    styled,
+)
 from naiad.runtime.queue import Status
 
 
@@ -222,3 +233,20 @@ def test_a_line_assembled_from_pieces_keeps_every_character_of_its_words(capsys)
     assert line == "queued in /tmp/odd\rname"
     say(line)
     assert capsys.readouterr().out == "queued in /tmp/odd\rname\n"
+
+
+def test_a_refusal_off_a_terminal_is_naiad_and_its_words(capsys):
+    refuse("no entry 'a\tb' in the queue")
+
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert captured.err == "naiad: no entry 'a\tb' in the queue\n"
+
+
+def test_a_refusal_at_a_terminal_styles_its_naiad(monkeypatch):
+    terminal = to_terminal(monkeypatch, stream="stderr")
+
+    refuse("no entry 'x' in the queue")
+
+    assert ESCAPE in terminal.getvalue()
+    assert styles_of(refusal("no entry 'x' in the queue")) == {"naiad:": "refusal"}

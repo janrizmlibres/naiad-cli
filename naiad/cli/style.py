@@ -181,10 +181,17 @@ def status(word: Status) -> Text:
     return Text(f"{GLYPHS[word]} {word}", style=f"status.{word}")
 
 
-def refusal(message: str) -> Text:
+def refusal(message: str) -> Styled:
     """A refusal as every command words it, `naiad: ` and then what was refused,
     with the prefix marked so the eye finds it among a Supervisor's lines."""
-    return Text.assemble(("naiad:", "refusal"), " ", message)
+    return Styled.assemble(("naiad:", "refusal"), " ", message)
+
+
+def refuse(message: object) -> None:
+    """Say a refusal on stderr: its `naiad:` styled at a terminal, and off one
+    the very words a refusal has always been, since an agent reads the
+    refusals of the verbs it types and matches on them."""
+    say(refusal(str(message)), stderr=True)
 
 
 class Styled(str):
@@ -259,6 +266,7 @@ __all__ = [
     "columns",
     "console",
     "refusal",
+    "refuse",
     "say",
     "status",
     "styled",

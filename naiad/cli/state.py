@@ -20,7 +20,7 @@ from rich.text import Text
 from naiad.adapters.editor import EditorError, edit_text
 from naiad.cli.library import LibraryError, resolve_workflow
 from naiad.cli.picker import pick_states
-from naiad.cli.style import Styled, say
+from naiad.cli.style import Styled, refuse, say
 from naiad.cli.terminal import terminal_width
 from naiad.cli.workflow_view import render_state, render_state_list
 from naiad.domain.key_table import (
@@ -76,7 +76,7 @@ def _refusing(action: Handler) -> Handler:
         try:
             return action(arguments)
         except FAILURES as error:
-            print(f"naiad: {error}", file=sys.stderr)
+            refuse(error)
             return 2
 
     return guarded
