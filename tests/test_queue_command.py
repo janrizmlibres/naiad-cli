@@ -10,11 +10,13 @@ import re
 import time
 
 import pytest
+from rich.text import Text
 
+from fake_terminal import ESCAPE, to_terminal
 from naiad.adapters.lock import SupervisorLock
 from naiad.cli.hold import declare_hold
 from naiad.cli.main import _drive, _ticker, main
-from naiad.cli.style import GLYPHS
+from naiad.cli.style import GLYPHS, Styled
 from naiad.cli.wait import declare_wait
 from naiad.domain.decide import NUDGE_LIMIT, SILENCE_SECONDS, Finish, Notify
 from naiad.domain.entry import Entry
@@ -1705,6 +1707,47 @@ def test_a_supervised_tick_names_the_entry_and_leaves_room_for_the_run_prefix(
 
     assert ticked["entry_id"] == "night"
     assert ticked["lead"] == len(f"{run.id}  ")
+
+
+CLEARING = Styled(Text.assemble(("clearing", "event.progress"), " ", ("grill", "state")))
+
+
+def test_a_supervised_tick_says_each_line_after_the_run_it_belongs_to(
+    home, repo, monkeypatch, capsys
+):
+    run = run_entry(home, repo, "night")
+    ticked = {}
+    monkeypatch.setattr("naiad.cli.main.tick_once", lambda **arguments: ticked.update(arguments))
+    _ticker()(run)
+    assert capsys.readouterr().out == f"watching {run.id}   (tmux attach -t {run.tmux_session})\n"
+
+    ticked["report"](CLEARING)
+
+    assert capsys.readouterr().out == f"{run.id}  clearing grill\n"
+
+
+def test_a_supervised_tick_keeps_the_lines_styles_at_a_terminal(home, repo, monkeypatch):
+    run = run_entry(home, repo, "night")
+    ticked = {}
+    monkeypatch.setattr("naiad.cli.main.tick_once", lambda **arguments: ticked.update(arguments))
+    terminal = to_terminal(monkeypatch)
+
+    _ticker()(run)
+    ticked["report"](CLEARING)
+
+    lines = terminal.getvalue().splitlines()
+    assert len(lines) == 2
+    assert all(ESCAPE in line for line in lines)
+
+
+def test_watching_one_run_says_where_to_attach_styled_at_a_terminal(home, repo, monkeypatch):
+    run = run_entry(home, repo, "night")
+    monkeypatch.setattr("naiad.cli.main.watch", lambda **arguments: None)
+    terminal = to_terminal(monkeypatch)
+
+    _drive(run)
+
+    assert ESCAPE in terminal.getvalue()
 
 
 def test_a_watched_run_that_was_queued_names_its_entry_to_the_loop(home, repo, monkeypatch):

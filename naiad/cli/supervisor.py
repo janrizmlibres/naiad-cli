@@ -28,6 +28,7 @@ from collections.abc import Callable, Sequence
 from pathlib import Path
 from typing import Protocol, assert_never
 
+from naiad.cli.style import Styled, say
 from naiad.domain.capacity import DISK_FLOOR, DISK_SHARE, GB, Disk, low_on_disk
 from naiad.domain.entry import Entry
 from naiad.domain.supervise import (
@@ -75,7 +76,7 @@ def supervise_queue(
     tick: Callable[[Run], None],
     following: bool,
     sleep: Callable[[float], None] = time.sleep,
-    report: Callable[[str], None] = print,
+    report: Callable[[str], None] = say,
     ceiling: int | None = None,
     machine: MachineReading | None = None,
 ) -> None:
@@ -122,7 +123,7 @@ def supervise_queue(
             sleep(POLL_SECONDS)
             continue
         if isinstance(scanned, Drained):
-            report("the queue is drained")
+            report(Styled.assemble(("the queue is drained", "event.ended")))
             return
 
         reason = next(
@@ -137,7 +138,7 @@ def supervise_queue(
                 continue
             if isinstance(action, Start):
                 entry = action.entry
-                report(f"starting {entry.id}: {entry.task}")
+                report(_taking("starting", entry))
                 run = start(entry, action.predecessor)
                 # A Child needs no rule of its own to start, its working tree
                 # being a Lane of its own; what is owed is the Run it became,
@@ -169,7 +170,7 @@ def supervise_queue(
                 run = _run_of(entry, runs)
                 if run.id not in announced:
                     announced.add(run.id)
-                    report(f"resuming {entry.id}: {entry.task}")
+                    report(_taking("resuming", entry))
                 tick(run)
             else:
                 # Named rather than left to fall through, so that an Action
@@ -203,15 +204,27 @@ def _low_disk(entries: Sequence[Entry], machine: MachineReading | None) -> set[P
     }
 
 
-def _held_back(reason: Reason, *, ceiling: int | None) -> str:
+def _taking(verb: str, entry: Entry) -> Styled:
+    """The operator's line for an Entry the Supervisor is taking up: what it
+    is doing, which Entry, and the work."""
+    return Styled.assemble((verb, "event.progress"), " ", (entry.id, "id"), f": {entry.task}")
+
+
+def _held_back(reason: Reason, *, ceiling: int | None) -> Styled:
     """The operator's line for why nothing is starting."""
+    return Styled.assemble(
+        ("not starting anything:", "event.attention"), " ", _why_held_back(reason, ceiling)
+    )
+
+
+def _why_held_back(reason: Reason, ceiling: int | None) -> str:
     if reason == CEILING:
-        return f"not starting anything: the ceiling of {ceiling} live runs is reached"
+        return f"the ceiling of {ceiling} live runs is reached"
     if reason == MEMORY:
-        return "not starting anything: the machine reports memory under pressure"
+        return "the machine reports memory under pressure"
     if reason == DISK:
         return (
-            "not starting anything: free disk where the waiting runs would work is "
+            "free disk where the waiting runs would work is "
             f"below the larger of {DISK_SHARE:.0%} and {DISK_FLOOR // GB} GB"
         )
     assert_never(reason)

@@ -7,31 +7,13 @@ same characters with no escape codes among them. NO_COLOR is the operator
 saying they want none, and it wins over everything.
 """
 
-import io
-import sys
 from typing import get_args
 
 from rich.text import Text
 
-from naiad.cli.style import GLYPHS, THEME, columns, console, refusal, status
+from fake_terminal import ESCAPE, styles_of, to_terminal
+from naiad.cli.style import GLYPHS, THEME, Styled, columns, console, refusal, say, status, styled
 from naiad.runtime.queue import Status
-
-ESCAPE = "\x1b["
-
-
-class Terminal(io.StringIO):
-    """A stream that says it is a terminal, as the operator's is."""
-
-    def isatty(self):
-        return True
-
-
-def to_terminal(monkeypatch):
-    """Stdout replaced by a terminal. Called inside the test rather than as a
-    fixture, because the capture resets stdout between a fixture and the test."""
-    stream = Terminal()
-    monkeypatch.setattr(sys, "stdout", stream)
-    return stream
 
 
 def test_output_that_is_not_a_terminal_carries_no_escape_codes(capsys):
@@ -158,3 +140,47 @@ def test_columns_are_measured_in_cells_and_keep_their_styles():
     assert plain(lines) == ["名前  TASK", "漢字  done"]
     assert any(span.style == "state" for span in lines[1].spans)
     assert any(span.style == "status.done" for span in lines[1].spans)
+
+
+def test_a_styled_line_reads_as_its_words_to_anything_that_reads_text():
+    """A test's list, a log and `print` take a line as text; only the terminal
+    is shown its styles."""
+    line = Styled(Text.assemble(("starting", "event.progress"), " ", ("51695", "id")))
+
+    assert isinstance(line, str)
+    assert line == "starting 51695"
+    assert styles_of(line) == {"starting": "event.progress", "51695": "id"}
+
+
+def test_a_line_nobody_styled_is_shown_as_its_words():
+    shown = styled("the queue is drained")
+
+    assert shown.plain == "the queue is drained"
+    assert shown.spans == []
+
+
+def test_a_said_line_is_plain_off_a_terminal(capsys):
+    say(Styled(Text("starting", style="event.progress")))
+
+    assert capsys.readouterr().out == "starting\n"
+
+
+def test_a_said_line_is_coloured_at_a_terminal(monkeypatch):
+    terminal = to_terminal(monkeypatch)
+
+    say(Styled(Text("starting", style="event.progress")))
+
+    assert ESCAPE in terminal.getvalue()
+
+
+def test_a_line_said_to_stderr_goes_to_stderr(capsys):
+    say("naiad: refused", stderr=True)
+
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert captured.err == "naiad: refused\n"
+
+
+def test_every_kind_of_event_has_a_style_of_its_own():
+    for kind in ("progress", "attention", "ended"):
+        assert f"event.{kind}" in THEME.styles

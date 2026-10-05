@@ -1,6 +1,7 @@
-"""What fits on the operator's screen: the width a line is cut to, and the cut."""
+"""What fits on the operator's screen: the width a line is cut to, and the clause
+of an answer it keeps."""
 
-from naiad.cli.terminal import cut, first_clause, terminal_width
+from naiad.cli.terminal import first_clause, terminal_width
 
 
 def test_a_terminal_reports_its_own_width(monkeypatch):
@@ -14,17 +15,6 @@ def test_a_piped_output_is_eighty_columns_wide(monkeypatch):
     monkeypatch.delenv("COLUMNS", raising=False)
 
     assert terminal_width() == 80
-
-
-def test_a_line_that_fits_is_left_alone():
-    assert cut("answered: the client", 80) == "answered: the client"
-
-
-def test_a_line_cut_to_the_width_ends_in_an_ellipsis_and_fills_no_more_than_it():
-    cut_line = cut("a" * 100, 40)
-
-    assert len(cut_line) == 40
-    assert cut_line.endswith("…")
 
 
 def test_the_first_clause_of_an_answer_stops_at_the_first_punctuation():

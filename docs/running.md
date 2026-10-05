@@ -125,8 +125,10 @@ names a State the Workflow lacks, a Gate, a Terminal State, or one State twice.
 ## Watching and attaching
 
 Leave `queue watch` running in a terminal. It prints what happens to each Run,
-and every notification that fires also lands there, so it is the record of a
-night's work. Interrupt it with `C-c`. Nothing is lost: the records are on disk,
+one line per event after the Run's id, and every notification that fires also
+lands there, so it is the record of a night's work. On a terminal each line's
+leading verb is coloured by kind: work going ahead, something worth a look (a
+nudge, a Question put to the Answerer, nothing starting), or an ending. Interrupt it with `C-c`. Nothing is lost: the records are on disk,
 and a new `queue watch` picks the queue up again.
 
 Each Run has one tmux session, named `naiad-` and the Run's id, opened in the

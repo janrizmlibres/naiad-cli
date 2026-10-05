@@ -23,8 +23,7 @@ palette lives in one place.
 Width is measured on the text, never on what is printed: an escape code takes
 bytes and no columns. Build a line as plain strings or a rich `Text` (whose
 `cell_len` counts columns, a wide character as two), cut and pad it there, and
-style it last. naiad.cli.terminal's `cut` counts characters, which is the same
-measure for the text Naiad prints today. A Console made here never wraps or
+style it last. A Console made here never wraps or
 crops a line itself: a line is cut to the width before it is printed, and one
 the reader needs whole — a path, an id — must not be broken by a second wrap.
 """
@@ -76,6 +75,13 @@ THEME = Theme(
         "severity.info": "blue",
         # The `naiad:` that opens a refusal.
         "refusal": "bold red",
+        # The verb that leads a line of a Run's narration, by what kind of
+        # thing happened: the work going ahead, something the operator may
+        # want to look at (an agent gone quiet, a Question put to the
+        # Answerer, the Supervisor holding back), and an ending.
+        "event.progress": "green",
+        "event.attention": "bold yellow",
+        "event.ended": "bold green",
     }
 )
 
@@ -159,9 +165,57 @@ def refusal(message: str) -> Text:
     return Text.assemble(("naiad:", "refusal"), " ", message)
 
 
+class Styled(str):
+    """A line as its words, carrying the same words styled for a terminal.
+
+    A str, so that whatever takes a line as text takes this one unchanged: a
+    test's list, a log, `print`, a reader matching on its words. Only `say`
+    looks for the styles, and a line that went through anything else — sliced,
+    joined, formatted — is plain words again, which is never wrong, only
+    undecorated.
+    """
+
+    text: Text
+
+    def __new__(cls, text: Text) -> Styled:
+        line = super().__new__(cls, text.plain)
+        line.text = text
+        return line
+
+    @classmethod
+    def assemble(cls, *pieces: str | tuple[str, str] | Text) -> Styled:
+        """A line from its pieces in order, each plain, a Text, or words with
+        the name of their style."""
+        return cls(Text.assemble(*pieces))
+
+
+def styled(line: str) -> Text:
+    """A line as a terminal is shown it: its styles where it carries them,
+    its words alone where it does not."""
+    return line.text.copy() if isinstance(line, Styled) else Text(line)
+
+
+def say(line: str, *, stderr: bool = False) -> None:
+    """Print one line, styled only where the stream is a terminal."""
+    console(stderr=stderr).print(styled(line))
+
+
 def _no_color() -> bool:
     """Whether the operator asked for no colour. Any value but empty asks."""
     return os.environ.get("NO_COLOR", "") != ""
 
 
-__all__ = ["ABSENT", "GAP", "GLYPHS", "LEAST", "THEME", "columns", "console", "refusal", "status"]
+__all__ = [
+    "ABSENT",
+    "GAP",
+    "GLYPHS",
+    "LEAST",
+    "THEME",
+    "Styled",
+    "columns",
+    "console",
+    "refusal",
+    "say",
+    "status",
+    "styled",
+]

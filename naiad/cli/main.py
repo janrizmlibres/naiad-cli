@@ -57,7 +57,7 @@ from naiad.cli.kickoff import start_entry
 from naiad.cli.protocol import injection_for, standing_in
 from naiad.cli.refusals import ADD_COMMAND, ADOPT_COMMAND, RUN_COMMAND, Remedy
 from naiad.cli.spawn import SpawnError, spawn_child
-from naiad.cli.style import ABSENT, columns, console, status
+from naiad.cli.style import ABSENT, Styled, columns, console, say, status, styled
 from naiad.cli.supervisor import supervise_queue
 from naiad.cli.terminal import terminal_width
 from naiad.cli.wait import WaitError, declare_wait
@@ -1047,7 +1047,7 @@ def _drive(run: Run) -> None:
     # The line the operator needs to look in on the work, printed where the Run
     # is driven rather than where it was queued: an Entry queued tonight is
     # started hours later, and the session it names does not exist until then.
-    print(f"watching {run.id}   (tmux attach -t {run.tmux_session})")
+    say(_watching(run))
     watch(
         run=run,
         workflow=load_workflow(run.workflow_path),
@@ -1090,7 +1090,7 @@ def _ticker() -> Callable[[Run], None]:
     def tick_run(run: Run) -> None:
         if run.id not in watching:
             watching.add(run.id)
-            print(f"watching {run.id}   (tmux attach -t {run.tmux_session})")
+            say(_watching(run))
         tick_once(
             run=run,
             workflow=load_workflow(run.workflow_path),
@@ -1100,11 +1100,24 @@ def _ticker() -> Callable[[Run], None]:
             naiad=naiad,
             entry_id=_entry_id_of(run),
             queue=Queue(default_queue_root()),
-            report=lambda message: print(f"{run.id}  {message}"),
+            report=lambda message: say(
+                Styled.assemble((f"{run.id}  ", "secondary"), styled(message))
+            ),
             lead=len(f"{run.id}  "),
         )
 
     return tick_run
+
+
+def _watching(run: Run) -> Styled:
+    """The line saying a Run is being driven, and the command that looks in on
+    its session."""
+    return Styled.assemble(
+        ("watching", "event.progress"),
+        " ",
+        (run.id, "id"),
+        (f"   (tmux attach -t {run.tmux_session})", "secondary"),
+    )
 
 
 def _named_run(run_id: str) -> Run:

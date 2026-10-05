@@ -15,6 +15,7 @@ from pathlib import Path
 
 import pytest
 
+from fake_terminal import styles_of
 from naiad.cli.supervisor import supervise_queue
 from naiad.domain.capacity import GB, Disk
 from naiad.domain.decide import Finish
@@ -659,3 +660,39 @@ def test_a_working_tree_low_on_disk_is_passed_over_for_a_later_one(
 
     assert supervision.started == [("two", None)]
     assert len([report for report in reports if "disk" in report]) == 1
+
+
+# How what the Supervisor says looks at a terminal; read as words above.
+
+
+def test_a_start_names_its_entry_as_an_id_after_its_verb(queue, runs, repo):
+    queued(queue, repo, "one")
+    reports = []
+
+    supervising(queue, runs, Supervision(runs), reports=reports)
+
+    assert reports[0] == "starting one: task one"
+    assert styles_of(reports[0]) == {"starting": "event.progress", "one": "id"}
+
+
+def test_a_drained_queue_is_said_as_an_end(queue, runs):
+    reports = []
+
+    supervising(queue, runs, Supervision(runs), reports=reports)
+
+    assert reports == ["the queue is drained"]
+    assert styles_of(reports[0]) == {"the queue is drained": "event.ended"}
+
+
+def test_holding_back_is_said_as_something_to_watch(queue, runs, repo, other_repo):
+    queued(queue, repo, "one")
+    queued(queue, other_repo, "two")
+    reports = []
+
+    with pytest.raises(Interrupted):
+        supervising(
+            queue, runs, Supervision(runs, never_finishes={"run-1"}), ceiling=1, reports=reports
+        )
+
+    held = next(report for report in reports if "ceiling" in report)
+    assert styles_of(held)["not starting anything:"] == "event.attention"
