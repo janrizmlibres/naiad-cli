@@ -1,8 +1,9 @@
 """A numbered prompt for choosing States: numbered lines and `input`.
 
 `naiad state next` opens it when given no States: the list is short and the
-author knows the names, so a line of numbers is enough, and a picker that
-takes over the screen would be a dependency this release does not carry. The
+author knows the names, so a line of numbers is enough. A picker that takes
+over the screen would be a third dependency, since rich, which styles these
+lines, draws no interactive one. The
 lines are said as every other line is, so the States are styled as States at
 a terminal and the words are the same everywhere.
 """

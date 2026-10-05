@@ -242,8 +242,10 @@ naiad queue answers <entry-or-run>
 The last line says whose outcome it was. `answerer` is what the Answerer replied.
 `yours` is a Question that reached you, by an escalation or because the Workflow
 gave it to you. Naiad records that it was put to you and never what you typed.
-`abandoned` is a Question the agent walked away from. The output above is an
-example; your Workflow's States and Questions will differ.
+`abandoned` is a Question the agent walked away from. On a terminal the arrow
+and its word are coloured by whose outcome it was, and the output is plain when
+piped or when `NO_COLOR` is set. The output above is an example; your
+Workflow's States and Questions will differ.
 
 ## Reports and notifications
 
@@ -257,8 +259,9 @@ Naiad tells you three kinds of thing:
 
 Each goes down every leg that exists on your machine:
 
-- **Terminal**, always: printed by the `watch` or `queue watch` process. This is
-  the one that is still there in the morning.
+- **Terminal**, always: printed by the `watch` or `queue watch` process, its
+  `naiad:` coloured by the kind of telling on a terminal. This is the one that is
+  still there in the morning.
 - **Desktop**, on macOS only: a banner through `osascript`. There is no desktop
   leg on Linux.
 - **Push**, when `NAIAD_NTFY_URL` is set. This is the only leg that reaches you
