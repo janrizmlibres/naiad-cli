@@ -24,6 +24,8 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
+from rich.text import Text
+
 from naiad.adapters.answerer import HeadlessAnswerer
 from naiad.adapters.executable import naiad_command
 from naiad.adapters.lock import SupervisorLock
@@ -55,6 +57,7 @@ from naiad.cli.kickoff import start_entry
 from naiad.cli.protocol import injection_for, standing_in
 from naiad.cli.refusals import ADD_COMMAND, ADOPT_COMMAND, RUN_COMMAND, Remedy
 from naiad.cli.spawn import SpawnError, spawn_child
+from naiad.cli.style import ABSENT, columns, console, status
 from naiad.cli.supervisor import supervise_queue
 from naiad.cli.terminal import terminal_width
 from naiad.cli.wait import WaitError, declare_wait
@@ -70,6 +73,7 @@ from naiad.domain.key_table import file_key_help, file_row, file_value
 from naiad.domain.listing import render_states, render_workflow
 from naiad.domain.protocol import ANNOUNCE_SUBCOMMAND, SPAWN_SUBCOMMAND
 from naiad.domain.settings import Setting, StateSetting
+from naiad.domain.short_ids import short_ids
 from naiad.domain.workflow import Workflow, WorkflowError, load_workflow
 from naiad.hooks.install import install_hooks
 from naiad.runtime.announcements import Announcements
@@ -82,7 +86,15 @@ from naiad.runtime.home import (
     default_queue_root,
     default_runs_root,
 )
-from naiad.runtime.queue import Queue, cancel, entered_in, prune, status_of
+from naiad.runtime.queue import (
+    AmbiguousName,
+    Queue,
+    branch_of,
+    cancel,
+    entered_in,
+    prune,
+    status_of,
+)
 from naiad.runtime.records import Clears, EntryTurns, Turns
 from naiad.runtime.resolve import NoRunError, RunResolver, turn_recipient
 from naiad.runtime.run import Run, RunStore
@@ -95,6 +107,7 @@ Handler = Callable[[argparse.Namespace], int]
 # Everything a command can fail with that the operator or agent should read as
 # a message rather than a traceback.
 FAILURES = (
+    AmbiguousName,
     AnnounceError,
     AskError,
     BatchError,
@@ -202,7 +215,7 @@ def build_parser() -> argparse.ArgumentParser:
         "answers", help="what became of every Question a Run asked, in the order they were asked"
     )
     queue_answers.add_argument(
-        "entry_or_run", help="an Entry or a Run, as `naiad queue list` names them"
+        "entry_or_run", help="an Entry, as `naiad queue list` names it, or a Run by its id"
     )
     queue_answers.set_defaults(handler=_queue_answers)
 
@@ -1051,7 +1064,8 @@ def _drive(run: Run) -> None:
 
 def _entry_id_of(run: Run) -> str | None:
     """The Entry a Run became, so that a notification can point the operator at
-    `naiad queue answers` by the id `naiad queue list` shows. The Run records no
+    `naiad queue answers` by the Entry's id, which that command takes whole as
+    readily as the short form `naiad queue list` shows. The Run records no
     Entry; the Queue is asked, and a Run it does not know is pointed at by its
     own id."""
     entry = Queue(default_queue_root()).entry_of(run.id)
@@ -1518,7 +1532,13 @@ def _report(entry: Entry) -> None:
 
 def _queue_list(arguments: argparse.Namespace) -> int:
     """The Entries in id order, which is Queue order, each with what became of
-    it — asked of its Run rather than read from a status the Queue keeps."""
+    it — asked of its Run rather than read from a status the Queue keeps.
+
+    One row per Entry under a header, each Child beneath its Parent, and the
+    settings an Entry names on lines of their own under its row. Each Entry is
+    shown by the short form of its id that `naiad queue rm` and `naiad queue
+    answers` take back.
+    """
     try:
         queue = Queue(default_queue_root())
         entries = queue.all()
@@ -1528,42 +1548,54 @@ def _queue_list(arguments: argparse.Namespace) -> int:
         print(f"naiad: {error}", file=sys.stderr)
         return 2
 
+    out = console()
     if not entries:
-        print(f"the queue is empty ({default_queue_root()})")
+        out.print(Text(f"the queue is empty ({default_queue_root()})", style="secondary"))
         return 0
 
     runs = RunStore(default_runs_root())
-    standing = {entry.id: _standing_shown(entry, runs) for entry in entries}
-    # Padded to the longest here rather than to a fixed width, because a State
-    # is named by the Workflow and Naiad knows no name in advance.
-    width = max(len(name) for name in standing.values())
-    for entry, depth in _families(entries):
-        indent = "  " * depth
-        print(
-            indent
-            + _queue_line(entry, runs, queue, state=f"{standing[entry.id]:<{width}}")
-        )
-        for line in _settings_shown(entry):
-            print(f"{indent}    {line}")
+    shown = short_ids(entry.id for entry in entries)
+    rows: list[Sequence[Text | str]] = [[Text(name, style="header") for name in QUEUE_COLUMNS]]
+    beneath: list[list[str]] = [[]]
+    for entry, tree in _families(entries):
+        rows.append(_queue_row(entry, runs, queue, shown=shown[entry.id], tree=tree))
+        beneath.append([f"{_UNDER[tree]}  {line}" for line in _settings_shown(entry)])
+    for line, lines_under in zip(columns(rows, width=terminal_width()), beneath):
+        out.print(line)
+        for under in lines_under:
+            out.print(Text(under, style="secondary"))
     return 0
 
 
-def _families(entries: Sequence[Entry]) -> list[tuple[Entry, int]]:
-    """Each Entry with how deep to indent it: every Child straight beneath the
-    Entry whose Run spawned it, so that a fan-out reads as one piece of work.
-    A Child whose Parent's Entry has left the Queue stands on its own."""
+QUEUE_COLUMNS = ("ID", "STATUS", "STATE", "REPO", "BRANCH", "TASK")
+
+# What is drawn before a Child's id, joining it to its Parent's row, and what
+# is drawn before the lines beneath that Child: a Child with a sibling below it
+# carries the line on down to that sibling.
+_FIRST, _LAST = "├ ", "└ "
+_UNDER = {"": "", _FIRST: "│ ", _LAST: "  "}
+
+
+def _families(entries: Sequence[Entry]) -> list[tuple[Entry, str]]:
+    """Each Entry with the tree drawn before its id: every Child straight
+    beneath the Entry whose Run spawned it, so that a fan-out reads as one
+    piece of work. A Child whose Parent's Entry has left the Queue stands on
+    its own."""
     parents = {entry.run_id for entry in entries if entry.run_id is not None}
     children: dict[str, list[Entry]] = {}
     for entry in entries:
         if entry.parent in parents:
             children.setdefault(entry.parent, []).append(entry)
-    families: list[tuple[Entry, int]] = []
+    families: list[tuple[Entry, str]] = []
     for entry in entries:
         if entry.parent in parents:
             continue
-        families.append((entry, 0))
+        families.append((entry, ""))
         if entry.run_id is not None:
-            families.extend((child, 1) for child in children.get(entry.run_id, []))
+            spawned = children.get(entry.run_id, [])
+            families.extend(
+                (child, _LAST if child is spawned[-1] else _FIRST) for child in spawned
+            )
     return families
 
 
@@ -1577,29 +1609,46 @@ def _settings_shown(entry: Entry) -> list[str]:
     return [f"{state}: {', '.join(said)}" for state, said in by_state.items()]
 
 
-def _standing_shown(entry: Entry, runs: RunStore) -> str:
+def _standing_shown(entry: Entry, runs: RunStore) -> str | None:
     """The State the Entry's Run stands in, as the Run recorded it — never
-    re-derived from a Workflow that may have been edited since. A dash where
+    re-derived from a Workflow that may have been edited since. None where
     there is none: a waiting Entry has no Run, and a Run written before kickoff
     recorded its start has nothing to show until it announces."""
     run = runs.load(entry.run_id) if entry.run_id is not None else None
-    return (standing_in(run) if run is not None else None) or "-"
+    return standing_in(run) if run is not None else None
 
 
-def _queue_line(entry: Entry, runs: RunStore, queue: Queue, *, state: str) -> str:
-    """One Entry as one line: which, what became of it, the State it stands in,
+def _queue_row(
+    entry: Entry, runs: RunStore, queue: Queue, *, shown: str, tree: str
+) -> list[Text | str]:
+    """One Entry as one row: which, what became of it, the State it stands in,
     where, on what branch, and what the work is.
 
     The repository in full rather than by its directory's name, because one
     Queue spans every repository and two checkouts of the same project — a
     worktree, a second clone — share that name and would otherwise read as one.
+    And never cut to fit: an agent tells which of its Children is working in a
+    worktree by the path on that Child's row.
+
+    The task on one line however it was written, since a row is one line.
     """
-    became = status_of(entry, runs, queue)
-    line = (
-        f"{entry.id}  {became:<7}  {state}  {_shortened(entry.target_repo)}  "
-        f"{_branch_shown(entry)}  {entry.task}"
-    )
-    return line if entry.run_id is None else f"{line}  ({entry.run_id})"
+    standing = _standing_shown(entry, runs)
+    # The Run's when the Entry named none: the agent derives a branch inside
+    # the Run and declares it there, and the Entry keeps what was typed.
+    branch = branch_of(entry, runs)
+    return [
+        Text.assemble((tree, "secondary"), (shown, "id")),
+        status(status_of(entry, runs, queue)),
+        _cell(standing, "state"),
+        Text(_shortened(entry.target_repo), style="repo"),
+        _cell(branch, "branch"),
+        " ".join(entry.task.split()),
+    ]
+
+
+def _cell(value: str | None, style: str) -> Text:
+    """A cell in its style, or the mark of nothing where there is no value."""
+    return Text(ABSENT, style="secondary") if value is None else Text(value, style=style)
 
 
 def _branch_shown(entry: Entry) -> str:
@@ -1704,14 +1753,14 @@ def _start_entry(entry: Entry, predecessor: str | None) -> Run:
 def _queue_answers(arguments: argparse.Namespace) -> int:
     """Print a Run's Answer log, for the Entry or the Run the operator named.
 
-    An Entry id and a Run id are both what `naiad queue list` prints, so either
-    is taken. An Entry not yet started has no Run to read and says so, rather
+    An Entry is taken as `naiad queue list` shows it, and a Run by its id, for
+    the Run no Entry became. An Entry not yet started has no Run to read and says so, rather
     than printing the empty block of a Run that was asked nothing.
     """
     named = arguments.entry_or_run
     runs = RunStore(default_runs_root())
     try:
-        entry = Queue(default_queue_root()).find(named)
+        entry = Queue(default_queue_root()).named(named)
         run_id = named if entry is None else entry.run_id
         if entry is not None and run_id is None:
             print(f"{entry.id} has not started, so it has no answers yet")
@@ -1762,7 +1811,7 @@ def _queue_rm(arguments: argparse.Namespace) -> int:
         )
         return 2
 
-    print(f"removed {arguments.entry_id}")
+    print(f"removed {cancelled.entry.id}")
     # Only a Run this act actually ended. An Entry that never started one, and
     # one whose Run was already over, release no Session — and a line offering
     # the operator a session in either case would be a claim, not a report.

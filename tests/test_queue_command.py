@@ -14,14 +14,17 @@ import pytest
 from naiad.adapters.lock import SupervisorLock
 from naiad.cli.hold import declare_hold
 from naiad.cli.main import _drive, _ticker, main
+from naiad.cli.style import GLYPHS
 from naiad.cli.wait import declare_wait
 from naiad.domain.decide import NUDGE_LIMIT, SILENCE_SECONDS, Finish, Notify
 from naiad.domain.entry import Entry
 from naiad.domain.question import Question
 from naiad.domain.settings import StateSetting
+from naiad.domain.short_ids import short_ids
 from naiad.domain.workflow import parse_workflow
 from naiad.runtime.announcements import Announcements
 from naiad.runtime.answers import AnswerLog
+from naiad.runtime.home import default_queue_root
 from naiad.runtime.log import RunLog
 from naiad.runtime.loop import tick
 from naiad.runtime.queue import Queue
@@ -258,7 +261,7 @@ def test_listing_shows_entries_in_queue_order_with_what_became_of_each(home, rep
     assert main(["queue", "list"]) == 0
 
     printed = capsys.readouterr().out
-    assert printed.index(first.id) < printed.index(second.id)
+    assert printed.index(shown_as(first.id)) < printed.index(shown_as(second.id))
     assert printed.count("waiting") == 2
     assert "TASK-8546" in printed and "add dark mode" in printed
 
@@ -287,18 +290,42 @@ def run_entry(home, repo, name, *, start_state="grill"):
     return run
 
 
-def _cells(capsys, entry_id):
-    """One Entry's line in a listing, split into cells told apart by two
-    spaces or more."""
+# The lines drawn before a Child's id, joining it to its Parent's row.
+TREE = re.compile(r"^[├└] ")
+
+COLUMNS = ["ID", "STATUS", "STATE", "REPO", "BRANCH", "TASK"]
+
+
+def shown_as(entry_id):
+    """The short form a listing shows an Entry by, among the Queue's Entries
+    as they are now."""
+    return short_ids(entry.id for entry in Queue(default_queue_root()).all())[entry_id]
+
+
+def listed(capsys):
+    """The lines `naiad queue list` prints, with nothing printed before it."""
     capsys.readouterr()
-    main(["queue", "list"])
-    (line,) = [l for l in capsys.readouterr().out.splitlines() if l.startswith(entry_id)]
-    return re.split(r"\s{2,}", line)
+    assert main(["queue", "list"]) == 0
+    return capsys.readouterr().out.splitlines()
+
+
+def row_of(lines, entry_id):
+    """One Entry's row among a listing's lines."""
+    (row,) = [line for line in lines if TREE.sub("", line).split("  ")[0] == shown_as(entry_id)]
+    return row
+
+
+def _cells(capsys, entry_id):
+    """One Entry's row in a listing, split into cells told apart by two
+    spaces or more, with any tree drawn before a Child's id left off."""
+    return re.split(r"\s{2,}", TREE.sub("", row_of(listed(capsys), entry_id)))
 
 
 def status_shown(capsys, entry_id):
-    """The status column of one Entry's line: the second cell."""
-    return _cells(capsys, entry_id)[1]
+    """The word in the status column of one Entry's row, after its mark."""
+    mark, word = _cells(capsys, entry_id)[1].split(" ")
+    assert mark == GLYPHS[word]
+    return word
 
 
 def standing_shown(capsys, entry_id):
@@ -314,12 +341,12 @@ def test_listing_shows_the_settings_an_entry_names_beneath_its_line(home, repo, 
     add(repo, "--branch", "TASK-8547")
     named, plain = queue_of(home).all()
 
-    main(["queue", "list"])
+    lines = listed(capsys)
 
-    lines = capsys.readouterr().out.splitlines()
-    under_named = lines[lines.index(next(l for l in lines if l.startswith(named.id))) + 1]
+    under_named = lines[lines.index(row_of(lines, named.id)) + 1]
+    assert under_named.startswith("  ")
     assert under_named.split() == ["implement:", "model", "sonnet,", "effort", "medium"]
-    assert not any("model" in line for line in lines if line.startswith(plain.id))
+    assert "model" not in row_of(lines, plain.id)
     assert sum("model" in line for line in lines) == 1
 
 
@@ -327,7 +354,7 @@ def test_listing_shows_a_dash_for_a_waiting_entry(home, repo, capsys):
     add(repo)
     (waiting,) = queue_of(home).all()
 
-    assert standing_shown(capsys, waiting.id) == "-"
+    assert standing_shown(capsys, waiting.id) == "—"
 
 
 def test_listing_shows_the_recorded_start_state_of_a_run_that_has_not_announced(
@@ -525,22 +552,107 @@ def test_listing_shows_a_dash_for_a_run_with_no_recorded_start_and_no_announceme
 ):
     run_entry(home, repo, "legacy", start_state=None)
 
-    assert standing_shown(capsys, "legacy") == "-"
+    assert standing_shown(capsys, "legacy") == "—"
 
 
-def test_listing_pads_the_state_column_to_the_longest_state_and_gives_it_no_header(
-    home, repo, capsys
-):
+def test_listing_heads_its_columns_and_pads_each_to_its_longest_cell(home, repo, capsys):
+    """Padded to the cells rather than to fixed widths, because a State is
+    named by the Workflow and Naiad knows no name in advance."""
     run_entry(home, repo, "longer", start_state="implement")
     add(repo)
-    capsys.readouterr()
+    (waiting,) = [entry for entry in queue_of(home).all() if entry.id != "longer"]
 
-    assert main(["queue", "list"]) == 0
+    header, *rows = listed(capsys)
 
-    lines = capsys.readouterr().out.splitlines()
-    assert len(lines) == 2
-    assert any("  running  implement  " in line for line in lines)
-    assert any(f"  waiting  {'-':<9}  " in line for line in lines)
+    assert header.split() == COLUMNS
+    assert len(rows) == 2
+    state_at = header.index("STATE")
+    assert row_of(rows, "longer")[state_at:].startswith("implement  ")
+    assert row_of(rows, waiting.id)[state_at:].startswith(f"{'—':<9}  ")
+    branch_at = header.index("BRANCH")
+    assert all(row[branch_at - 2 : branch_at] == "  " for row in rows)
+
+
+def test_listing_shows_each_entry_by_the_shortest_form_of_its_id(home, repo, capsys):
+    """What tells Entries apart is mostly the process id that ends theirs, so
+    that is what is shown, lengthened where two Entries share it."""
+    for entry_id in (PARENT_ID, CHILD_ID, SIBLING_ID):
+        queued_as(home, repo, entry_id)
+
+    _, *rows = listed(capsys)
+
+    assert [row.split()[0] for row in rows] == [
+        "51695",
+        "573056-matt-pocock-56055",
+        "573057-matt-pocock-56055",
+    ]
+    assert not any(PARENT_ID in row for row in rows)
+
+
+def test_listing_shows_a_status_as_its_mark_and_its_word(home, repo, capsys):
+    add(repo)
+    (waiting,) = queue_of(home).all()
+
+    assert _cells(capsys, waiting.id)[1] == f"{GLYPHS['waiting']} waiting"
+
+
+def test_listing_shows_the_branch_a_run_declared_when_its_entry_named_none(
+    home, repo, capsys
+):
+    """An Entry queued without a branch leaves the agent to derive one and
+    declare it on the Run, so the Run is where the branch is read from."""
+    declared = run_entry(home, repo, "declared")
+    declared.working_branch = "feat/burrow-system"
+    declared.save()
+    run_entry(home, repo, "undeclared")
+
+    assert _cells(capsys, "declared")[4] == "feat/burrow-system"
+    assert _cells(capsys, "undeclared")[4] == "—"
+
+
+def test_listing_shows_the_repository_whole_and_cuts_only_the_task(
+    home, repo, capsys, monkeypatch
+):
+    """An agent tells a Child in flight by the working tree its row names, so
+    the repository is never shortened to fit; the task gives way instead."""
+    queued_as(home, repo, PARENT_ID, task="Build Burrow from the 55 tickets " * 10)
+    header, *_ = listed(capsys)
+    task_at = header.index("TASK")
+    monkeypatch.setenv("COLUMNS", str(task_at + 30))
+
+    row = row_of(listed(capsys), PARENT_ID)
+
+    assert len(row) == task_at + 30
+    assert row.endswith("…")
+    assert str(repo) in row
+
+
+def test_a_task_written_over_several_lines_is_listed_on_one(
+    home, repo, capsys, monkeypatch
+):
+    """A batch file can hold a Task over several lines, and a row is one line."""
+    monkeypatch.setenv("COLUMNS", "1000")
+    queued_as(home, repo, PARENT_ID, task="Build Burrow\n\nfrom the tickets")
+    queued_as(home, repo, CHILD_ID)
+
+    header, first, second = listed(capsys)
+
+    assert first.endswith("Build Burrow from the tickets")
+
+
+def test_a_terminal_too_narrow_for_the_other_columns_still_shows_some_of_the_task(
+    home, repo, capsys, monkeypatch
+):
+    queued_as(home, repo, PARENT_ID, task="Build Burrow from the 55 tickets " * 10)
+    monkeypatch.setenv("COLUMNS", "40")
+
+    lines = listed(capsys)
+
+    row = row_of(lines, PARENT_ID)
+    shown_task = row[lines[0].index("TASK") :]
+    assert shown_task.startswith("Build Burrow from")
+    assert shown_task.endswith("…")
+    assert str(repo) in row
 
 
 def test_listing_tells_apart_two_repositories_that_share_a_name(home, repo, tmp_path, capsys):
@@ -585,7 +697,8 @@ def test_listing_derives_what_became_of_an_entry_from_its_run(home, repo, capsys
 
     printed = capsys.readouterr().out
     assert "done" in printed
-    assert "a-run" in printed
+    # The Run is reached through its Entry, which `naiad queue answers` takes.
+    assert "a-run" not in printed
 
 
 def test_listing_a_queue_holding_an_unreadable_entry_reports_it(home, repo, capsys):
@@ -889,6 +1002,62 @@ def test_removing_an_entry_that_is_not_there_is_reported(home, repo, capsys):
     assert main(["queue", "rm", "no-such-entry"]) == 2
 
     assert "no-such-entry" in capsys.readouterr().err
+
+
+PARENT_ID = "20261005-012208-211125-matt-pocock-51695"
+CHILD_ID = "20261005-012443-573056-matt-pocock-56055"
+SIBLING_ID = "20261005-012443-573057-matt-pocock-56055"
+
+
+def queued_as(home, repo, entry_id, *, task=None, **fields):
+    """A waiting Entry under an id shaped as Naiad makes them, so that the
+    short form a listing shows can be typed back."""
+    entry = Entry(
+        id=entry_id,
+        workflow_path=repo / "workflow.toml",
+        task=task or f"task of {entry_id}",
+        target_repo=repo,
+        working_branch=None,
+        created_at="2026-10-05T01:22:08Z",
+        **fields,
+    )
+    queue_of(home).add(entry)
+    return entry
+
+
+def test_removing_an_entry_by_the_short_form_the_listing_shows(home, repo, capsys):
+    queued_as(home, repo, PARENT_ID)
+    queued_as(home, repo, CHILD_ID)
+
+    assert main(["queue", "rm", "51695"]) == 0
+
+    assert [held.id for held in queue_of(home).all()] == [CHILD_ID]
+    assert f"removed {PARENT_ID}" in capsys.readouterr().out
+
+
+def test_a_short_form_naming_several_entries_is_refused_and_removes_nothing(
+    home, repo, capsys
+):
+    """Two Entries one agent queued in a turn share a process id. Choosing
+    between them would cancel work nobody named."""
+    queued_as(home, repo, CHILD_ID)
+    queued_as(home, repo, SIBLING_ID)
+
+    assert main(["queue", "rm", "56055"]) == 2
+
+    assert len(queue_of(home).all()) == 2
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert captured.err.startswith("naiad: ")
+    assert CHILD_ID in captured.err and SIBLING_ID in captured.err
+
+
+def test_a_part_of_an_id_that_is_not_whole_names_nothing(home, repo, capsys):
+    queued_as(home, repo, PARENT_ID)
+
+    assert main(["queue", "rm", "1695"]) == 2
+
+    assert len(queue_of(home).all()) == 1
 
 
 # `naiad queue add --file`. A night's work as one document, which is how an
@@ -1477,6 +1646,28 @@ def test_an_argument_naming_neither_an_entry_nor_a_run_is_refused(home, repo, ca
     assert "nigth" in err
 
 
+def test_an_entry_is_read_by_the_short_form_the_listing_shows(home, repo, capsys):
+    run = run_entry(home, repo, PARENT_ID)
+    AnswerLog(run.root).record(question=RETRIES, answer="the client", state="implement")
+
+    status, out, _ = answers_printed(capsys, "51695")
+
+    assert status == 0
+    assert "→ answerer: the client" in out
+
+
+def test_a_short_form_naming_several_entries_reads_no_answers(home, repo, capsys):
+    run_entry(home, repo, CHILD_ID)
+    run_entry(home, repo, SIBLING_ID)
+
+    status, out, err = answers_printed(capsys, "56055")
+
+    assert status == 2
+    assert out == ""
+    assert err.startswith("naiad: ")
+    assert CHILD_ID in err and SIBLING_ID in err
+
+
 def test_the_question_is_wrapped_to_the_terminal_width(home, repo, capsys, monkeypatch):
     run = run_entry(home, repo, "night")
     long = Question(text="word " * 30, options=("a",))
@@ -1542,35 +1733,40 @@ def test_a_watched_run_that_was_never_queued_names_no_entry(home, repo, monkeypa
     assert watched["entry_id"] is None
 
 
-def test_listing_shows_each_child_indented_beneath_its_parent(home, repo, tmp_path, capsys):
+def test_listing_shows_each_child_beneath_its_parent_joined_by_a_tree(
+    home, repo, tmp_path, capsys
+):
     """A fan-out reads as one piece of work: each Child under the Entry whose
     Run spawned it, with its own status, whatever Queue order says."""
-    worktree = tmp_path / "repo-wt-01"
-    worktree.mkdir()
     parent = run_entry(home, repo, "a-parent")
     add(repo, "--branch", "TASK-8547")
     (unrelated,) = [entry for entry in queue_of(home).all() if entry.id != "a-parent"]
-    queue_of(home).add(
-        Entry(
-            id="0-child",
-            workflow_path=repo / "workflow.toml",
-            task="build ticket one",
-            target_repo=worktree,
-            working_branch="TASK-8546--01",
-            created_at="2026-07-22T12:00:00Z",
-            parent=parent.id,
+    for number in ("01", "02"):
+        worktree = tmp_path / f"repo-wt--{number}"
+        worktree.mkdir()
+        queue_of(home).add(
+            Entry(
+                id=f"0-child{number}",
+                workflow_path=repo / "workflow.toml",
+                task=f"build ticket {number}",
+                target_repo=worktree,
+                working_branch=f"TASK-8546--{number}",
+                created_at="2026-07-22T12:00:00Z",
+                parent=parent.id,
+                settings=(StateSetting(state="build", setting="model", value="sonnet"),),
+            )
         )
-    )
 
-    capsys.readouterr()
-    assert main(["queue", "list"]) == 0
+    lines = listed(capsys)
 
-    lines = capsys.readouterr().out.splitlines()
-    at = {line.split()[0]: index for index, line in enumerate(lines)}
-    assert at["0-child"] == at["a-parent"] + 1
-    child_line = lines[at["0-child"]]
-    assert child_line.startswith("  0-child") and "waiting" in child_line
-    assert not lines[at[unrelated.id]].startswith(" ")
+    at = lines.index(row_of(lines, "a-parent"))
+    first, first_settings, last, last_settings = lines[at + 1 : at + 5]
+    assert first.startswith(f"├ {shown_as('0-child01')}  ") and "waiting" in first
+    assert first_settings.startswith("│ ") and "build: model sonnet" in first_settings
+    assert last.startswith(f"└ {shown_as('0-child02')}  ")
+    assert last_settings.startswith("  ") and "build: model sonnet" in last_settings
+    assert str(tmp_path / "repo-wt--01") in first
+    assert not row_of(lines, unrelated.id).startswith((" ", "├", "└"))
 
 
 # A Child limit, given at the entrance that queues the Parent.
@@ -1670,7 +1866,9 @@ def test_a_child_held_by_its_parents_limit_reads_waiting(home, repo, tmp_path, c
             )
         )
 
-    assert _cells(capsys, "  1-held")[1:3] == ["1-held", "waiting"]
+    assert _cells(capsys, "1-held")[0] == shown_as("1-held")
+    assert status_shown(capsys, "1-held") == "waiting"
+    assert row_of(listed(capsys), "1-held").startswith("└ ")
 
 
 def test_cancelling_a_parent_prints_an_untold_childs_working_tree_as_left_to_remove(

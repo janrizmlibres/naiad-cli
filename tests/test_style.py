@@ -13,7 +13,7 @@ from typing import get_args
 
 from rich.text import Text
 
-from naiad.cli.style import GLYPHS, THEME, console, refusal, status
+from naiad.cli.style import GLYPHS, THEME, columns, console, refusal, status
 from naiad.runtime.queue import Status
 
 ESCAPE = "\x1b["
@@ -122,3 +122,39 @@ def test_a_status_reads_as_its_glyph_then_its_word():
 
     assert shown.plain == f"{GLYPHS['done']} done"
     assert shown.cell_len == len(shown.plain)
+
+
+def plain(lines):
+    return [line.plain for line in lines]
+
+
+def test_columns_are_padded_to_their_widest_cell_and_the_last_is_not_padded():
+    lines = columns([["ID", "STATE", "TASK"], ["51695", "orchestrate", "build"]], width=80)
+
+    assert plain(lines) == [
+        "ID     STATE        TASK",
+        "51695  orchestrate  build",
+    ]
+
+
+def test_the_last_column_is_cut_so_each_line_fits_the_width():
+    lines = columns([["ID", "TASK"], ["51695", "x" * 100]], width=30)
+
+    assert plain(lines)[1] == "51695  " + "x" * 22 + "…"
+    assert all(line.cell_len <= 30 for line in lines)
+
+
+def test_the_last_column_keeps_its_least_width_however_narrow_the_terminal():
+    lines = columns([["ID", "TASK"], ["a" * 40, "y" * 100]], width=30, least=12)
+
+    assert plain(lines)[1] == "a" * 40 + "  " + "y" * 11 + "…"
+
+
+def test_columns_are_measured_in_cells_and_keep_their_styles():
+    """A wide character takes two columns, and a style takes none."""
+    wide = Text("漢字", style="state")
+    lines = columns([["名前", "TASK"], [wide, Text("done", style="status.done")]], width=80)
+
+    assert plain(lines) == ["名前  TASK", "漢字  done"]
+    assert any(span.style == "state" for span in lines[1].spans)
+    assert any(span.style == "status.done" for span in lines[1].spans)

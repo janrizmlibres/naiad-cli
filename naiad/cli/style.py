@@ -32,7 +32,7 @@ the reader needs whole — a path, an id — must not be broken by a second wrap
 from __future__ import annotations
 
 import os
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 
 from rich.console import Console
 from rich.text import Text
@@ -104,6 +104,50 @@ def console(*, stderr: bool = False) -> Console:
     )
 
 
+# Where a cell has nothing to show: a dash wide enough not to be read as a
+# hyphen in a name, rather than an empty cell that shifts the eye to the next.
+ABSENT = "—"
+
+# Between columns. Two spaces, so that a reader splitting a row on runs of two
+# or more finds every cell, single spaces inside a cell included.
+GAP = "  "
+
+# The fewest columns the cut column is given, however narrow the terminal: a
+# row too wide already is better wider still than showing nothing of it.
+LEAST = 20
+
+
+def columns(
+    rows: Sequence[Sequence[Text | str]], *, width: int, least: int = LEAST
+) -> list[Text]:
+    """Rows as lines: each column padded to its widest cell, and the last cut
+    with an ellipsis so that the line fits in width columns.
+
+    Only the last column is cut, and the others are never touched, because they
+    hold what a reader matches whole — an id, a path, a branch. When those
+    alone fill the width, the last still keeps `least` columns and the line
+    runs over; a terminal wraps it, and nothing a reader needs is lost. The
+    last column is not padded, so no line ends in spaces.
+
+    The first row is a header if the caller styles it as one. Cells are
+    measured in cells rather than characters, and keep their styles.
+    """
+    lines = [[cell if isinstance(cell, Text) else Text(cell) for cell in row] for row in rows]
+    widths = [max(line[at].cell_len for line in lines) for at in range(len(lines[0]) - 1)]
+    room = max(width - sum(widths) - len(GAP) * len(widths), least)
+    laid_out = []
+    for line in lines:
+        text = Text()
+        for cell, column_width in zip(line, widths):
+            text.append_text(cell)
+            text.append(" " * (column_width - cell.cell_len) + GAP)
+        last = line[-1].copy()
+        last.truncate(room, overflow="ellipsis")
+        text.append_text(last)
+        laid_out.append(text)
+    return laid_out
+
+
 def status(word: Status) -> Text:
     """What became of an Entry, as its mark and its word in its own style."""
     return Text(f"{GLYPHS[word]} {word}", style=f"status.{word}")
@@ -120,4 +164,4 @@ def _no_color() -> bool:
     return os.environ.get("NO_COLOR", "") != ""
 
 
-__all__ = ["GLYPHS", "THEME", "console", "refusal", "status"]
+__all__ = ["ABSENT", "GAP", "GLYPHS", "LEAST", "THEME", "columns", "console", "refusal", "status"]

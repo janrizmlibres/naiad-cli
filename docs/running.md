@@ -54,15 +54,28 @@ Once started it counts toward the ceiling like any other run.
 While nothing can start for one of these reasons (the ceiling, memory or
 disk), the Supervisor says so once.
 
-`queue list` prints one line per entry, in queue order:
+`queue list` prints one row per entry under a header, in queue order, with
+each Child beneath the entry whose Run spawned it:
 
 ```text
-20260929-101204-482113-starter-4242  parked   review  ~/dev/shop  feat/dry-run  Add a --dry-run flag  (20260929-101206-starter-4242)
+ID      STATUS     STATE        REPO                             BRANCH           TASK
+4242    ◌ parked   review       ~/dev/shop                       feat/dry-run     Add a --dry-run flag to the…
+4318    ● joining  orchestrate  ~/dev/burrow                     feat/burrow      Build Burrow from the 55 ti…
+├ 4407  ● running  build        ~/dev/burrow-wt-feat-burrow--26  feat/burrow--26  Build ticket 26
+└ 4411  ◌ waiting  —            ~/dev/burrow-wt-feat-burrow--27  feat/burrow--27  Build ticket 27
 ```
 
-That is the entry's id, what became of it, the State it stands in, the repository,
-the branch (`-` until the agent has derived one) and the task. The Run's id is in
-brackets once it has one. What became of an entry is one of five words:
+That is the entry, what became of it, the State it stands in, the repository,
+the branch and the task. An entry is shown by the end of its id, the process id
+that queued it, made longer where two entries share it: an agent queueing a
+night's work in one turn gives every entry the same one. `naiad queue rm` and
+`naiad queue answers` take that short form as well as the full id, and refuse
+one that has come to name more than one entry. The repository is never cut,
+and the task is cut to fit the terminal. The branch is the one the
+entry was queued with, or the one the agent declared on its Run, and `—` until
+there is one. The settings an entry names are listed beneath its row. The
+status is coloured on a terminal, and plain when the output is piped or
+`NO_COLOR` is set. What became of an entry is one of five words:
 
 - `waiting`: no Run yet. It is queued behind another entry for its tree, it is
   a Child held by its Parent's Child limit, the Supervisor is at its ceiling,
@@ -106,7 +119,7 @@ naiad queue add starter "Add a --dry-run flag to the export command" --model imp
 A setting beats the State's own key and the file's default, for that entry only.
 It is refused before anything is queued, and again when the entry starts, if it
 names a State the Workflow lacks, a Gate, a Terminal State, or one State twice.
-`naiad queue list` shows an entry's settings under its line. `naiad adopt` and
+`naiad queue list` shows an entry's settings under its row. `naiad adopt` and
 `naiad run` take the same flags. A batch file cannot name settings yet.
 
 ## Watching and attaching
@@ -201,8 +214,8 @@ Answerer settled and how to read them:
 3 answered by the Answerer — naiad queue answers 20260929-101204-482113-starter-4242
 ```
 
-`naiad queue answers` takes an entry or a Run, as `naiad queue list` names them,
-and prints one numbered block per Question in the order they were asked:
+`naiad queue answers` takes an entry, as `naiad queue list` names it, or a Run
+by its id, and prints one numbered block per Question in the order they were asked:
 
 ```
 naiad queue answers <entry-or-run>
