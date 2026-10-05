@@ -93,6 +93,12 @@ THEME = Theme(
         "event.progress": "green",
         "event.attention": "bold yellow",
         "event.ended": "bold green",
+        # Whose outcome a Question had in `naiad queue answers`: the
+        # Answerer's, the operator's — loud, as parked is, since it was put to
+        # them — or walked away from by the agent that asked it.
+        "answer.answerer": "green",
+        "answer.yours": "bold yellow",
+        "answer.abandoned": "red",
     }
 )
 

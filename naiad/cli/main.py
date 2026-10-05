@@ -1801,7 +1801,7 @@ def _queue_answers(arguments: argparse.Namespace) -> int:
         entry = Queue(default_queue_root()).named(named)
         run_id = named if entry is None else entry.run_id
         if entry is not None and run_id is None:
-            print(f"{entry.id} has not started, so it has no answers yet")
+            say(Styled.assemble((entry.id, "id"), " has not started, so it has no answers yet"))
             return 0
         run = runs.load(run_id) if run_id is not None else None
     except FAILURES as error:
@@ -1816,10 +1816,7 @@ def _queue_answers(arguments: argparse.Namespace) -> int:
         )
         return 2
 
-    print(
-        render_answers(run.id, AnswerLog(run.root).entries(), width=terminal_width()),
-        end="",
-    )
+    say(render_answers(run.id, AnswerLog(run.root).entries(), width=terminal_width()))
     return 0
 
 

@@ -1617,6 +1617,28 @@ def test_a_run_that_was_asked_nothing_says_so(home, repo, capsys):
     assert out == f"no questions were asked in {run.id}\n"
 
 
+def test_answers_are_coloured_at_a_terminal_with_the_same_words(home, repo, monkeypatch):
+    run = run_entry(home, repo, "night")
+    AnswerLog(run.root).record(question=RETRIES, answer="the client", state="implement")
+    terminal = to_terminal(monkeypatch)
+
+    assert main(["queue", "answers", "night"]) == 0
+
+    printed = terminal.getvalue()
+    assert ESCAPE in printed
+    assert "→ answerer:" in printed and "Which module owns retries?" in printed
+
+
+def test_an_entry_that_has_not_started_names_its_entry_as_an_id(home, repo, monkeypatch):
+    add(repo)
+    (waiting,) = queue_of(home).all()
+    terminal = to_terminal(monkeypatch)
+
+    assert main(["queue", "answers", waiting.id]) == 0
+
+    assert ESCAPE in terminal.getvalue()
+
+
 def test_an_entry_that_has_not_started_says_so(home, repo, capsys):
     add(repo)
     (waiting,) = queue_of(home).all()
