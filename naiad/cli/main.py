@@ -1327,7 +1327,13 @@ def _workflow_show(arguments: argparse.Namespace) -> int:
 def _workflow_check(arguments: argparse.Namespace) -> int:
     """Whether a Run could start from this file, decided by loading it exactly
     as a Run does: through the library's resolution, then the one loader."""
-    return _print_workflow(arguments.workflow, lambda workflow: f"{workflow.name}: OK")
+    return _print_workflow(arguments.workflow, _checked)
+
+
+def _checked(workflow: Workflow) -> Styled:
+    """What `check` says of a file a Run could start from. The words are fixed,
+    since a script may read them."""
+    return Styled.assemble((workflow.name, "workflow"), ": ", ("OK", "severity.ok"))
 
 
 def _workflow_new(arguments: argparse.Namespace) -> int:
@@ -1339,7 +1345,7 @@ def _workflow_new(arguments: argparse.Namespace) -> int:
         print(f"naiad: {error}", file=sys.stderr)
         return 2
 
-    print(f"created {workflow.name}: {path}")
+    say(Styled.assemble("created ", (workflow.name, "workflow"), f": {path}"))
     return 0
 
 
@@ -1365,7 +1371,7 @@ def _workflow_set(arguments: argparse.Namespace) -> int:
         print(f"naiad: {error}", file=sys.stderr)
         return 2
 
-    print(f"{path.stem}: {arguments.key} = {value}")
+    say(Styled.assemble((path.stem, "workflow"), f": {arguments.key} = {value}"))
     return 0
 
 
@@ -1381,10 +1387,8 @@ def _workflow_unset(arguments: argparse.Namespace) -> int:
         print(f"naiad: {error}", file=sys.stderr)
         return 2
 
-    if removed == [True]:
-        print(f"{path.stem}: {arguments.key} removed")
-    else:
-        print(f"{path.stem}: {arguments.key} was not set")
+    said = "removed" if removed == [True] else "was not set"
+    say(Styled.assemble((path.stem, "workflow"), f": {arguments.key} {said}"))
     return 0
 
 
@@ -1417,7 +1421,15 @@ def _workflow_rename(arguments: argparse.Namespace) -> int:
         print(f"naiad: {error}", file=sys.stderr)
         return 2
 
-    print(f"renamed {arguments.workflow} to {arguments.new}: {path}")
+    say(
+        Styled.assemble(
+            "renamed ",
+            (arguments.workflow, "workflow"),
+            " to ",
+            (arguments.new, "workflow"),
+            f": {path}",
+        )
+    )
     return 0
 
 

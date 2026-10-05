@@ -78,7 +78,9 @@ THEME = Theme(
         # A column's name, and anything said beside the line rather than in it.
         "header": "bold",
         "secondary": "dim",
-        # What `naiad doctor` found, by how much it matters.
+        # What `naiad doctor` found, by how much it matters, and a check
+        # that found nothing wrong.
+        "severity.ok": "green",
         "severity.fail": "bold red",
         "severity.warn": "yellow",
         "severity.info": "blue",

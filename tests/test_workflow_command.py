@@ -11,10 +11,10 @@ import re
 
 import pytest
 
-from fake_terminal import ESCAPE, to_terminal
-from naiad.cli.main import build_parser, main
+from fake_terminal import ESCAPE, styles_of, to_terminal
+from naiad.cli.main import _checked, build_parser, main
 from naiad.cli.style import ABSENT
-from naiad.domain.workflow import load_workflow
+from naiad.domain.workflow import load_workflow, parse_workflow
 from naiad.runtime.log import RunLog
 from naiad.runtime.queue import Queue
 from naiad.runtime.run import RunStore
@@ -78,6 +78,55 @@ def test_check_passes_on_what_new_wrote(library, capsys):
     assert main(["workflow", "check", "demo"]) == 0
 
     assert capsys.readouterr().out.strip() == "demo: OK"
+
+
+def test_check_is_styled_at_a_terminal(library, capsys, monkeypatch):
+    main(["workflow", "new", "demo"])
+    capsys.readouterr()
+    terminal = to_terminal(monkeypatch)
+
+    assert main(["workflow", "check", "demo"]) == 0
+
+    assert ESCAPE in terminal.getvalue()
+
+
+def test_check_names_the_workflow_and_says_ok_in_their_styles():
+    workflow = parse_workflow(STARTER_LIKE)
+
+    line = _checked(workflow)
+
+    assert line == "demo: OK"
+    assert styles_of(line) == {"demo": "workflow", "OK": "severity.ok"}
+
+
+def test_each_verb_says_what_it_did_with_the_workflows_it_names_styled(
+    library, monkeypatch
+):
+    """The words are what they were, for a script reading them; at a terminal
+    the Workflow stands out from what was done to it."""
+    said = []
+    monkeypatch.setattr("naiad.cli.main.say", lambda line, **_: said.append(line))
+
+    main(["workflow", "new", "demo"])
+    main(["workflow", "set", "demo", "model", "opus"])
+    main(["workflow", "unset", "demo", "model"])
+    main(["workflow", "unset", "demo", "model"])
+    main(["workflow", "rename", "demo", "other"])
+
+    assert said == [
+        f"created demo: {library / 'demo.toml'}",
+        "demo: model = opus",
+        "demo: model removed",
+        "demo: model was not set",
+        f"renamed demo to other: {library / 'other.toml'}",
+    ]
+    assert [styles_of(line) for line in said] == [
+        {"demo": "workflow"},
+        {"demo": "workflow"},
+        {"demo": "workflow"},
+        {"demo": "workflow"},
+        {"demo": "workflow", "other": "workflow"},
+    ]
 
 
 def test_the_queue_accepts_a_workflow_new_wrote(home, tmp_path):

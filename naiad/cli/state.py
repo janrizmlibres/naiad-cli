@@ -15,10 +15,12 @@ import sys
 from collections.abc import Callable
 from pathlib import Path
 
+from rich.text import Text
+
 from naiad.adapters.editor import EditorError, edit_text
 from naiad.cli.library import LibraryError, resolve_workflow
 from naiad.cli.picker import pick_states
-from naiad.cli.style import say
+from naiad.cli.style import Styled, say
 from naiad.cli.terminal import terminal_width
 from naiad.cli.workflow_view import render_state, render_state_list
 from naiad.domain.key_table import (
@@ -219,6 +221,14 @@ def _path(arguments: argparse.Namespace) -> Path:
     return resolve_workflow(arguments.workflow, library=default_library_root())
 
 
+def _named(path: Path, state: str | None = None) -> Text:
+    """The Workflow a verb acted on, by the name its file gives it, and the
+    State within it where the verb acted on one: `demo` or `demo/plan`."""
+    if state is None:
+        return Text.assemble((path.stem, "workflow"))
+    return Text.assemble((path.stem, "workflow"), "/", (state, "state"))
+
+
 def _position(workflow: Workflow, state: str) -> int:
     return [held.name for held in workflow.states].index(state) + 1
 
@@ -267,7 +277,7 @@ def _add(arguments: argparse.Namespace) -> int:
     if not (arguments.gate or arguments.terminal):
         prompt = _prompt_from(arguments)
         if not prompt.strip():
-            print(f"the Prompt is empty, so nothing was added to {path.stem}")
+            say(Styled.assemble("the Prompt is empty, so nothing was added to ", _named(path)))
             return 0
 
     edited = edit_workflow(
@@ -286,7 +296,14 @@ def _add(arguments: argparse.Namespace) -> int:
             before=arguments.before,
         ),
     )
-    print(f"{path.stem}: added {arguments.state} at position {_position(edited, arguments.state)}")
+    say(
+        Styled.assemble(
+            _named(path),
+            ": added ",
+            (arguments.state, "state"),
+            f" at position {_position(edited, arguments.state)}",
+        )
+    )
     return 0
 
 
@@ -303,11 +320,11 @@ def _set_prompt(arguments: argparse.Namespace) -> int:
     current = (state.prompt or "").rstrip("\n")
     prompt = _prompt_from(arguments, current=f"{current}\n" if current else "")
     if not prompt.strip():
-        print(f"the Prompt is empty, so nothing was changed in {path.stem}")
+        say(Styled.assemble("the Prompt is empty, so nothing was changed in ", _named(path)))
         return 0
 
     edit_workflow(path, lambda document: set_prompt(document, state.name, prompt))
-    print(f"{path.stem}/{state.name}: Prompt replaced")
+    say(Styled.assemble(_named(path, state.name), ": Prompt replaced"))
     return 0
 
 
@@ -334,7 +351,7 @@ def _set(arguments: argparse.Namespace) -> int:
         path, lambda document: set_state_key(document, arguments.state, arguments.key, value)
     )
     shown = str(value).lower() if isinstance(value, bool) else value
-    print(f"{path.stem}/{arguments.state}: {arguments.key} = {shown}")
+    say(Styled.assemble(_named(path, arguments.state), f": {arguments.key} = {shown}"))
     return 0
 
 
@@ -349,21 +366,25 @@ def _unset(arguments: argparse.Namespace) -> int:
         ),
     )
     said = "removed" if removed == [True] else "was not set"
-    print(f"{path.stem}/{arguments.state}: {arguments.key} {said}")
+    say(Styled.assemble(_named(path, arguments.state), f": {arguments.key} {said}"))
     return 0
 
 
 def _rename(arguments: argparse.Namespace) -> int:
     path = _path(arguments)
     edit_workflow(path, lambda document: rename_state(document, arguments.state, arguments.new))
-    print(f"{path.stem}: renamed {arguments.state} to {arguments.new}")
+    say(
+        Styled.assemble(
+            _named(path), ": renamed ", (arguments.state, "state"), " to ", (arguments.new, "state")
+        )
+    )
     return 0
 
 
 def _rm(arguments: argparse.Namespace) -> int:
     path = _path(arguments)
     edit_workflow(path, lambda document: remove_state(document, arguments.state))
-    print(f"{path.stem}: removed {arguments.state}")
+    say(Styled.assemble(_named(path), ": removed ", (arguments.state, "state")))
     return 0
 
 
@@ -375,7 +396,14 @@ def _move(arguments: argparse.Namespace) -> int:
             document, arguments.state, after=arguments.after, before=arguments.before
         ),
     )
-    print(f"{path.stem}: moved {arguments.state} to position {_position(edited, arguments.state)}")
+    say(
+        Styled.assemble(
+            _named(path),
+            ": moved ",
+            (arguments.state, "state"),
+            f" to position {_position(edited, arguments.state)}",
+        )
+    )
     return 0
 
 
@@ -399,11 +427,11 @@ def _next(arguments: argparse.Namespace) -> int:
             state.next_candidates,
         )
         if chosen is None:
-            print(f"{path.stem}/{state.name}: successors left as they were")
+            say(Styled.assemble(_named(path, state.name), ": successors left as they were"))
             return 0
         successors = chosen
 
     edit_workflow(path, lambda document: set_next(document, state.name, successors))
-    told = ", ".join(successors) if successors else "none"
-    print(f"{path.stem}/{state.name}: next = {told}")
+    told = Text(", ").join(Text(name, style="state") for name in successors) or Text("none")
+    say(Styled.assemble(_named(path, state.name), ": next = ", told))
     return 0

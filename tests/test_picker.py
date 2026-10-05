@@ -1,9 +1,10 @@
 """The numbered prompt `naiad state next` opens when given no States.
 
-Standard library only: what is asserted is what the author sees listed, which
+What is asserted is what the author sees listed, which
 answers are taken, and that a bad answer is asked again rather than guessed at.
 """
 
+from fake_terminal import styles_of
 from naiad.cli.picker import pick_states
 
 STATES = ["plan", "build", "done"]
@@ -64,3 +65,13 @@ def test_the_end_of_input_keeps_the_current_successors():
     chosen, _ = pick([])
 
     assert chosen is None
+
+
+def test_the_states_are_styled_as_states_and_the_words_are_unchanged():
+    shown = []
+
+    pick_states("plan", STATES, ("build",), read=lambda prompt="": "1", write=shown.append)
+
+    assert shown[0] == "Successors of plan (* marks the current ones):"
+    assert styles_of(shown[0]) == {"plan": "state"}
+    assert styles_of(shown[2]) == {"build": "state"}
