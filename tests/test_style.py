@@ -1,0 +1,124 @@
+"""How Naiad's output looks: styled for a person at a terminal, plain for
+everything else.
+
+The audience decides it. A person at a terminal gets colour; an agent's Bash
+tool, a hook and a file all read a stream that is not a terminal, and get the
+same characters with no escape codes among them. NO_COLOR is the operator
+saying they want none, and it wins over everything.
+"""
+
+import io
+import sys
+from typing import get_args
+
+from rich.text import Text
+
+from naiad.cli.style import GLYPHS, THEME, console, refusal, status
+from naiad.runtime.queue import Status
+
+ESCAPE = "\x1b["
+
+
+class Terminal(io.StringIO):
+    """A stream that says it is a terminal, as the operator's is."""
+
+    def isatty(self):
+        return True
+
+
+def to_terminal(monkeypatch):
+    """Stdout replaced by a terminal. Called inside the test rather than as a
+    fixture, because the capture resets stdout between a fixture and the test."""
+    stream = Terminal()
+    monkeypatch.setattr(sys, "stdout", stream)
+    return stream
+
+
+def test_output_that_is_not_a_terminal_carries_no_escape_codes(capsys):
+    console().print(status("running"))
+
+    printed = capsys.readouterr().out
+    assert ESCAPE not in printed
+    assert printed == f"{GLYPHS['running']} running\n"
+
+
+def test_output_to_a_terminal_is_coloured(monkeypatch):
+    terminal = to_terminal(monkeypatch)
+
+    console().print(status("parked"))
+
+    assert ESCAPE in terminal.getvalue()
+
+
+def test_force_color_colours_output_that_is_not_a_terminal(monkeypatch, capsys):
+    monkeypatch.setenv("FORCE_COLOR", "1")
+
+    console().print(status("running"))
+
+    assert ESCAPE in capsys.readouterr().out
+
+
+def test_no_color_wins_over_a_terminal_and_over_force_color(monkeypatch):
+    terminal = to_terminal(monkeypatch)
+    monkeypatch.setenv("NO_COLOR", "1")
+    monkeypatch.setenv("FORCE_COLOR", "1")
+
+    console().print(status("parked"))
+
+    assert ESCAPE not in terminal.getvalue()
+    assert "parked" in terminal.getvalue()
+
+
+def test_the_error_console_writes_to_stderr(capsys):
+    console(stderr=True).print(refusal("no entry 'x' in the queue"))
+
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert captured.err == "naiad: no entry 'x' in the queue\n"
+
+
+def test_square_brackets_in_text_are_printed_as_they_are(capsys):
+    """A Task is whatever the operator typed, and `[bold]` in it is theirs."""
+    console().print("fix [bold]x[/bold] and :smile: in [repo]")
+
+    assert capsys.readouterr().out == "fix [bold]x[/bold] and :smile: in [repo]\n"
+
+
+def test_nothing_in_a_line_is_highlighted(monkeypatch):
+    """Rich colours numbers, paths and quoted strings unless told not to, which
+    would put escape codes into text nobody styled."""
+    terminal = to_terminal(monkeypatch)
+
+    console().print("entry 20261005-012208 in /Users/me/dev 'quoted' 42")
+
+    assert ESCAPE not in terminal.getvalue()
+
+
+def test_the_console_is_as_wide_as_columns_says(monkeypatch):
+    monkeypatch.setenv("COLUMNS", "132")
+
+    assert console().width == 132
+
+
+def test_a_line_wider_than_the_console_is_never_wrapped(monkeypatch, capsys):
+    """Lines are cut to fit before they are printed; a second wrap by the
+    console would break a row that was already the right width, or one the
+    reader needs whole."""
+    monkeypatch.setenv("COLUMNS", "20")
+
+    console().print(Text("a" * 50 + " " + "b" * 50))
+
+    assert capsys.readouterr().out == "a" * 50 + " " + "b" * 50 + "\n"
+
+
+def test_every_status_has_a_glyph_and_a_style_of_its_own():
+    assert set(GLYPHS) == set(get_args(Status))
+    for word in get_args(Status):
+        assert f"status.{word}" in THEME.styles
+
+
+def test_a_status_reads_as_its_glyph_then_its_word():
+    shown = status("done")
+
+    assert shown.plain == f"{GLYPHS['done']} done"
+    assert shown.cell_len == len(shown.plain)

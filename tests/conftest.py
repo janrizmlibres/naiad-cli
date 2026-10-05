@@ -72,3 +72,13 @@ def ready_machine(monkeypatch, tmp_path_factory):
 def no_capacity_set(monkeypatch):
     """A ceiling the operator's shell sets is not one any test asked for."""
     monkeypatch.delenv("NAIAD_CAPACITY", raising=False)
+
+
+@pytest.fixture(autouse=True)
+def plain_output(monkeypatch):
+    """Output as an agent's tool reads it: not a terminal, and no colour asked
+    for or refused. A shell or CI that sets these would otherwise colour, or
+    leave plain, what a test means to read the other way. A test about colour
+    sets them again."""
+    for variable in ("FORCE_COLOR", "NO_COLOR", "TTY_COMPATIBLE", "TTY_INTERACTIVE"):
+        monkeypatch.delenv(variable, raising=False)
