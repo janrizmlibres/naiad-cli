@@ -210,8 +210,19 @@ def styled(line: str) -> Text:
 
 
 def say(line: str, *, stderr: bool = False) -> None:
-    """Print one line, styled only where the stream is a terminal."""
-    console(stderr=stderr).print(styled(line))
+    """Print one line, styled only where the stream is a terminal.
+
+    Where nothing will be coloured, the words are printed as they are rather
+    than through the Console, which turns a tab into spaces and drops a
+    carriage return. Off a terminal an agent, a hook or a script is reading,
+    and a tab in a Task or an answer is the writer's; under NO_COLOR at a
+    terminal, the terminal lays a tab out just as the Console would have.
+    """
+    out = console(stderr=stderr)
+    if out.color_system is None:
+        print(line, file=out.file, flush=True)
+    else:
+        out.print(styled(line))
 
 
 def _no_color() -> bool:

@@ -191,3 +191,24 @@ def test_a_line_said_to_stderr_goes_to_stderr(capsys):
 def test_every_kind_of_event_has_a_style_of_its_own():
     for kind in ("progress", "attention", "ended"):
         assert f"event.{kind}" in THEME.styles
+
+
+def test_a_said_line_off_a_terminal_is_its_words_byte_for_byte(capsys):
+    """An agent, a hook or a script reads these words. A tab in a Task or an
+    answer is the writer's, and a Console would have turned it into spaces and
+    dropped a carriage return."""
+    say("fix\tthis\rnow")
+    say(Styled(Text.assemble(("queued", "event.progress"), "\tlater")), stderr=True)
+
+    captured = capsys.readouterr()
+    assert captured.out == "fix\tthis\rnow\n"
+    assert captured.err == "queued\tlater\n"
+
+
+def test_a_said_line_under_no_color_is_its_words_byte_for_byte(monkeypatch):
+    terminal = to_terminal(monkeypatch)
+    monkeypatch.setenv("NO_COLOR", "1")
+
+    say("fix\tthis")
+
+    assert terminal.getvalue() == "fix\tthis\n"
