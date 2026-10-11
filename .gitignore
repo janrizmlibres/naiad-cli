@@ -4,3 +4,8 @@ __pycache__/
 .pytest_cache/
 .mypy_cache/
 uv.lock
+
+# .scratch: the local issue tracker's markdown is tracked; everything else in it stays local
+.scratch/**
+!.scratch/**/
+!.scratch/**/*.md

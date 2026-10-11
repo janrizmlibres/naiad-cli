@@ -1,0 +1,15 @@
+# wontfix is closed, and the drop tends its dependents
+
+A Run parked at `handover` because the implement loop's scan reached a ticket whose Status was `wontfix` — dropped mid-Run, with a note saying why — while two `ready-for-agent` tickets waited behind it. ADR 0010 routes every status other than `ready-for-agent` to the gate, and its argument is the one-way bias: an unknown label or incomplete work must not be implemented, so where the loop is unsure it pays the cheap pause. `wontfix` fits neither half of that argument. It is not unknown — `triage-labels.md` defines it — and it is not incomplete work waiting on someone; it is a decision already made and recorded. The handover asked a human to confirm what the tracker already held, and would ask again on every later Run that scanned past the same file.
+
+We decided that `wontfix` is closed. The tracker has exactly two closed statuses — `resolved`, closed by completion, and `wontfix`, closed by decision — and the scan treats them identically: walked past, never implemented, never handed over. The loop's exit line changes with it, from "no unresolved tickets remain" to "no open tickets remain", because a Run whose last ticket is `wontfix` must still reach the pull request. The five open statuses keep ADR 0010's routing untouched; this sharpens that ADR rather than superseding it.
+
+The edge rule follows: an edge is satisfied when the ticket it names is closed. What makes that safe is a convention rather than a mechanism, and the convention is why this ADR exists. No ticket is born `wontfix` — `/to-tickets` never publishes one. The status only appears when someone deliberately drops a ticket mid-Run, and whoever drops it addresses its dependents in the same act: rewrites them, drops them too, or clears their edges. The scan can therefore trust every surviving edge, because a dependent that survived the drop was looked at by the person who dropped its blocker.
+
+Two alternatives were rejected. Treating an edge to a `wontfix` ticket as never satisfied strands the dependent silently — open, unreachable, and reported nowhere when the Run ends by the no-open-tickets rule. Routing such dependents to `handover` instead pays a pause to ratify what the convention already covers, and pays it on every dependent of every drop. Both lose to a convention stated once at the moment of the drop, where the person with the reason in front of them is the one acting on it.
+
+The `tickets` State is deliberately unchanged. Its scan runs at publish time, when no ticket can yet be `wontfix`, so the closed-set language there would instruct for a case that cannot occur.
+
+## Consequences
+
+The definition of closed lives in `docs/agents/issue-tracker.md`, beside the blocking rule, so `/wayfinder` and the implement loop read one definition rather than drifting apart. Withdrawing this decision means re-parking Runs at every dropped ticket and re-opening the edge question, and the convention is a contract between the human who drops and every later Run that scans — which is why it is written down rather than assumed.

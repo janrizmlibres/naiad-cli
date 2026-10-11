@@ -1,0 +1,13 @@
+# A Workflow name resolves at the entrance
+
+The Workflow argument — the positional of `naiad run` and `naiad queue add`, and the `workflow =` key of a batch file — now accepts a bare name beside a path. A name is looked up in the Workflow library, one machine-wide directory under the Naiad home (`~/.naiad/workflows/`, moving with `NAIAD_HOME` as everything under the home does), where the lookup key is the file's stem: `matt-pocock` opens `matt-pocock.toml`. The home so far held only what Naiad writes; the library is the first thing under it a human writes and Naiad only reads, a widening accepted so that the home stays the one directory whose move moves everything.
+
+Which of the two an argument is, its shape alone decides: a path separator or a `.toml` suffix makes it a path, anything else a name. Disk state never participates — an existence-based rule would let a stray local file shadow the library, and the same string must mean the same thing in every directory. Every path anyone types today carries a `/` or `.toml`, so nothing existing changes meaning.
+
+The name resolves to a path at the entrance and nowhere else. The Entry stores the resolved path exactly as it stores one typed explicitly; validation, kickoff, run ids, and the Supervisor are untouched. This is the same boundary translation `--branch` and `--base` already perform — operator vocabulary in, glossary vocabulary stored — and it preserves the entrance's principle that everything refusable is refused while whoever typed it is still at the terminal: the file validated is the file that runs. The alternative, storing the name and resolving at kickoff, would let the library be reorganised under waiting Entries — and would validate one file at the entrance while running whatever the name means later.
+
+Two refusals guard the library. A name not found is refused with the library's actual contents (or, when the directory is missing or empty, with where to put files), so the refusal is the listing command we declined to add. A library file whose declared `name` disagrees with its stem is refused as misfiled — in the library the filename has become an address, and a file reachable as `matt-pocock` that calls itself something else in every log would confuse whoever reads those logs. Workflows given by explicit path keep today's freedom; the coherence rule binds only the library.
+
+## Consequences
+
+Editing or deleting a library file changes or breaks the Entries already queued against it, exactly as it does today for an explicit path — a name buys no snapshot. The Run record names the resolved path, not the name typed, which is the trade for an untouched Entry format: whoever reads the record reads which file ran, and the stem still says what it was called.

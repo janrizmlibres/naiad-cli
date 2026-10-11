@@ -1,0 +1,11 @@
+# A Subject stands in for an absent Task
+
+The task argument — the positional of `naiad run` and `naiad queue add`, and the `task =` key of a batch file — may now be omitted when a Subject is given: the entrance copies the Subject into the Entry's task, and everything downstream is untouched. The motivating case is an Entry started mid-workflow, `--at implement --subject <ticket>`, where the Subject already says everything the operator has to say and the required task was a second copy of it typed to satisfy a rule.
+
+The alternative was a truly optional task — `task: str | None` on the Entry and the Run. Rejected because the task is not only prompt-fuel: it is the line the Queue listing and the Supervisor print for a human, and the context the Answerer reads before settling a Question. An optional task gives every one of those an absence story, and gives `{task}` an empty rendering should any Prompt ever name it. Copying at the entrance keeps the task a total, Run-level fact — the same boundary translation the Workflow name already undergoes (ADR 0023): operator shorthand in, a complete Entry stored.
+
+The stand-in is unconditional — it applies whatever the start State, including one whose Prompt renders `{task}`. An operator who gave only a Subject has said the Subject describes the work; refusing when the start State's Prompt names `{task}` would be Naiad second-guessing that, for a case that is not an error — a ticket path handed to a classifier is a coherent thing to classify. And it is strictly a fallback for absence: a task given beside the Subject, or arriving as a batch file default, is the task, because the batch file's override rule is same-key-beats-default, never different-key-beats-default. The entrance refuses only when neither a task nor a Subject is given, which keeps the one refusal that existed.
+
+## Consequences
+
+An Entry made this way records the same string twice — task and Subject — and the Queue listing, the Run record, and the Answerer's context all show the Subject verbatim as the task. That is the trade for totality: whoever reads them reads a ticket path where an operator's sentence might have been, and the Entry does not record that the task was stood in for.
